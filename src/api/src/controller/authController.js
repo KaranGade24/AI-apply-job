@@ -1,4 +1,4 @@
-import { register as registerService } from '../services/authService.js';
+import { register as registerService, login as loginService } from '../services/authService.js';
 import { handleError, appError } from '../utils/errors.js';
 
 export const register = async (req, res) => {
@@ -19,6 +19,26 @@ export const register = async (req, res) => {
     });
   } catch (error) {
     // Passes any thrown error to our centralized API error handler
+    return handleError(error, res);
+  }
+};
+
+export const login = async (req, res) => {
+  try {
+    const { identifier, username, email, password } = req.body;
+    const userIdentifier = identifier || username || email;
+
+    if (!userIdentifier || !password) {
+      throw new appError('Username/Email and password are required fields.', 400);
+    }
+
+    const result = await loginService(userIdentifier, password);
+
+    return res.status(200).json({
+      message: 'User logged in successfully',
+      data: result
+    });
+  } catch (error) {
     return handleError(error, res);
   }
 };

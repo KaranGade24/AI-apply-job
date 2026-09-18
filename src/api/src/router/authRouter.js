@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { register } from '../controller/authController.js';
+import { register, login } from '../controller/authController.js';
 
 const router = Router();
 
@@ -37,5 +37,41 @@ const router = Router();
  *         description: Internal server error
  */
 router.post('/register', register);
+
+/**
+ * @swagger
+ * /api/auth/login:
+ *   post:
+ *     summary: Login an existing user
+ *     tags: [Auth]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - password
+ *             properties:
+ *               identifier:
+ *                 type: string
+ *                 description: Username or email address
+ *               username:
+ *                 type: string
+ *               email:
+ *                 type: string
+ *               password:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: User logged in successfully
+ *       400:
+ *         description: Missing required fields
+ *       401:
+ *         description: Invalid credentials
+ *       500:
+ *         description: Internal server error
+ */
+router.post('/login', login);
 
 export default router;

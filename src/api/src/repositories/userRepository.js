@@ -25,3 +25,13 @@ export const findUserByUsername = async (username) => {
     throw new appError(`Database error finding user by username: ${error.message}`, 500);
   }
 };
+
+export const findUserByEmailOrUsername = async (identifier) => {
+  try {
+    return await User.findOne({
+      $or: [{ email: identifier }, { username: identifier }]
+    });
+  } catch (error) {
+    throw new appError(`Database error finding user: ${error.message}`, 500);
+  }
+};

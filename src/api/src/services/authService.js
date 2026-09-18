@@ -1,8 +1,9 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { validateEmail, validatePassword } from '../../../../shared/validation.js';
-import { createUser, findUserByEmail, findUserByUsername } from '../repositories/userRepository.js';
+import { createUser, findUserByEmail, findUserByUsername, findUserByEmailOrUsername } from '../repositories/userRepository.js';
 import { appError } from '../utils/errors.js';
+import { logLoginEvent } from '../utils/logger.js';
 
 export const register = async (username, password, email) => {
   try {
@@ -78,5 +79,52 @@ export const register = async (username, password, email) => {
     }
     // Otherwise, wrap unexpected bugs securely
     throw new appError(`Registration service error: ${error.message}`, 500);
+  }
+};
+
+export const login = async (identifier, password) => {
+  try {
+    if (!identifier || !password) {
+      throw new appError('Email/Username and password are required.', 400);
+    }
+
+    // Find user by email or username
+    const user = await findUserByEmailOrUsername(identifier);
+    if (!user) {
+      await logLoginEvent(identifier, 'FAILED', 'User does not exist');
+      throw new appError('Invalid credentials.', 401);
+    }
+
+    // Compare hashed password
+    const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
+    if (!isPasswordValid) {
+      await logLoginEvent(identifier, 'FAILED', 'Incorrect password');
+      throw new appError('Invalid credentials.', 401);
+    }
+
+    // Log successful login
+    await logLoginEvent(identifier, 'SUCCESS', 'User authenticated successfully');
+
+    // Generate JWT token
+    const token = jwt.sign(
+      { userId: user._id, email: user.email, username: user.username, role: user.role },
+      process.env.JWT_SECRET || 'default_fallback_secret',
+      { expiresIn: '24h' }
+    );
+
+    return {
+      user: {
+        _id: user._id,
+        email: user.email,
+        username: user.username,
+        role: user.role
+      },
+      token
+    };
+  } catch (error) {
+    if (error.isOperational) {
+      throw error;
+    }
+    throw new appError(`Login service error: ${error.message}`, 500);
   }
 };
