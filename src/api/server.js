@@ -1,9 +1,9 @@
 import express from 'express';
 import swaggerUi from 'swagger-ui-express';
 import swaggerJsdoc from 'swagger-jsdoc';
-import { connectToDatabase } from './api/src/config/database.js';
-import authRouter from './api/src/router/authRouter.js';
-import { swaggerOptions } from './api/src/config/swagger.js';
+import { connectToDatabase } from './src/config/database.js';
+import authRouter from './src/router/authRouter.js';
+import { swaggerOptions } from './src/config/swagger.js';
 
 const app = express();
 
