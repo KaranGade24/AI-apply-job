@@ -41,6 +41,42 @@ export const logAuthEvent = async (eventType, userIdentifier, status, additional
   }
 };
 
+export const logError = async (context, errorMessage, stack = '', mode = 'mix') => {
+  try {
+    const timestamp = new Date().toISOString();
+    const formattedLog = `[${timestamp}] ERROR | CONTEXT: ${context} | MESSAGE: ${errorMessage} | STACK: ${stack}\n`;
+    
+    if (mode === 'console' || mode === 'mix') {
+      console.error(formattedLog.trim());
+    }
+
+    if (mode === 'file' || mode === 'mix') {
+      const logFilePath = path.join(logDirectory, 'errorLogs.log');
+      await fs.appendFile(logFilePath, formattedLog, 'utf8');
+    }
+  } catch (err) {
+    console.error('Failed to write to error log file:', err.message);
+  }
+};
+
+export const logResumeEvent = async (resumeIdOrFile, status, additionalInfo = '', mode = 'mix') => {
+  try {
+    const timestamp = new Date().toISOString();
+    const formattedLog = `[${timestamp}] RESUME_EVENT | FILE/ID: ${resumeIdOrFile} | STATUS: ${status.toUpperCase()} | INFO: ${additionalInfo}\n`;
+
+    if (mode === 'console' || mode === 'mix') {
+      console.log(formattedLog.trim());
+    }
+
+    if (mode === 'file' || mode === 'mix') {
+      const logFilePath = path.join(logDirectory, 'resumeEvents.log');
+      await fs.appendFile(logFilePath, formattedLog, 'utf8');
+    }
+  } catch (err) {
+    console.error('Failed to write to resume log file:', err.message);
+  }
+};
+
 export const logLoginEvent = async (userIdentifier, status, additionalInfo = '', mode = 'mix') => {
   return logAuthEvent('LOGIN', userIdentifier, status, additionalInfo, mode);
 };

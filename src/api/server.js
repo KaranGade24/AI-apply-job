@@ -3,12 +3,15 @@ import swaggerUi from 'swagger-ui-express';
 import swaggerJsdoc from 'swagger-jsdoc';
 import { connectToDatabase } from './src/config/database.js';
 import authRouter from './src/router/authRouter.js';
+import resumeRouter from './src/router/resumeRouter.js';
 import { swaggerOptions } from './src/config/swagger.js';
+import { DEFAULT_PORT } from './src/constant/api.constant.js';
 
 const app = express();
 
-// Middleware to parse JSON request bodies
+// Middleware to parse JSON and URL-encoded request bodies
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 // Root route - redirect to API documentation
 app.get('/', (req, res) => {
@@ -20,8 +23,9 @@ app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 // Register Routes
 app.use('/api/auth', authRouter);
+app.use('/api/resume', resumeRouter);
 
-const PORT = 3000;
+const PORT = DEFAULT_PORT;
 
 // Start Express server immediately so port 3000 responds right away
 app.listen(PORT, () => {

@@ -4,6 +4,8 @@ import { validateEmail, validatePassword } from '../../../../shared/validation.j
 import { createUser, findUserByEmail, findUserByUsername, findUserByEmailOrUsername } from '../repositories/userRepository.js';
 import { appError } from '../utils/errors.js';
 import { logLoginEvent, logRegisterEvent } from '../utils/logger.js';
+import { JWT_SECRET } from '../config/env.js';
+import { BCRYPT_SALT_ROUNDS, JWT_EXPIRES_IN } from '../constant/api.constant.js';
 
 export const register = async (username, password, email) => {
   try {
@@ -51,7 +53,7 @@ export const register = async (username, password, email) => {
     }
 
     // Hash the password using bcrypt
-    const passwordHash = await bcrypt.hash(password, 10);
+    const passwordHash = await bcrypt.hash(password, BCRYPT_SALT_ROUNDS);
 
     // Create the user in the database
     const newUser = await createUser({
@@ -66,8 +68,8 @@ export const register = async (username, password, email) => {
     // Create JWT token containing email and username
     const token = jwt.sign(
       { email: newUser.email, username: newUser.username },
-      process.env.JWT_SECRET || 'default_fallback_secret',
-      { expiresIn: '24h' }
+      JWT_SECRET,
+      { expiresIn: JWT_EXPIRES_IN }
     );
 
     return {
@@ -118,8 +120,8 @@ export const login = async (identifier, password) => {
     // Generate JWT token
     const token = jwt.sign(
       { userId: user._id, email: user.email, username: user.username, role: user.role },
-      process.env.JWT_SECRET || 'default_fallback_secret',
-      { expiresIn: '24h' }
+      JWT_SECRET,
+      { expiresIn: JWT_EXPIRES_IN }
     );
 
     return {

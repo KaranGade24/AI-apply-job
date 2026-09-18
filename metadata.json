@@ -1,0 +1,6 @@
+{
+  "name": "AI Apply Job API",
+  "description": "Backend service for job application tracking and AI resume parsing",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
