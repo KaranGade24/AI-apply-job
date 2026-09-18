@@ -1,9 +1,12 @@
 import fs from 'fs/promises';
 import path from 'path';
+import { createRequire } from 'module';
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
-import pdfParse from 'pdf-parse';
 import { logError } from '../../utils/logger.js';
+
+const require = createRequire(import.meta.url);
+const pdfParse = require('pdf-parse');
 
 /**
  * Tool function to extract raw text content from a resume file stored in resume_temp
