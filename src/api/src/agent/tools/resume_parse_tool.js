@@ -4,10 +4,7 @@ import { createRequire } from 'module';
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
 import { logError } from '../../utils/logger.js';
-
-const require = createRequire(import.meta.url);
-const pdfParse = require('pdf-parse');
-
+import { PDFParse } from 'pdf-parse';
 /**
  * Tool function to extract raw text content from a resume file stored in resume_temp
  */
@@ -27,8 +24,14 @@ export const extractResumeText = async (filePath) => {
     let extractedText = '';
 
     if (ext === '.pdf') {
-      const pdfData = await pdfParse(fileBuffer);
-      extractedText = pdfData.text || '';
+      const parser = new PDFParse({ data: fileBuffer });
+
+try {
+  const pdfData = await parser.getText();
+  extractedText = pdfData.text || '';
+} finally {
+  await parser.destroy();
+}
     } else {
       // For plain text, markdown or doc/docx basic text extraction
       extractedText = fileBuffer.toString('utf-8');
