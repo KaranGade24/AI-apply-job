@@ -1,12 +1,12 @@
 /**
  * Agent Constants
  */
-export const MODEL_NAME = 'gemini-3.8-flash';
+export const MODEL_NAME = 'gemini-2.5-flash';
 export const MODEL_TEMPERATURE = 0.1;
 
 export const MAX_ATTEMPTS = 3;
 export const MAX_TOOL_CALLS = 2;
-export const LLM_TIMEOUT_MS = 20000; // 20 seconds
+export const LLM_TIMEOUT_MS = 60000; // 60 seconds timeout for AI structured extraction
 
 export const AGENT_STATUS = {
   IDLE: 'IDLE',
