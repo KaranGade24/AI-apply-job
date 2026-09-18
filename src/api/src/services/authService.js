@@ -3,23 +3,26 @@ import jwt from 'jsonwebtoken';
 import { validateEmail, validatePassword } from '../../../../shared/validation.js';
 import { createUser, findUserByEmail, findUserByUsername, findUserByEmailOrUsername } from '../repositories/userRepository.js';
 import { appError } from '../utils/errors.js';
-import { logLoginEvent } from '../utils/logger.js';
+import { logLoginEvent, logRegisterEvent } from '../utils/logger.js';
 
 export const register = async (username, password, email) => {
   try {
     // Validate email
     if (!validateEmail(email)) {
+      await logRegisterEvent(email || username, 'FAILED', 'Invalid email format');
       throw new appError('Invalid email format.', 400);
     }
 
     // Validate password
     if (!validatePassword(password)) {
+      await logRegisterEvent(email, 'FAILED', 'Password complexity requirements failed');
       throw new appError('Password does not meet complexity requirements (min 8 chars, 1 uppercase, 1 lowercase, 1 number, 1 symbol).', 400);
     }
 
     // Verify email uniqueness
     const existingEmail = await findUserByEmail(email);
     if (existingEmail) {
+      await logRegisterEvent(email, 'FAILED', 'Email already registered');
       throw new appError('Email is already registered.', 409);
     }
 
@@ -43,6 +46,7 @@ export const register = async (username, password, email) => {
 
     // If we exceed our max attempts, exit the loop securely
     if (!isUnique) {
+      await logRegisterEvent(email, 'FAILED', 'Failed to generate unique username');
       throw new appError('Unable to generate a unique username automatically. Please try a different username.', 409);
     }
 
@@ -55,6 +59,9 @@ export const register = async (username, password, email) => {
       passwordHash,
       username: uniqueUsername
     });
+
+    // Log successful registration
+    await logRegisterEvent(newUser.email, 'SUCCESS', `User registered with username: ${newUser.username}`);
 
     // Create JWT token containing email and username
     const token = jwt.sign(
@@ -73,6 +80,9 @@ export const register = async (username, password, email) => {
       token
     };
   } catch (error) {
+    if (!error.isOperational) {
+      await logRegisterEvent(email || username, 'FAILED', error.message);
+    }
     // If it's already one of our managed app errors, just rethrow it
     if (error.isOperational) {
       throw error;

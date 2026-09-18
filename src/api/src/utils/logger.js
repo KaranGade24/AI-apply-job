@@ -18,12 +18,12 @@ try {
   console.error('Failed to create logs directory:', dirError.message);
 }
 
-export const logLoginEvent = async (userIdentifier, status, additionalInfo = '', mode = 'mix') => {
+export const logAuthEvent = async (eventType, userIdentifier, status, additionalInfo = '', mode = 'mix') => {
   try {
     const timestamp = new Date().toISOString();
     
     // Construct the text format log entry
-    const formattedLog = `[${timestamp}] EVENT: LOGIN | STATUS: ${status.toUpperCase()} | USER: ${userIdentifier} | INFO: ${additionalInfo}\n`;
+    const formattedLog = `[${timestamp}] EVENT: ${eventType.toUpperCase()} | STATUS: ${status.toUpperCase()} | USER: ${userIdentifier} | INFO: ${additionalInfo}\n`;
     
     // Output to console if mode is console or mix
     if (mode === 'console' || mode === 'mix') {
@@ -32,11 +32,19 @@ export const logLoginEvent = async (userIdentifier, status, additionalInfo = '',
 
     // Append to the text file if mode is file or mix
     if (mode === 'file' || mode === 'mix') {
-      const logFilePath = path.join(logDirectory, 'loginEvents.log');
+      const logFilePath = path.join(logDirectory, 'authEvents.log');
       await fs.appendFile(logFilePath, formattedLog, 'utf8');
     }
   } catch (error) {
     // Graceful fallback if the file system fails, preventing the app from crashing
-    console.error('Failed to write to login log file:', error.message);
+    console.error('Failed to write to auth log file:', error.message);
   }
+};
+
+export const logLoginEvent = async (userIdentifier, status, additionalInfo = '', mode = 'mix') => {
+  return logAuthEvent('LOGIN', userIdentifier, status, additionalInfo, mode);
+};
+
+export const logRegisterEvent = async (userIdentifier, status, additionalInfo = '', mode = 'mix') => {
+  return logAuthEvent('REGISTER', userIdentifier, status, additionalInfo, mode);
 };
