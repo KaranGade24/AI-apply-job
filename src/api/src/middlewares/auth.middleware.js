@@ -1,4 +1,5 @@
 import jwt from 'jsonwebtoken';
+import fs from 'fs';
 import { appError, handleError } from '../utils/errors.js';
 import { JWT_SECRET } from '../config/env.js';
 
@@ -33,6 +34,14 @@ export const authMiddleware = (req, res, next) => {
     req.user = decoded;
     next();
   } catch (error) {
+    // If a file was uploaded by multer prior to auth check, clean it up on auth failure
+    if (req.file && req.file.path && fs.existsSync(req.file.path)) {
+      try {
+        fs.unlinkSync(req.file.path);
+      } catch (cleanupErr) {
+        // silent catch
+      }
+    }
     if (error.name === 'JsonWebTokenError' || error.name === 'TokenExpiredError') {
       return handleError(new appError(`Invalid or expired token: ${error.message}`, 401), res);
     }

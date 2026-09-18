@@ -39,7 +39,7 @@ const router = Router();
  *       500:
  *         description: Internal server or AI parsing error
  */
-router.post('/upload', authMiddleware, upload.single('resume'), uploadResume);
+router.post('/upload', upload.single('resume'), authMiddleware, uploadResume);
 
 /**
  * @swagger
