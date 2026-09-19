@@ -10,8 +10,12 @@ import {
  * @returns {Promise<import('playwright').Browser>} Chromium browser instance
  */
 export const createBrowser = async () => {
+  const isHeadless = typeof BROWSER_HEADLESS === 'string'
+    ? BROWSER_HEADLESS.toLowerCase() === 'true'
+    : Boolean(BROWSER_HEADLESS);
+
   return chromium.launch({
-    headless: BROWSER_HEADLESS,
+    headless: isHeadless,
     slowMo: BROWSER_SLOW_MO,
     args: [...BROWSER_LAUNCH_ARGS]
   });

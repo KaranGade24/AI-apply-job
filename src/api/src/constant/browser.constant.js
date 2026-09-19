@@ -1,7 +1,7 @@
 /**
  * Centralized Browser Automation Constants
  */
-export const BROWSER_HEADLESS = "false";
+export const BROWSER_HEADLESS = process.env.BROWSER_HEADLESS === 'true'; // boolean false by default for headed debugging
 export const BROWSER_SLOW_MO = Number(process.env.BROWSER_SLOW_MO || 0);
 export const BROWSER_DEFAULT_TIMEOUT = Number(
   process.env.BROWSER_TIMEOUT || 30000,
