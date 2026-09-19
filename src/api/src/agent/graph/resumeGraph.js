@@ -496,7 +496,10 @@ const workflow = new StateGraph(ResumeStateAnnotation)
   .addConditionalEdges(
     "extract_text",
     (state) => {
-      if (state.status === AGENT_STATUS.FAILED || !state.extractedText)
+      if (
+        state.status === AGENT_STATUS.FAILED ||
+        !state.extractedResumeData?.text
+      )
         return END;
       return "structure_resume";
     },
