@@ -17,6 +17,7 @@
     "mongoose": "^9.10.1",
     "multer": "^2.4.0",
     "pdf-parse": "^2.4.5",
+    "playwright": "^1.63.0",
     "swagger-jsdoc": "^6.3.0",
     "swagger-ui-express": "^5.0.1",
     "validator": "^13.15.35",

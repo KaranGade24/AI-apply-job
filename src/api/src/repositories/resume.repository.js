@@ -42,8 +42,20 @@ export const findResumeById = async (resumeId) => {
   }
 };
 
+/**
+ * Finds the latest ORIGINAL resume for a User ID
+ */
+export const findOriginalResumeByUserId = async (userId) => {
+  try {
+    return await Resume.findOne({ userId, type: ResumeType.ORIGINAL }).sort({ createdAt: -1 });
+  } catch (error) {
+    throw new appError(`Database error fetching original resume: ${error.message}`, 500);
+  }
+};
+
 export default {
   createResume,
   findResumesByUserId,
-  findResumeById
+  findResumeById,
+  findOriginalResumeByUserId
 };

@@ -1,5 +1,5 @@
 import fs from 'fs';
-import { processAndSaveResume, getUserResumes, getResumeById } from '../services/resumeService.js';
+import { processAndSaveResume, getUserResumes, getResumeById } from '../services/resume.service.js';
 import { handleError, appError } from '../utils/errors.js';
 import { logError } from '../utils/logger.js';
 import { upload } from '../config/multer.config.js';

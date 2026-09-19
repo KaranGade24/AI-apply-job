@@ -1,5 +1,5 @@
 import { runAgent } from '../agent/agent.js';
-import { createResume, findResumesByUserId, findResumeById } from '../repositories/resumeRepository.js';
+import { createResume, findResumesByUserId, findResumeById } from '../repositories/resume.repository.js';
 import { appError } from '../utils/errors.js';
 import { ResumeType } from '../model/Resume.js';
 

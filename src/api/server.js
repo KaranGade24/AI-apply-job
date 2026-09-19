@@ -1,9 +1,10 @@
 import express from 'express';
 import swaggerUi from 'swagger-ui-express';
 import swaggerJsdoc from 'swagger-jsdoc';
-import { connectToDatabase } from './src/config/database.js';
-import authRouter from './src/router/authRouter.js';
-import resumeRouter from './src/router/resumeRouter.js';
+import { connectToDatabase } from './src/config/database.config.js';
+import authRouter from './src/router/auth.router.js';
+import resumeRouter from './src/router/resume.router.js';
+import jobRouter from './src/router/job.router.js';
 import { swaggerOptions } from './src/config/swagger.js';
 import { DEFAULT_PORT } from './src/constant/api.constant.js';
 
@@ -24,6 +25,7 @@ app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 // Register Routes
 app.use('/api/auth', authRouter);
 app.use('/api/resume', resumeRouter);
+app.use('/api/jobs', jobRouter);
 
 const PORT = DEFAULT_PORT;
 

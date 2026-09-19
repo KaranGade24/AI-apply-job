@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import resumeGraph from './graph/resumeGraph.js';
+import { jobDiscoveryGraph } from './graph/jobDiscoveryGraph.js';
 import { logError, logResumeEvent } from '../utils/logger.js';
 import { appError } from '../utils/errors.js';
 
@@ -7,7 +8,8 @@ import { appError } from '../utils/errors.js';
  * Agent Registry
  */
 export const agents = Object.freeze({
-  resume: resumeGraph
+  resume: resumeGraph,
+  jobDiscovery: jobDiscoveryGraph
 });
 
 /**

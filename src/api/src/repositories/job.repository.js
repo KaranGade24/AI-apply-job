@@ -1,0 +1,108 @@
+import { Job, MatchStatus } from '../model/Job.js';
+import { logError } from '../utils/logger.js';
+
+/**
+ * Saves or updates a job by sourceUrl in MongoDB (upsert)
+ * @param {object} jobData
+ * @returns {Promise<object>} Saved Mongoose document
+ */
+export const upsertJob = async (jobData) => {
+  try {
+    if (!jobData.sourceUrl) {
+      throw new Error('sourceUrl is required for job upsert');
+    }
+
+    const updatedJob = await Job.findOneAndUpdate(
+      { sourceUrl: jobData.sourceUrl },
+      { $set: jobData },
+      { new: true, upsert: true, runValidators: true }
+    );
+
+    return updatedJob;
+  } catch (error) {
+    await logError('jobRepository.upsertJob', error.message);
+    throw error;
+  }
+};
+
+/**
+ * Saves multiple job documents in bulk using upsert
+ * @param {Array<object>} jobsList
+ * @returns {Promise<Array<object>>} List of saved jobs
+ */
+export const saveBulkJobs = async (jobsList = []) => {
+  try {
+    const savedJobs = [];
+    for (const job of jobsList) {
+      if (job.sourceUrl) {
+        const doc = await upsertJob(job);
+        savedJobs.push(doc);
+      }
+    }
+    return savedJobs;
+  } catch (error) {
+    await logError('jobRepository.saveBulkJobs', error.message);
+    return [];
+  }
+};
+
+/**
+ * Finds job by source URL
+ * @param {string} sourceUrl
+ * @returns {Promise<object|null>}
+ */
+export const getJobBySourceUrl = async (sourceUrl) => {
+  try {
+    return await Job.findOne({ sourceUrl });
+  } catch (error) {
+    await logError('jobRepository.getJobBySourceUrl', error.message);
+    return null;
+  }
+};
+
+/**
+ * Updates match status, score, and skill analysis for a job
+ * @param {string} jobId
+ * @param {object} matchResult
+ * @returns {Promise<object|null>}
+ */
+export const updateJobMatchStatus = async (jobId, matchResult = {}) => {
+  try {
+    const update = {
+      matchStatus: matchResult.matchStatus || MatchStatus.MATCHED,
+      matchScore: matchResult.matchScore || 0,
+      matchReason: matchResult.matchReason || '',
+      matchedSkills: matchResult.matchedSkills || [],
+      missingSkills: matchResult.missingSkills || [],
+      resumeId: matchResult.resumeId || null
+    };
+
+    return await Job.findByIdAndUpdate(jobId, { $set: update }, { new: true });
+  } catch (error) {
+    await logError('jobRepository.updateJobMatchStatus', error.message);
+    return null;
+  }
+};
+
+/**
+ * Retrieves matched or stored jobs with optional filters
+ * @param {object} filter
+ * @param {number} limit
+ * @returns {Promise<Array<object>>}
+ */
+export const getJobs = async (filter = {}, limit = 50) => {
+  try {
+    return await Job.find(filter).sort({ createdAt: -1 }).limit(limit);
+  } catch (error) {
+    await logError('jobRepository.getJobs', error.message);
+    return [];
+  }
+};
+
+export default {
+  upsertJob,
+  saveBulkJobs,
+  getJobBySourceUrl,
+  updateJobMatchStatus,
+  getJobs
+};

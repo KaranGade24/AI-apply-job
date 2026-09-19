@@ -10,8 +10,8 @@ import {
 } from "@langchain/langgraph";
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { geminiModel } from "../config/modelConfig.js";
-import { extractResumeText } from "../tools/resume_parse_tool.js";
-import { RESUME_PARSER_SYSTEM_PROMPT } from "../prompt/resume_parser.js";
+import { extractResumeText } from "../tools/resumeParse.tool.js";
+import { RESUME_PARSER_SYSTEM_PROMPT } from "../prompt/resumeParser.js";
 import { resumeSchema } from "../schema/resumeSchema.js";
 import { logError, logResumeEvent } from "../../utils/logger.js";
 import {

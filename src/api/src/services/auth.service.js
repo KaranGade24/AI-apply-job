@@ -1,7 +1,7 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { validateEmail, validatePassword } from '../../../../shared/validation.js';
-import { createUser, findUserByEmail, findUserByUsername, findUserByEmailOrUsername } from '../repositories/userRepository.js';
+import { createUser, findUserByEmail, findUserByUsername, findUserByEmailOrUsername } from '../repositories/user.repository.js';
 import { appError } from '../utils/errors.js';
 import { logLoginEvent, logRegisterEvent } from '../utils/logger.js';
 import { JWT_SECRET } from '../config/env.js';

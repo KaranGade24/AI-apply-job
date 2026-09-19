@@ -1,4 +1,4 @@
-import { register as registerService, login as loginService } from '../services/authService.js';
+import { register as registerService, login as loginService } from '../services/auth.service.js';
 import { handleError, appError } from '../utils/errors.js';
 
 export const register = async (req, res) => {
