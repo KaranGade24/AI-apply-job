@@ -77,6 +77,24 @@ export const logResumeEvent = async (resumeIdOrFile, status, additionalInfo = ''
   }
 };
 
+export const logJobEvent = async (stepOrSource, status, additionalInfo = '', mode = 'mix') => {
+  try {
+    const timestamp = new Date().toISOString();
+    const formattedLog = `[${timestamp}] JOB_EVENT | STEP/SOURCE: ${stepOrSource} | STATUS: ${status.toUpperCase()} | INFO: ${additionalInfo}\n`;
+
+    if (mode === 'console' || mode === 'mix') {
+      console.log(formattedLog.trim());
+    }
+
+    if (mode === 'file' || mode === 'mix') {
+      const logFilePath = path.join(logDirectory, 'jobEvents.log');
+      await fs.appendFile(logFilePath, formattedLog, 'utf8');
+    }
+  } catch (err) {
+    console.error('Failed to write to job log file:', err.message);
+  }
+};
+
 export const logLoginEvent = async (userIdentifier, status, additionalInfo = '', mode = 'mix') => {
   return logAuthEvent('LOGIN', userIdentifier, status, additionalInfo, mode);
 };

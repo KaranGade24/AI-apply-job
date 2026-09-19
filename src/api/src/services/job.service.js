@@ -2,7 +2,7 @@ import { findOriginalResumeByUserId } from '../repositories/resume.repository.js
 import { getJobs, getJobBySourceUrl } from '../repositories/job.repository.js';
 import { runJobDiscoveryWorkflow } from '../agent/graph/jobDiscoveryGraph.js';
 import { appError } from '../utils/errors.js';
-import { logError } from '../utils/logger.js';
+import { logError, logJobEvent } from '../utils/logger.js';
 
 /**
  * Service to orchestrate Job Discovery, filtering, and candidate resume matching
@@ -32,6 +32,8 @@ export const discoverJobsService = async ({
     if (!userId) {
       throw new appError('User ID is required for job discovery', 400);
     }
+
+    await logJobEvent('discoverJobsService', 'START', `Initiating job discovery for User: ${userId}`);
 
     // 1. Fetch user's original candidate resume from MongoDB
     const originalResume = await findOriginalResumeByUserId(userId);
@@ -63,6 +65,8 @@ export const discoverJobsService = async ({
     if (!workflowResult.success && workflowResult.errors?.length > 0) {
       throw new appError(`Job Discovery workflow failed: ${workflowResult.errors.join('; ')}`, 500);
     }
+
+    await logJobEvent('discoverJobsService', 'SUCCESS', `Discovered ${workflowResult.totalJobsDiscovered || 0} jobs, matched ${workflowResult.matchedJobs?.length || 0}`);
 
     return {
       totalDiscovered: workflowResult.totalJobsDiscovered || 0,

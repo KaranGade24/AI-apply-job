@@ -8,7 +8,7 @@ import { compareJobWithConfig } from "../../integrations/utils/compareJobs.js";
 import { createBrowser } from "../../browser/browserConfig.js";
 import { upsertJob } from "../../repositories/job.repository.js";
 import { Resume } from "../../model/Resume.js";
-import { logError, logResumeEvent } from "../../utils/logger.js";
+import { logError, logResumeEvent, logJobEvent } from "../../utils/logger.js";
 
 export { searchConfigSchema };
 
@@ -18,6 +18,7 @@ export { searchConfigSchema };
 const validateConfigNode = async (state) => {
   try {
     const validatedConfig = searchConfigSchema.parse(state.config || {});
+    await logJobEvent('validateConfigNode', 'SUCCESS', `Config validated for keywords: ${validatedConfig.keywords.join(', ')}`);
 
     // Try loading candidate's active resume from DB if userId is provided
     let resumeText = state.candidateResumeText || '';
@@ -27,6 +28,9 @@ const validateConfigNode = async (state) => {
         resumeText = typeof activeResume.parsedData === 'string'
           ? activeResume.parsedData
           : JSON.stringify(activeResume.parsedData);
+        await logJobEvent('validateConfigNode', 'RESUME_LOADED', `Candidate resume retrieved for User ${validatedConfig.userId}`);
+      } else {
+        await logJobEvent('validateConfigNode', 'NO_RESUME', `No active candidate resume found for User ${validatedConfig.userId}`);
       }
     }
 
@@ -51,6 +55,8 @@ const discoverJobsNode = async (state) => {
   try {
     const config = state.config;
     const sourceName = config.sources[state.currentSourceIndex || 0] || 'jobViaReferral';
+    await logJobEvent('discoverJobsNode', 'START', `Scraping source: ${sourceName}`);
+
     const sourceAdapter = getJobSource(sourceName);
 
     browser = await createBrowser();
@@ -64,6 +70,8 @@ const discoverJobsNode = async (state) => {
 
     await browser.close();
     browser = null;
+
+    await logJobEvent('discoverJobsNode', 'SUCCESS', `Discovered ${discovered?.length || 0} jobs from ${sourceName}`);
 
     return {
       rawJobs: discovered || []
@@ -90,6 +98,8 @@ const normalizeJobsNode = async (state) => {
       source: job.source || 'jobViaReferral',
       postedDate: job.postedDate || new Date().toISOString()
     }));
+
+    await logJobEvent('normalizeJobsNode', 'SUCCESS', `Normalized ${normalizedList.length} raw jobs`);
 
     return {
       normalizedJobs: normalizedList
@@ -122,6 +132,8 @@ const applyFiltersNode = async (state) => {
       }
     }
 
+    await logJobEvent('applyFiltersNode', 'SUCCESS', `Filtered ${passedJobs.length}/${normalized.length} jobs based on criteria`);
+
     return {
       filteredJobs: passedJobs
     };
@@ -142,7 +154,6 @@ const matchWithResumeNode = async (state) => {
     const jobsToMatch = state.filteredJobs || [];
 
     if (!candidateText || jobsToMatch.length === 0) {
-      // If no candidate resume available, mark filtered jobs as MATCHED by default
       const defaultMatched = jobsToMatch.map(job => ({
         ...job,
         matchStatus: 'MATCHED',
@@ -150,9 +161,11 @@ const matchWithResumeNode = async (state) => {
         matchReason: 'Matched based on deterministic criteria (No candidate resume provided)'
       }));
 
+      await logJobEvent('matchWithResumeNode', 'BYPASS', `Bypassed LLM evaluation for ${jobsToMatch.length} jobs (no candidate resume or jobs empty)`);
       return { matchedJobs: defaultMatched };
     }
 
+    await logJobEvent('matchWithResumeNode', 'START', `Evaluating candidate resume match against ${jobsToMatch.length} jobs via Gemini LLM`);
     const matchedResults = [];
 
     for (const job of jobsToMatch) {
@@ -188,6 +201,7 @@ const matchWithResumeNode = async (state) => {
       }
     }
 
+    await logJobEvent('matchWithResumeNode', 'SUCCESS', `Completed LLM evaluation for ${matchedResults.length} jobs`);
     return { matchedJobs: matchedResults };
   } catch (error) {
     await logError('jobDiscoveryGraph.matchWithResumeNode', error.message);
@@ -210,7 +224,7 @@ const storeEligibleJobsNode = async (state) => {
       }
     }
 
-    await logResumeEvent('storeEligibleJobsNode', `Stored ${storedList.length} jobs in MongoDB`);
+    await logJobEvent('storeEligibleJobsNode', 'SUCCESS', `Persisted ${storedList.length}/${jobsToStore.length} jobs to MongoDB`);
 
     return {
       storedJobsCount: storedList.length
