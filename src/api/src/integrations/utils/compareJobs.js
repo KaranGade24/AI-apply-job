@@ -75,38 +75,51 @@ export const compareJobWithConfig = (job = {}, searchConfig = {}) => {
     // 2. Location Matching
     if (Array.isArray(searchConfig.locations) && searchConfig.locations.length > 0) {
       const jobLoc = (job.location || '').toLowerCase();
+      const jobTitle = (job.title || '').toLowerCase();
+      const locationContext = `${jobLoc} ${jobTitle}`;
+
       const matchedLocs = searchConfig.locations.filter(loc => {
         const target = loc.toLowerCase().trim();
-        return jobLoc.includes(target) || fullText.includes(target) || (target === 'remote' && jobLoc.includes('remote'));
+        if (!target) return false;
+        if (target === 'remote') {
+          return (job.workMode || '').toLowerCase() === 'remote' || /remote|work\s*from\s*home|wfh/i.test(locationContext);
+        }
+        return locationContext.includes(target);
       });
 
       if (matchedLocs.length > 0) {
         matchReasons.push(`Matched locations: ${matchedLocs.join(', ')}`);
       } else {
-        score -= 20;
-        failReasons.push(`Location '${job.location}' did not match preferred locations [${searchConfig.locations.join(', ')}]`);
+        failReasons.push(`Location '${job.location || 'Not Specified'}' did not match preferred locations [${searchConfig.locations.join(', ')}]`);
+        return {
+          isMatch: false,
+          score: 0,
+          matchReasons,
+          failReasons
+        };
       }
     }
 
     // 3. Work Mode Matching
     if (Array.isArray(searchConfig.workMode) && searchConfig.workMode.length > 0) {
-      const isRemote = /remote|work\s*from\s*home|wfh/i.test(fullText);
-      const isHybrid = /hybrid/i.test(fullText);
-      const isOffice = /office|onsite/i.test(fullText);
+      const jobMode = (job.workMode || 'unspecified').toLowerCase();
+      const isRemote = jobMode === 'remote' || /remote|work\s*from\s*home|wfh/i.test(fullText);
+      const isHybrid = jobMode === 'hybrid' || /hybrid/i.test(fullText);
+      const isOffice = jobMode === 'workfromoffice' || /work\s*from\s*office|wfo|office|onsite|on-site/i.test(fullText);
 
       const requestedModes = searchConfig.workMode.map(m => m.toLowerCase());
       const modeMatches = requestedModes.some(mode => {
         if (mode === 'remote' && isRemote) return true;
         if (mode === 'hybrid' && isHybrid) return true;
-        if ((mode === 'workfromoffice' || mode === 'onsite') && isOffice) return true;
+        if ((mode === 'workfromoffice' || mode === 'onsite' || mode === 'wfo') && isOffice) return true;
         return false;
       });
 
       if (modeMatches) {
-        matchReasons.push('Matched requested work mode');
-      } else if (!isRemote && requestedModes.includes('remote')) {
-        score -= 15;
-        failReasons.push('Position is not remote');
+        matchReasons.push(`Matched requested work mode (${job.workMode || 'detected'})`);
+      } else {
+        score -= 20;
+        failReasons.push(`Work mode '${job.workMode || 'unspecified'}' did not match requested modes [${searchConfig.workMode.join(', ')}]`);
       }
     }
 

@@ -17,6 +17,8 @@ export const DEFAULT_JOB_STRUCTURE = Object.freeze({
   title: '',
   company: '',
   location: 'Remote / Unspecified',
+  workMode: 'unspecified',
+  employmentType: 'fullTime',
   experienceRequired: 'Not Specified',
   description: '',
   requirements: [],

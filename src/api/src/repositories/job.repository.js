@@ -15,7 +15,7 @@ export const upsertJob = async (jobData) => {
     const updatedJob = await Job.findOneAndUpdate(
       { sourceUrl: jobData.sourceUrl },
       { $set: jobData },
-      { new: true, upsert: true, runValidators: true }
+      { returnDocument: 'after', upsert: true, runValidators: true }
     );
 
     return updatedJob;
@@ -77,7 +77,7 @@ export const updateJobMatchStatus = async (jobId, matchResult = {}) => {
       resumeId: matchResult.resumeId || null
     };
 
-    return await Job.findByIdAndUpdate(jobId, { $set: update }, { new: true });
+    return await Job.findByIdAndUpdate(jobId, { $set: update }, { returnDocument: 'after' });
   } catch (error) {
     await logError('jobRepository.updateJobMatchStatus', error.message);
     return null;

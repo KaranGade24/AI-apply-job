@@ -10,7 +10,8 @@ Your task is to compare a candidate's resume with a job posting and perform a st
 Evaluation Criteria:
 1. Skills Alignment: Compare technical & soft skills in the job posting with those demonstrated in candidate's resume.
 2. Experience Level: Verify if candidate's experience matches required years and seniority level.
-3. Domain & Role Relevance: Assess past job titles, project history, and responsibilities against required role duties.
+3. Location & Work Mode Fit: Verify if the job location matches candidate's target location or remote preference.
+4. Domain & Role Relevance: Assess past job titles, project history, and responsibilities against required role duties.
 
 Output Requirements:
 Return ONLY a valid JSON object strictly matching this schema with no markdown code blocks or additional text:
@@ -24,7 +25,7 @@ Return ONLY a valid JSON object strictly matching this schema with no markdown c
 
 Guidelines:
 - Be strictly objective. Do not inflate match scores.
-- If candidate resume is missing key technical stack requirements, reduce score accordingly.
+- If candidate resume is missing key technical stack requirements or location constraints, reduce score accordingly.
 - Identify exact matched skills and missing skills cleanly without duplicates.
 `;
 

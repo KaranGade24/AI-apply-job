@@ -55,7 +55,10 @@ const discoverJobsNode = async (state) => {
   try {
     const config = state.config;
     const sourceName = config.sources[state.currentSourceIndex || 0] || 'jobViaReferral';
-    await logJobEvent('discoverJobsNode', 'START', `Scraping source: ${sourceName}`);
+    const targetMaxMatched = config.maxJobs || 5;
+    const scrapeLimit = Math.max(targetMaxMatched * 5, 25);
+
+    await logJobEvent('discoverJobsNode', 'START', `Scraping source: ${sourceName} (scrape limit: ${scrapeLimit})`);
 
     const sourceAdapter = getJobSource(sourceName);
 
@@ -64,7 +67,7 @@ const discoverJobsNode = async (state) => {
 
     // Use source adapter to search and scrape jobs
     const discovered = await sourceAdapter.searchJobs(page, {
-      maxJobs: config.maxJobs,
+      maxJobs: scrapeLimit,
       categoryUrl: undefined
     });
 
@@ -239,7 +242,7 @@ const storeEligibleJobsNode = async (state) => {
  * Conditional Edge Router: Determines if workflow should end or discover next source/batch
  */
 const checkEnoughJobsEdge = (state) => {
-  const matched = state.matchedJobs || [];
+  const matched = (state.matchedJobs || []).filter(j => j.matchStatus === 'MATCHED');
   const maxJobs = state.config?.maxJobs || 10;
   const currentSourceIndex = state.currentSourceIndex || 0;
   const sourcesCount = state.config?.sources?.length || 1;
@@ -300,10 +303,14 @@ export const runJobDiscoveryWorkflow = async (searchConfig = {}) => {
       candidateResumeText: searchConfig.candidateResumeText || ''
     };
 
+    const targetMax = searchConfig.maxJobs || 10;
     const finalState = await jobDiscoveryGraph.invoke(initialState);
+    const matchedOnly = (finalState.matchedJobs || []).filter(j => j.matchStatus === 'MATCHED');
+    const limitedMatchedJobs = matchedOnly.slice(0, targetMax);
+
     return {
       success: true,
-      matchedJobs: finalState.matchedJobs || [],
+      matchedJobs: limitedMatchedJobs,
       totalJobsDiscovered: (finalState.normalizedJobs || []).length,
       errors: finalState.errors || []
     };

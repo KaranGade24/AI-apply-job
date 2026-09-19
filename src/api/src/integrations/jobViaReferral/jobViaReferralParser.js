@@ -19,6 +19,20 @@ export const parseTitle = async (page) => {
 };
 
 /**
+ * Helper to truncate raw parsed strings at adjacent field keywords
+ * @param {string} val
+ * @returns {string} Clean field value
+ */
+const cleanFieldValue = (val = '') => {
+  if (!val || typeof val !== 'string') return '';
+  const cleaned = val
+    .split(/(?:Work\s*Mode|Experience|Qualification|Employment|Eligibility|Skills|Position|Job\s*ID|Joining|Salary|Post\s*Views|---|\n|\r)/i)[0]
+    .replace(/^[:|\-\s,]+|[:|\-\s,]+$/g, '')
+    .trim();
+  return cleaned;
+};
+
+/**
  * Extracts company name from job text content or heading
  * @param {import('playwright').Page} page
  * @param {string} contentText - Raw text of job post body
@@ -28,7 +42,8 @@ export const parseCompany = async (page, contentText = '') => {
   try {
     const match = contentText.match(JOB_VIA_REFERRAL_SELECTORS.textPatterns.company);
     if (match && match[1]?.trim()) {
-      return match[1].trim();
+      const cleanComp = cleanFieldValue(match[1]);
+      if (cleanComp) return cleanComp;
     }
 
     // Fallback: Check title for "Company Name Hiring / Off Campus Drive" pattern
@@ -55,12 +70,22 @@ export const parseLocation = async (page, contentText = '') => {
   try {
     const match = contentText.match(JOB_VIA_REFERRAL_SELECTORS.textPatterns.location);
     if (match && match[1]?.trim()) {
-      return match[1].trim();
+      const cleanLoc = cleanFieldValue(match[1]);
+      if (cleanLoc) return cleanLoc;
     }
-    return 'Work From Home / India';
+
+    // Check title for location hints (e.g. "... | Pune", "... | Nagpur", "... | Remote")
+    const title = await parseTitle(page);
+    const locInTitleMatch = title.match(/\|\s*([^|]+)$/);
+    if (locInTitleMatch && locInTitleMatch[1]?.trim()) {
+      const cleanLoc = cleanFieldValue(locInTitleMatch[1]);
+      if (cleanLoc) return cleanLoc;
+    }
+
+    return 'India';
   } catch (error) {
     await logError('jobViaReferralParser.parseLocation', error.message);
-    return 'Work From Home / India';
+    return 'India';
   }
 };
 
@@ -74,9 +99,10 @@ export const parseExperience = async (page, contentText = '') => {
   try {
     const match = contentText.match(JOB_VIA_REFERRAL_SELECTORS.textPatterns.experience);
     if (match && match[1]?.trim()) {
-      return match[1].trim();
+      const cleanExp = cleanFieldValue(match[1]);
+      if (cleanExp) return cleanExp;
     }
-    return '0 - 2 Years (Fresher / Experienced)';
+    return '0 - 2 Years';
   } catch (error) {
     await logError('jobViaReferralParser.parseExperience', error.message);
     return '0 - 2 Years';
@@ -474,6 +500,85 @@ export const parseJobCard = async (cardLocator) => {
 };
 
 /**
+ * Cleans location string to separate city/region from work mode details
+ * @param {string} locStr
+ * @returns {string} Clean location (e.g. "Pune", "Nagpur", "Remote")
+ */
+export const cleanLocationString = (locStr = '') => {
+  if (!locStr || typeof locStr !== 'string') return 'India';
+  if (/^remote$/i.test(locStr.trim())) return 'Remote';
+
+  let cleaned = locStr
+    .replace(/\|\s*(?:Work\s*From\s*Office|WFO|On-site|Onsite|Hybrid|Remote|Work\s*From\s*Home|WFH|Work\s*Mode.*|\(.*?\))/gi, '')
+    .replace(/\b(?:Work\s*From\s*Office|WFO|On-site|Onsite|Work\s*Mode:?.*)\b/gi, '')
+    .replace(/^[:|\-\s,]+|[:|\-\s,]+$/g, '')
+    .trim();
+
+  return cleaned || locStr.trim() || 'India';
+};
+
+/**
+ * Extracts work mode enum ('remote', 'hybrid', 'workFromOffice', 'unspecified')
+ * @param {import('playwright').Page} page
+ * @param {string} contentText
+ * @param {string} rawLocationStr
+ * @returns {string} WorkMode enum
+ */
+export const parseWorkMode = (page, contentText = '', rawLocationStr = '') => {
+  try {
+    const match = contentText.match(/(?:Work\s*Mode|Mode\s*of\s*Work|Work\s*Type)\s*[:|-]\s*([^\n\r]+)/i);
+    if (match && match[1]) {
+      const modeVal = match[1].toLowerCase();
+      if (/remote|work\s*from\s*home|wfh/i.test(modeVal)) return 'remote';
+      if (/hybrid/i.test(modeVal)) return 'hybrid';
+      if (/office|wfo|on-site|onsite/i.test(modeVal)) return 'workFromOffice';
+    }
+
+    const combinedText = `${rawLocationStr} ${contentText}`.toLowerCase();
+
+    if (/work\s*from\s*office|\bwfo\b|on-site|onsite|in-office/i.test(combinedText)) {
+      return 'workFromOffice';
+    }
+    if (/\bhybrid\b/i.test(combinedText)) {
+      return 'hybrid';
+    }
+    if (/\bremote\b|work\s*from\s*home|\bwfh\b/i.test(combinedText)) {
+      return 'remote';
+    }
+
+    return 'unspecified';
+  } catch (error) {
+    return 'unspecified';
+  }
+};
+
+/**
+ * Extracts employment type ('fullTime', 'partTime', 'internship', 'contract')
+ * @param {import('playwright').Page} page
+ * @param {string} contentText
+ * @returns {string} EmploymentType enum
+ */
+export const parseEmploymentType = (page, contentText = '') => {
+  try {
+    const match = contentText.match(/(?:Employment\s*Type|Role\s*Type|Job\s*Type)\s*[:|-]\s*([^\n\r]+)/i);
+    const textToScan = `${match ? match[1] : ''} ${contentText}`.toLowerCase();
+
+    if (/internship|intern\b/i.test(textToScan)) {
+      return 'internship';
+    }
+    if (/part\s*-?\s*time/i.test(textToScan)) {
+      return 'partTime';
+    }
+    if (/contract|freelance/i.test(textToScan)) {
+      return 'contract';
+    }
+    return 'fullTime';
+  } catch (error) {
+    return 'fullTime';
+  }
+};
+
+/**
  * Parses full job details page into normalized Job object
  * @param {import('playwright').Page} page
  * @param {string} jobUrl
@@ -485,7 +590,10 @@ export const parseJobDetails = async (page, jobUrl) => {
     const description = await parseDescription(page);
 
     const company = await parseCompany(page, description);
-    const location = await parseLocation(page, description);
+    const rawLocation = await parseLocation(page, description);
+    const location = cleanLocationString(rawLocation);
+    const workMode = parseWorkMode(page, description, rawLocation);
+    const employmentType = parseEmploymentType(page, description);
     const experienceRequired = await parseExperience(page, description);
     const skills = await parseSkills(page, description);
     const resumeTips = await parseResumeTips(page, description);
@@ -504,6 +612,8 @@ export const parseJobDetails = async (page, jobUrl) => {
       title,
       company,
       location,
+      workMode,
+      employmentType,
       experienceRequired,
       description,
       skills,
@@ -529,6 +639,9 @@ export default {
   parseTitle,
   parseCompany,
   parseLocation,
+  cleanLocationString,
+  parseWorkMode,
+  parseEmploymentType,
   parseExperience,
   parseDescription,
   parseSkills,
