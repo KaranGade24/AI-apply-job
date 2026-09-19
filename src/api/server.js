@@ -5,14 +5,18 @@ import { connectToDatabase } from './src/config/database.config.js';
 import authRouter from './src/router/auth.router.js';
 import resumeRouter from './src/router/resume.router.js';
 import jobRouter from './src/router/job.router.js';
+import { flexibleJsonParser } from './src/middlewares/customJsonParser.middleware.js';
+import { jsonSyntaxErrorHandler } from './src/middlewares/jsonError.middleware.js';
 import { swaggerOptions } from './src/config/swagger.js';
 import { DEFAULT_PORT } from './src/constant/api.constant.js';
 
 const app = express();
 
-// Middleware to parse JSON and URL-encoded request bodies
+// Flexible JSON body parser supporting auto-correction for trailing commas
+app.use(flexibleJsonParser);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(jsonSyntaxErrorHandler);
 
 // Root route - redirect to API documentation
 app.get('/', (req, res) => {
