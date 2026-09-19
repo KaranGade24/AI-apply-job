@@ -10,6 +10,7 @@ export const MatchStatus = Object.freeze({
 export const WorkMode = Object.freeze({
   REMOTE: 'remote',
   HYBRID: 'hybrid',
+  OFFICE: 'office',
   WORK_FROM_OFFICE: 'workFromOffice',
   UNSPECIFIED: 'unspecified'
 });

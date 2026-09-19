@@ -90,6 +90,39 @@ export const parseLocation = async (page, contentText = '') => {
 };
 
 /**
+ * Cleans experience string to filter out work mode or invalid non-experience terms
+ * and format experience integers/ranges.
+ * @param {string} expStr
+ * @returns {string} Clean experience string
+ */
+export const cleanExperienceString = (expStr = '') => {
+  if (!expStr || typeof expStr !== 'string') return '0 - 2 Years';
+
+  let cleaned = expStr
+    .replace(/\b(?:Work\s*From\s*Home|WFH|Work\s*From\s*Office|WFO|On-site|Onsite|Hybrid|Remote|Work\s*Mode:?.*|\(.*?\))\b/gi, '')
+    .replace(/^[:|\-\s,]+|[:|\-\s,]+$/g, '')
+    .trim();
+
+  const digitMatch = cleaned.match(/\d+/g);
+  if (digitMatch && digitMatch.length > 0) {
+    const minYears = parseInt(digitMatch[0], 10);
+    const maxYears = digitMatch[1] ? parseInt(digitMatch[1], 10) : minYears;
+    if (minYears === maxYears) return `${minYears} Years`;
+    return `${minYears} - ${maxYears} Years`;
+  }
+
+  if (/fresher/i.test(cleaned)) {
+    return '0 Years';
+  }
+
+  if (!cleaned || /^(?:wfh|wfo|remote|onsite|hybrid|n\/a|not\s*mentioned|not\s*specified)$/i.test(cleaned)) {
+    return '0 - 2 Years';
+  }
+
+  return cleaned;
+};
+
+/**
  * Extracts experience requirements from post content
  * @param {import('playwright').Page} page
  * @param {string} contentText
@@ -100,7 +133,8 @@ export const parseExperience = async (page, contentText = '') => {
     const match = contentText.match(JOB_VIA_REFERRAL_SELECTORS.textPatterns.experience);
     if (match && match[1]?.trim()) {
       const cleanExp = cleanFieldValue(match[1]);
-      if (cleanExp) return cleanExp;
+      const validExp = cleanExperienceString(cleanExp);
+      if (validExp) return validExp;
     }
     return '0 - 2 Years';
   } catch (error) {
@@ -518,11 +552,11 @@ export const cleanLocationString = (locStr = '') => {
 };
 
 /**
- * Extracts work mode enum ('remote', 'hybrid', 'workFromOffice', 'unspecified')
+ * Extracts work mode enum ('remote', 'hybrid', 'office')
  * @param {import('playwright').Page} page
  * @param {string} contentText
  * @param {string} rawLocationStr
- * @returns {string} WorkMode enum
+ * @returns {string} WorkMode enum ('remote', 'hybrid', 'office')
  */
 export const parseWorkMode = (page, contentText = '', rawLocationStr = '') => {
   try {
@@ -531,24 +565,24 @@ export const parseWorkMode = (page, contentText = '', rawLocationStr = '') => {
       const modeVal = match[1].toLowerCase();
       if (/remote|work\s*from\s*home|wfh/i.test(modeVal)) return 'remote';
       if (/hybrid/i.test(modeVal)) return 'hybrid';
-      if (/office|wfo|on-site|onsite/i.test(modeVal)) return 'workFromOffice';
+      if (/office|wfo|on-site|onsite|in-office/i.test(modeVal)) return 'office';
     }
 
     const combinedText = `${rawLocationStr} ${contentText}`.toLowerCase();
 
-    if (/work\s*from\s*office|\bwfo\b|on-site|onsite|in-office/i.test(combinedText)) {
-      return 'workFromOffice';
-    }
     if (/\bhybrid\b/i.test(combinedText)) {
       return 'hybrid';
     }
     if (/\bremote\b|work\s*from\s*home|\bwfh\b/i.test(combinedText)) {
       return 'remote';
     }
+    if (/work\s*from\s*office|\bwfo\b|on-site|onsite|in-office/i.test(combinedText)) {
+      return 'office';
+    }
 
-    return 'unspecified';
+    return 'office';
   } catch (error) {
-    return 'unspecified';
+    return 'office';
   }
 };
 

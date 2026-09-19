@@ -9,7 +9,7 @@ import { buildJobMatchPrompt } from "../prompt/jobMatcher.js";
 import { getJobSource } from "../../integrations/jobSources/sourceManager.js";
 import { compareJobWithConfig } from "../../integrations/utils/compareJobs.js";
 import { createBrowser } from "../../browser/browserConfig.js";
-import { upsertJob } from "../../repositories/job.repository.js";
+import { upsertJob, getExistingSourceUrls } from "../../repositories/job.repository.js";
 import { Resume } from "../../model/Resume.js";
 import { logError, logResumeEvent, logJobEvent } from "../../utils/logger.js";
 
@@ -71,6 +71,10 @@ const validateConfigNode = async (state) => {
  */
 const discoverJobsNode = async (state) => {
   let browser = null;
+  let context = null;
+  let page = null;
+  let discovered = [];
+
   try {
     const config = state.config;
     const sourceName =
@@ -87,20 +91,22 @@ const discoverJobsNode = async (state) => {
     const sourceAdapter = getJobSource(sourceName);
 
     browser = await createBrowser();
-    const page = await browser.newPage();
+    context = await browser.newContext({
+      userAgent:
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      viewport: { width: 1280, height: 800 },
+    });
+    page = await context.newPage();
 
     // Block non-essential media & tracking requests to speed up page navigation
     await page.route('**/*.{png,jpg,jpeg,gif,svg,css,woff,woff2,ttf,otf,eot,ico}', route => route.abort());
     await page.route(/(?:google-analytics|doubleclick|googlesyndication|facebook|analytics|tracker)/i, route => route.abort());
 
     // Use source adapter to search and scrape jobs
-    const discovered = await sourceAdapter.searchJobs(page, {
+    discovered = await sourceAdapter.searchJobs(page, {
       maxJobs: scrapeLimit,
       categoryUrl: undefined,
     });
-
-    await browser.close();
-    browser = null;
 
     await logJobEvent(
       "discoverJobsNode",
@@ -112,12 +118,22 @@ const discoverJobsNode = async (state) => {
       rawJobs: discovered || [],
     };
   } catch (error) {
-    if (browser) await browser.close().catch(() => {});
     await logError("jobDiscoveryGraph.discoverJobsNode", error.message);
     return {
       rawJobs: [],
       errors: [...(state.errors || []), error.message],
     };
+  } finally {
+    // Explicitly close page, context, and browser in finally block to prevent zombie processes
+    if (page) {
+      await page.close().catch(() => {});
+    }
+    if (context) {
+      await context.close().catch(() => {});
+    }
+    if (browser) {
+      await browser.close().catch(() => {});
+    }
   }
 };
 
@@ -152,15 +168,32 @@ const normalizeJobsNode = async (state) => {
 };
 
 /**
- * Node 4: Apply Deterministic Filters (Keywords, Location, Experience, WorkMode, PostedWithin)
+ * Node 4: Apply Deterministic Filters (Keywords, Location, Experience, WorkMode, PostedWithin) & Skip Existing DB Jobs
  */
 const applyFiltersNode = async (state) => {
   try {
     const config = state.config;
     const normalized = state.normalizedJobs || [];
 
+    // Query database for existing jobs by sourceUrl before evaluating/sending to AI
+    const sourceUrls = normalized.map((j) => j.sourceUrl).filter(Boolean);
+    const existingSet = await getExistingSourceUrls(sourceUrls);
+
     const passedJobs = [];
+    let skippedExistingCount = 0;
+
     for (const job of normalized) {
+      // Skip if job already exists in database
+      if (job.sourceUrl && existingSet.has(job.sourceUrl)) {
+        skippedExistingCount++;
+        await logJobEvent(
+          "applyFiltersNode",
+          "SKIP_EXISTING",
+          `Job already exists in database, skipping: ${job.sourceUrl}`,
+        );
+        continue;
+      }
+
       const evaluation = compareJobWithConfig(job, config);
       if (evaluation.isMatch) {
         passedJobs.push({
@@ -174,7 +207,7 @@ const applyFiltersNode = async (state) => {
     await logJobEvent(
       "applyFiltersNode",
       "SUCCESS",
-      `Filtered ${passedJobs.length}/${normalized.length} jobs based on criteria`,
+      `Filtered ${passedJobs.length}/${normalized.length} jobs based on criteria (skipped ${skippedExistingCount} already in database)`,
     );
 
     return {

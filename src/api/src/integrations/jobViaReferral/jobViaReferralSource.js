@@ -5,6 +5,33 @@ import { JOB_VIA_REFERRAL_CATEGORIES } from '../../constant/jobViaReferral.const
 import { logError } from '../../utils/logger.js';
 
 /**
+ * Utility to introduce randomized jitter delay simulating human pauses (2 to 5 seconds)
+ * @param {number} minMs
+ * @param {number} maxMs
+ */
+const randomDelay = (minMs = 2000, maxMs = 5000) => {
+  const ms = Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs;
+  return new Promise((resolve) => setTimeout(resolve, ms));
+};
+
+/**
+ * Simulates human-like scrolling behavior on the page
+ * @param {import('playwright').Page} page
+ */
+const simulateHumanScroll = async (page) => {
+  try {
+    await page.evaluate(() => {
+      window.scrollBy({
+        top: Math.floor(Math.random() * 300) + 150,
+        behavior: 'smooth'
+      });
+    });
+  } catch (err) {
+    // ignore scroll errors
+  }
+};
+
+/**
  * Navigates to JobViaReferral target category or homepage
  * @param {import('playwright').Page} page
  * @param {string} categoryUrl
@@ -14,11 +41,13 @@ export const openJobViaReferral = async (
   categoryUrl = JOB_VIA_REFERRAL_CATEGORIES.FRESHER_REFERRAL
 ) => {
   try {
+    await randomDelay(2000, 5000); // Pre-navigation jitter delay
     await page.goto(categoryUrl, {
       waitUntil: 'domcontentloaded',
-      timeout: 15000
+      timeout: 20000
     });
-    await page.waitForTimeout(500);
+    await simulateHumanScroll(page);
+    await randomDelay(2000, 5000); // Post-navigation human pause
   } catch (error) {
     await logError('jobViaReferralSource.openJobViaReferral', error.message);
     throw error;
@@ -45,6 +74,7 @@ export const getJobListingUrls = async (page, searchConfig = {}) => {
       if (cardData?.url) {
         jobUrls.add(cardData.url);
       }
+      await randomDelay(300, 800); // Small interaction delay between parsing cards
     }
 
     return Array.from(jobUrls);
@@ -61,11 +91,13 @@ export const getJobListingUrls = async (page, searchConfig = {}) => {
  */
 export const openJobDetails = async (page, jobUrl) => {
   try {
+    await randomDelay(2000, 5000); // Jitter delay before opening detail
     await page.goto(jobUrl, {
       waitUntil: 'domcontentloaded',
-      timeout: 10000
+      timeout: 15000
     });
-    await page.waitForTimeout(300);
+    await simulateHumanScroll(page);
+    await randomDelay(2000, 5000); // Jitter delay after landing on detail page
   } catch (error) {
     await logError('jobViaReferralSource.openJobDetails', error.message);
     throw error;

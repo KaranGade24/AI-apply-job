@@ -47,6 +47,22 @@ export const saveBulkJobs = async (jobsList = []) => {
 };
 
 /**
+ * Checks which source URLs already exist in the database
+ * @param {Array<string>} urls
+ * @returns {Promise<Set<string>>} Set of existing source URLs
+ */
+export const getExistingSourceUrls = async (urls = []) => {
+  try {
+    if (!urls || urls.length === 0) return new Set();
+    const existing = await Job.find({ sourceUrl: { $in: urls } }, { sourceUrl: 1 }).lean();
+    return new Set(existing.map(j => j.sourceUrl));
+  } catch (error) {
+    await logError('jobRepository.getExistingSourceUrls', error.message);
+    return new Set();
+  }
+};
+
+/**
  * Finds job by source URL
  * @param {string} sourceUrl
  * @returns {Promise<object|null>}
@@ -103,6 +119,7 @@ export default {
   upsertJob,
   saveBulkJobs,
   getJobBySourceUrl,
+  getExistingSourceUrls,
   updateJobMatchStatus,
   getJobs
 };
