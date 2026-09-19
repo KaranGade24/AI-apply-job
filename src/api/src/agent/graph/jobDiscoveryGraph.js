@@ -76,7 +76,7 @@ const discoverJobsNode = async (state) => {
     const sourceName =
       config.sources[state.currentSourceIndex || 0] || "jobViaReferral";
     const targetMaxMatched = config.maxJobs || 5;
-    const scrapeLimit = Math.max(targetMaxMatched * 50, 25);
+    const scrapeLimit = Math.min(Math.max(targetMaxMatched * 3, 10), 15);
 
     await logJobEvent(
       "discoverJobsNode",
@@ -88,6 +88,10 @@ const discoverJobsNode = async (state) => {
 
     browser = await createBrowser();
     const page = await browser.newPage();
+
+    // Block non-essential media & tracking requests to speed up page navigation
+    await page.route('**/*.{png,jpg,jpeg,gif,svg,css,woff,woff2,ttf,otf,eot,ico}', route => route.abort());
+    await page.route(/(?:google-analytics|doubleclick|googlesyndication|facebook|analytics|tracker)/i, route => route.abort());
 
     // Use source adapter to search and scrape jobs
     const discovered = await sourceAdapter.searchJobs(page, {
@@ -214,48 +218,49 @@ const matchWithResumeNode = async (state) => {
       "START",
       `Evaluating candidate resume match against ${jobsToMatch.length} jobs via Gemini LLM`,
     );
-    const matchedResults = [];
 
-    for (const job of jobsToMatch) {
-      try {
-        const prompt = buildJobMatchPrompt(candidateText, job);
+    const matchedResults = await Promise.all(
+      jobsToMatch.map(async (job) => {
+        try {
+          const prompt = buildJobMatchPrompt(candidateText, job);
 
-        const response = await geminiModel.invoke([
-          new SystemMessage(
-            "You output strictly valid JSON without markdown formatting or code fences.",
-          ),
-          new HumanMessage(prompt),
-        ]);
+          const response = await geminiModel.invoke([
+            new SystemMessage(
+              "You output strictly valid JSON without markdown formatting or code fences.",
+            ),
+            new HumanMessage(prompt),
+          ]);
 
-        const rawContent = response.content
-          .toString()
-          .replace(/```json|```/g, "")
-          .trim();
-        const parsedMatch = JSON.parse(rawContent);
+          const rawContent = response.content
+            .toString()
+            .replace(/```json|```/g, "")
+            .trim();
+          const parsedMatch = JSON.parse(rawContent);
 
-        const isMatch = parsedMatch.isMatch && parsedMatch.matchScore >= 50;
+          const isMatch = parsedMatch.isMatch && parsedMatch.matchScore >= 50;
 
-        matchedResults.push({
-          ...job,
-          matchStatus: isMatch ? "MATCHED" : "NOT_MATCHED",
-          matchScore: parsedMatch.matchScore || 0,
-          matchReason: parsedMatch.matchReason || "",
-          matchedSkills: parsedMatch.matchedSkills || [],
-          missingSkills: parsedMatch.missingSkills || [],
-        });
-      } catch (llmError) {
-        await logError(
-          "jobDiscoveryGraph.matchWithResumeNode.item",
-          llmError.message,
-        );
-        matchedResults.push({
-          ...job,
-          matchStatus: "MATCHED",
-          matchScore: job.deterministicScore || 70,
-          matchReason: "Matched based on keyword criteria",
-        });
-      }
-    }
+          return {
+            ...job,
+            matchStatus: isMatch ? "MATCHED" : "NOT_MATCHED",
+            matchScore: parsedMatch.matchScore || 0,
+            matchReason: parsedMatch.matchReason || "",
+            matchedSkills: parsedMatch.matchedSkills || [],
+            missingSkills: parsedMatch.missingSkills || [],
+          };
+        } catch (llmError) {
+          await logError(
+            "jobDiscoveryGraph.matchWithResumeNode.item",
+            llmError.message,
+          );
+          return {
+            ...job,
+            matchStatus: "MATCHED",
+            matchScore: job.deterministicScore || 70,
+            matchReason: "Matched based on keyword criteria",
+          };
+        }
+      })
+    );
 
     await logJobEvent(
       "matchWithResumeNode",

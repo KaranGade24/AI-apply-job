@@ -16,9 +16,9 @@ export const openJobViaReferral = async (
   try {
     await page.goto(categoryUrl, {
       waitUntil: 'domcontentloaded',
-      timeout: SCRAPER_DEFAULTS.NAVIGATION_TIMEOUT_MS
+      timeout: 15000
     });
-    await page.waitForTimeout(SCRAPER_DEFAULTS.WAIT_AFTER_PAGE_LOAD_MS);
+    await page.waitForTimeout(500);
   } catch (error) {
     await logError('jobViaReferralSource.openJobViaReferral', error.message);
     throw error;
@@ -63,9 +63,9 @@ export const openJobDetails = async (page, jobUrl) => {
   try {
     await page.goto(jobUrl, {
       waitUntil: 'domcontentloaded',
-      timeout: SCRAPER_DEFAULTS.NAVIGATION_TIMEOUT_MS
+      timeout: 10000
     });
-    await page.waitForTimeout(1000);
+    await page.waitForTimeout(300);
   } catch (error) {
     await logError('jobViaReferralSource.openJobDetails', error.message);
     throw error;
