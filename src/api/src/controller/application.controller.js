@@ -201,7 +201,7 @@ export const downloadPdf = async (req, res, next) => {
 export const updateResume = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { targetPageLength, pageCount, tailoredResumeData, template, regenerate } = req.body;
+    const { targetPageLength, pageCount, tailoredResumeData, template, regenerate } = req.body || {};
     const userId = req.user.userId || req.user._id;
 
     const updated = await applicationService.updateApplicationResumeService(id, userId, {

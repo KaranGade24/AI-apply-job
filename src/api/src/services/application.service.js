@@ -305,6 +305,13 @@ export const updateApplicationResumeService = async (
       throw new appError("Unauthorized access to job application", 403);
     }
 
+    if (application.status !== APPLICATION_STATUS.WAITING_FOR_REVIEW) {
+      throw new appError(
+        `Resume can only be updated for applications in '${APPLICATION_STATUS.WAITING_FOR_REVIEW}' status. Current status: '${application.status}'`,
+        400
+      );
+    }
+
     const { targetPageLength, pageCount, tailoredResumeData, template, regenerate } = options;
     const pageLengthParam = targetPageLength || pageCount;
 
