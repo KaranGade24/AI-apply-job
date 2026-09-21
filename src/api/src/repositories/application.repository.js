@@ -218,15 +218,20 @@ export const updateApplicationEmail = async (id, emailData) => {
  */
 export const updateApplicationResume = async (id, resumeData) => {
   try {
+    const setObj = {};
+    if (resumeData.sourceResumeId !== undefined) {
+      setObj["resume.sourceResumeId"] = resumeData.sourceResumeId;
+    }
+    if (resumeData.tailoredResumeData !== undefined) {
+      setObj["resume.tailoredResumeData"] = resumeData.tailoredResumeData;
+    }
+    if (resumeData.pdfPath !== undefined) {
+      setObj["resume.pdfPath"] = resumeData.pdfPath;
+    }
+
     return await JobApplication.findByIdAndUpdate(
       id,
-      {
-        $set: {
-          "resume.sourceResumeId": resumeData.sourceResumeId,
-          "resume.tailoredResumeData": resumeData.tailoredResumeData,
-          "resume.pdfPath": resumeData.pdfPath,
-        },
-      },
+      { $set: setObj },
       { returnDocument: "after" }
     );
   } catch (error) {

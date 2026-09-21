@@ -168,6 +168,46 @@ applicationRouter.put("/:id/review", authMiddleware, applicationController.editE
 
 /**
  * @swagger
+ * /api/applications/{id}/resume:
+ *   put:
+ *     summary: Update or regenerate tailored resume for a specific job application
+ *     tags: [Applications]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               targetPageLength:
+ *                 type: integer
+ *                 example: 1
+ *               pageCount:
+ *                 type: integer
+ *                 example: 1
+ *               regenerate:
+ *                 type: boolean
+ *                 example: true
+ *               tailoredResumeData:
+ *                 type: object
+ *               template:
+ *                 type: string
+ *                 example: "modern"
+ *     responses:
+ *       200:
+ *         description: Resume updated or regenerated successfully
+ *       404:
+ *         description: Application not found
+ */
+applicationRouter.put("/:id/resume", authMiddleware, applicationController.updateResume);
+
+/**
+ * @swagger
  * /api/applications/{id}/pdf:
  *   get:
  *     summary: Download or stream the tailored PDF resume for an application

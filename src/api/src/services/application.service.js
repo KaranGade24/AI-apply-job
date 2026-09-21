@@ -5,10 +5,12 @@ import {
   findNextPendingApplication,
   updateApplicationStatus,
   updateApplicationEmail,
+  updateApplicationResume,
   getUserApplications as repositoryGetUserApplications,
 } from "../repositories/application.repository.js";
 import { Job } from "../model/Job.js";
-import { APPLICATION_STATUS } from "../constant/application.constant.js";
+import { APPLICATION_STATUS, RESUME_PAGE_COUNT, RESUME_PDF_TEMPLATES } from "../constant/application.constant.js";
+import { generateResumePdf } from "../pdf/resumePdfService.js";
 import { sendApplicationEmail } from "../integrations/email/emailService.js";
 import { logError, logJobEvent } from "../utils/logger.js";
 import { appError } from "../utils/errors.js";
@@ -271,4 +273,71 @@ export const getApplicationById = async (applicationId, userId) => {
     throw new appError("Unauthorized access to job application", 403);
   }
   return appDoc;
+};
+
+/**
+ * Updates or regenerates the tailored resume for a specific application ID
+ * @param {string} applicationId
+ * @param {string} userId
+ * @param {object} [options]
+ * @param {string|number} [options.targetPageLength] - Target page count
+ * @param {string|number} [options.pageCount] - Target page count alias
+ * @param {object} [options.tailoredResumeData] - Direct updated resume JSON
+ * @param {string} [options.template] - PDF template choice ("modern", "minimal", "ats")
+ * @param {boolean} [options.regenerate] - Explicitly force AI regeneration
+ * @returns {Promise<object>}
+ */
+export const updateApplicationResumeService = async (
+  applicationId,
+  userId,
+  options = {}
+) => {
+  try {
+    const application = await findApplicationById(applicationId);
+    if (!application) {
+      throw new appError("Job application not found", 404);
+    }
+
+    if (
+      application.userId._id.toString() !== userId &&
+      application.userId.toString() !== userId
+    ) {
+      throw new appError("Unauthorized access to job application", 403);
+    }
+
+    const { targetPageLength, pageCount, tailoredResumeData, template, regenerate } = options;
+    const pageLengthParam = targetPageLength || pageCount;
+
+    // If custom tailored resume JSON data is provided directly, re-render PDF & update database
+    if (tailoredResumeData && !regenerate) {
+      const pdfPath = await generateResumePdf({
+        resumeData: tailoredResumeData,
+        userId,
+        template: template || RESUME_PDF_TEMPLATES.MODERN,
+      });
+
+      await updateApplicationResume(applicationId, {
+        tailoredResumeData,
+        pdfPath,
+      });
+
+      return await findApplicationById(applicationId);
+    }
+
+    // Otherwise, re-trigger AI application graph pipeline with target page count
+    await runAgent(
+      "jobApplication",
+      {
+        applicationId,
+        userId,
+        targetPageLength: pageLengthParam || RESUME_PAGE_COUNT,
+      },
+      { userId }
+    );
+
+    return await findApplicationById(applicationId);
+  } catch (error) {
+    await logError("applicationService.updateApplicationResumeService", error.message);
+    throw error;
+  }
 };

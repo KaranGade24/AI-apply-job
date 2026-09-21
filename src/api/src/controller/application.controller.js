@@ -194,3 +194,30 @@ export const downloadPdf = async (req, res, next) => {
     next(error);
   }
 };
+
+/**
+ * Update or regenerate tailored resume for an application
+ */
+export const updateResume = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { targetPageLength, pageCount, tailoredResumeData, template, regenerate } = req.body;
+    const userId = req.user.userId || req.user._id;
+
+    const updated = await applicationService.updateApplicationResumeService(id, userId, {
+      targetPageLength,
+      pageCount,
+      tailoredResumeData,
+      template,
+      regenerate,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Application resume updated/regenerated successfully",
+      data: updated,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
