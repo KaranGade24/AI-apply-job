@@ -1,4 +1,5 @@
 import { User } from '../model/User.js';
+import { UserProfile } from '../model/UserProfile.js';
 import { appError } from '../utils/errors.js';
 
 export const createUser = async ({ email, passwordHash, username }) => {
@@ -7,6 +8,22 @@ export const createUser = async ({ email, passwordHash, username }) => {
     return user;
   } catch (error) {
     throw new appError(`Database error creating user: ${error.message}`, 500);
+  }
+};
+
+export const findUserById = async (userId) => {
+  try {
+    return await User.findById(userId);
+  } catch (error) {
+    throw new appError(`Database error finding user by ID: ${error.message}`, 500);
+  }
+};
+
+export const findUserProfileByUserId = async (userId) => {
+  try {
+    return await UserProfile.findOne({ userId });
+  } catch (error) {
+    throw new appError(`Database error finding user profile: ${error.message}`, 500);
   }
 };
 
@@ -35,3 +52,4 @@ export const findUserByEmailOrUsername = async (identifier) => {
     throw new appError(`Database error finding user: ${error.message}`, 500);
   }
 };
+

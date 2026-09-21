@@ -5,6 +5,7 @@ import { connectToDatabase } from './src/config/database.config.js';
 import authRouter from './src/router/auth.router.js';
 import resumeRouter from './src/router/resume.router.js';
 import jobRouter from './src/router/job.router.js';
+import applicationRouter from './src/router/application.router.js';
 import { flexibleJsonParser } from './src/middlewares/customJsonParser.middleware.js';
 import { jsonSyntaxErrorHandler } from './src/middlewares/jsonError.middleware.js';
 import { swaggerOptions } from './src/config/swagger.js';
@@ -30,6 +31,7 @@ app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 app.use('/api/auth', authRouter);
 app.use('/api/resume', resumeRouter);
 app.use('/api/jobs', jobRouter);
+app.use('/api/applications', applicationRouter);
 
 const PORT = DEFAULT_PORT;
 

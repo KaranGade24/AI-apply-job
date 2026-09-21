@@ -12,6 +12,7 @@ import { createBrowser } from "../../browser/browserConfig.js";
 import { upsertJob, getExistingSourceUrls } from "../../repositories/job.repository.js";
 import { Resume } from "../../model/Resume.js";
 import { logError, logResumeEvent, logJobEvent } from "../../utils/logger.js";
+import { calculateScrapeLimit } from "../../constant/agent.constant.js";
 
 export { searchConfigSchema };
 
@@ -80,7 +81,7 @@ const discoverJobsNode = async (state) => {
     const sourceName =
       config.sources[state.currentSourceIndex || 0] || "jobViaReferral";
     const targetMaxMatched = config.maxJobs || 5;
-    const scrapeLimit = Math.min(Math.max(targetMaxMatched * 3, 10), 15);
+    const scrapeLimit = calculateScrapeLimit(targetMaxMatched);
 
     await logJobEvent(
       "discoverJobsNode",
@@ -98,8 +99,8 @@ const discoverJobsNode = async (state) => {
     });
     page = await context.newPage();
 
-    // Block non-essential media & tracking requests to speed up page navigation
-    await page.route('**/*.{png,jpg,jpeg,gif,svg,css,woff,woff2,ttf,otf,eot,ico}', route => route.abort());
+    // Block heavy media & trackers to speed up page navigation (do NOT block CSS/JS needed for DOM rendering)
+    await page.route('**/*.{png,jpg,jpeg,gif,svg,webp,mp4,mp3,wav,woff,woff2}', route => route.abort());
     await page.route(/(?:google-analytics|doubleclick|googlesyndication|facebook|analytics|tracker)/i, route => route.abort());
 
     // Use source adapter to search and scrape jobs

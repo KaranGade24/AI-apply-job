@@ -2,14 +2,14 @@ import { parseJobCard, parseJobDetails } from './jobViaReferralParser.js';
 import { JOB_VIA_REFERRAL_SELECTORS } from './jobViaReferralSelectors.js';
 import { SCRAPER_DEFAULTS } from '../../constant/job.constant.js';
 import { JOB_VIA_REFERRAL_CATEGORIES } from '../../constant/jobViaReferral.constant.js';
-import { logError } from '../../utils/logger.js';
+import { logError, logJobEvent } from '../../utils/logger.js';
 
 /**
- * Utility to introduce randomized jitter delay simulating human pauses (2 to 5 seconds)
+ * Utility to introduce fast, subtle randomized delay simulating human pauses
  * @param {number} minMs
  * @param {number} maxMs
  */
-const randomDelay = (minMs = 2000, maxMs = 5000) => {
+const randomDelay = (minMs = 400, maxMs = 1000) => {
   const ms = Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs;
   return new Promise((resolve) => setTimeout(resolve, ms));
 };
@@ -41,13 +41,13 @@ export const openJobViaReferral = async (
   categoryUrl = JOB_VIA_REFERRAL_CATEGORIES.FRESHER_REFERRAL
 ) => {
   try {
-    await randomDelay(2000, 5000); // Pre-navigation jitter delay
+    await randomDelay(300, 600);
     await page.goto(categoryUrl, {
       waitUntil: 'domcontentloaded',
-      timeout: 20000
+      timeout: 12000
     });
     await simulateHumanScroll(page);
-    await randomDelay(2000, 5000); // Post-navigation human pause
+    await randomDelay(400, 800);
   } catch (error) {
     await logError('jobViaReferralSource.openJobViaReferral', error.message);
     throw error;
@@ -74,7 +74,6 @@ export const getJobListingUrls = async (page, searchConfig = {}) => {
       if (cardData?.url) {
         jobUrls.add(cardData.url);
       }
-      await randomDelay(300, 800); // Small interaction delay between parsing cards
     }
 
     return Array.from(jobUrls);
@@ -91,13 +90,13 @@ export const getJobListingUrls = async (page, searchConfig = {}) => {
  */
 export const openJobDetails = async (page, jobUrl) => {
   try {
-    await randomDelay(2000, 5000); // Jitter delay before opening detail
+    await randomDelay(300, 600);
     await page.goto(jobUrl, {
       waitUntil: 'domcontentloaded',
-      timeout: 15000
+      timeout: 10000
     });
     await simulateHumanScroll(page);
-    await randomDelay(2000, 5000); // Jitter delay after landing on detail page
+    await randomDelay(300, 600);
   } catch (error) {
     await logError('jobViaReferralSource.openJobDetails', error.message);
     throw error;
@@ -116,21 +115,31 @@ export const discoverJobs = async (page, searchConfig = {}) => {
     const maxJobs = searchConfig.maxJobs || SCRAPER_DEFAULTS.MAX_JOBS_PER_RUN;
 
     // 1. Open JobViaReferral category page
+    await logJobEvent('discoverJobs', 'PROGRESS', `Navigating to target category page: ${categoryUrl}`);
     await openJobViaReferral(page, categoryUrl);
 
     // 2. Collect job detail URLs from listing
     const jobUrls = await getJobListingUrls(page, { maxJobs });
+    await logJobEvent('discoverJobs', 'PROGRESS', `Discovered ${jobUrls.length} job posting URLs on listing page`);
 
     const discoveredJobs = [];
 
     // 3. Open each job detail page and parse structured job data
-    for (const jobUrl of jobUrls) {
+    for (let i = 0; i < jobUrls.length; i++) {
       if (discoveredJobs.length >= maxJobs) break;
+      const jobUrl = jobUrls[i];
 
       try {
         await openJobDetails(page, jobUrl);
         const jobData = await parseJobDetails(page, jobUrl);
-        discoveredJobs.push(jobData);
+        if (jobData && jobData.title) {
+          discoveredJobs.push(jobData);
+          await logJobEvent(
+            'discoverJobs',
+            'PROGRESS',
+            `[${discoveredJobs.length}/${maxJobs}] Scraped job: ${jobData.title} @ ${jobData.companyName}`
+          );
+        }
       } catch (itemError) {
         await logError('jobViaReferralSource.discoverJobs.item', itemError.message);
       }

@@ -8,6 +8,26 @@ export const MAX_ATTEMPTS = 3;
 export const MAX_TOOL_CALLS = 2;
 export const LLM_TIMEOUT_MS = 60000; // 60 seconds timeout for AI structured extraction
 
+export const SCRAPE_LIMIT_CONFIG = Object.freeze({
+  DEFAULT_TARGET_MATCHED: 5,
+  MULTIPLIER: 10,
+  MIN_SCRAPE_LIMIT: 40,
+  MAX_SCRAPE_LIMIT: 50,
+});
+
+/**
+ * Calculates the scrape limit based on requested target matched jobs
+ * @param {number} targetMaxMatched
+ * @returns {number}
+ */
+export const calculateScrapeLimit = (targetMaxMatched = SCRAPE_LIMIT_CONFIG.DEFAULT_TARGET_MATCHED) => {
+  const target = targetMaxMatched || SCRAPE_LIMIT_CONFIG.DEFAULT_TARGET_MATCHED;
+  return Math.min(
+    Math.max(target * SCRAPE_LIMIT_CONFIG.MULTIPLIER, SCRAPE_LIMIT_CONFIG.MIN_SCRAPE_LIMIT),
+    SCRAPE_LIMIT_CONFIG.MAX_SCRAPE_LIMIT
+  );
+};
+
 export const AGENT_STATUS = {
   IDLE: "IDLE",
   VALIDATED: "VALIDATED",

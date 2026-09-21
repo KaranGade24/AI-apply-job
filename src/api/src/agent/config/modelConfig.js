@@ -6,9 +6,11 @@ import { tools } from '../tools/all.tools.js';
 // Initialize the Gemini LLM with API key from env.js and agent constants
 export const geminiModel = new ChatGoogleGenerativeAI({
   model: MODEL_NAME,
-  apiKey: GEMINI_API_KEY || process.env.GEMINI_API_KEY,
+  apiKey: GEMINI_API_KEY,
   temperature: MODEL_TEMPERATURE,
 });
+
+export const getGeminiModel = () => geminiModel;
 
 // Bind tools to the model
 export const agentModel = geminiModel.bindTools(tools);

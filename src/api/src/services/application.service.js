@@ -1,0 +1,234 @@
+import { runAgent } from "../agent/agent.js";
+import {
+  createApplication,
+  findApplicationById,
+  findNextPendingApplication,
+  updateApplicationStatus,
+  updateApplicationEmail,
+  getUserApplications as repositoryGetUserApplications,
+} from "../repositories/application.repository.js";
+import { Job } from "../model/Job.js";
+import { APPLICATION_STATUS } from "../constant/application.constant.js";
+import { sendApplicationEmail } from "../integrations/email/emailService.js";
+import { logError, logJobEvent } from "../utils/logger.js";
+import { appError } from "../utils/errors.js";
+
+/**
+ * Creates an application for a specific job and initiates the application graph
+ * @param {string} userId
+ * @param {string} jobId
+ * @returns {Promise<object>} Created application record
+ */
+export const createApplicationFromJob = async (userId, jobId) => {
+  try {
+    const job = await Job.findById(jobId);
+    if (!job) {
+      throw new appError("Job posting not found", 404);
+    }
+
+    const application = await createApplication({
+      userId,
+      jobId,
+      status: APPLICATION_STATUS.PENDING,
+      applicationMethod: job.applicationMethod || "email",
+    });
+
+    // Run application pipeline asynchronously / synchronously
+    const executionResult = await runAgent(
+      "jobApplication",
+      { applicationId: application._id.toString(), userId },
+      { userId }
+    );
+
+    const updatedApp = await findApplicationById(application._id.toString());
+    return updatedApp || executionResult;
+  } catch (error) {
+    await logError("applicationService.createApplicationFromJob", error.message);
+    throw error;
+  }
+};
+
+/**
+ * Automatically picks the next pending application and runs pipeline
+ * @param {string} userId
+ * @returns {Promise<object|null>} Processed application or null
+ */
+export const processNextPendingApplication = async (userId) => {
+  try {
+    const pendingApp = await findNextPendingApplication(userId);
+    if (!pendingApp) {
+      return null;
+    }
+
+    await runAgent(
+      "jobApplication",
+      { applicationId: pendingApp._id.toString(), userId },
+      { userId }
+    );
+
+    return await findApplicationById(pendingApp._id.toString());
+  } catch (error) {
+    await logError("applicationService.processNextPendingApplication", error.message);
+    throw error;
+  }
+};
+
+/**
+ * Human Approval Action: User approves application and triggers email dispatch
+ * @param {string} applicationId
+ * @param {string} userId
+ * @returns {Promise<object>}
+ */
+export const approveAndSendApplication = async (applicationId, userId) => {
+  try {
+    const application = await findApplicationById(applicationId);
+    if (!application) {
+      throw new appError("Job application not found", 404);
+    }
+
+    if (application.userId._id.toString() !== userId && application.userId.toString() !== userId) {
+      throw new appError("Unauthorized access to job application", 403);
+    }
+
+    if (application.status !== APPLICATION_STATUS.WAITING_FOR_REVIEW) {
+      throw new appError(`Cannot approve application in '${application.status}' status. Must be 'waiting_for_review'`, 400);
+    }
+
+    const recipient = application.email?.recipient;
+    const subject = application.email?.subject;
+    const body = application.email?.body;
+    const pdfPath = application.resume?.pdfPath;
+
+    if (!recipient || recipient === "unknown") {
+      throw new appError("A valid recipient email address is required before sending", 400);
+    }
+
+    await updateApplicationStatus(applicationId, APPLICATION_STATUS.SENDING, {
+      logMessage: "User approved email. Dispatching to recipient...",
+    });
+
+    const sendResult = await sendApplicationEmail({
+      recipient,
+      subject,
+      body,
+      pdfPath,
+    });
+
+    await updateApplicationEmail(applicationId, {
+      recipient,
+      subject,
+      body,
+      approved: true,
+      approvedAt: new Date(),
+      sentAt: new Date(),
+    });
+
+    await updateApplicationStatus(applicationId, APPLICATION_STATUS.SENT, {
+      logMessage: `Email dispatched successfully. Message ID: ${sendResult.messageId}`,
+    });
+
+    await logJobEvent(
+      "approveAndSendApplication",
+      "SUCCESS",
+      `Application ${applicationId} approved and sent to ${recipient}`
+    );
+
+    return await findApplicationById(applicationId);
+  } catch (error) {
+    if (applicationId) {
+      await updateApplicationStatus(applicationId, APPLICATION_STATUS.FAILED, {
+        logMessage: `Email dispatch failed: ${error.message}`,
+      }).catch(() => {});
+    }
+    await logError("applicationService.approveAndSendApplication", error.message);
+    throw error;
+  }
+};
+
+/**
+ * Human Rejection Action: User rejects candidate application draft
+ * @param {string} applicationId
+ * @param {string} userId
+ * @param {string} [reason]
+ * @returns {Promise<object>}
+ */
+export const rejectApplication = async (applicationId, userId, reason = "User rejected draft") => {
+  try {
+    const application = await findApplicationById(applicationId);
+    if (!application) {
+      throw new appError("Job application not found", 404);
+    }
+
+    if (application.userId._id.toString() !== userId && application.userId.toString() !== userId) {
+      throw new appError("Unauthorized access to job application", 403);
+    }
+
+    const updated = await updateApplicationStatus(applicationId, APPLICATION_STATUS.REJECTED, {
+      rejectionReason: reason,
+      logMessage: `Application rejected by user: ${reason}`,
+    });
+
+    return updated;
+  } catch (error) {
+    await logError("applicationService.rejectApplication", error.message);
+    throw error;
+  }
+};
+
+/**
+ * Human Edit Action: User edits email draft before approval
+ * @param {string} applicationId
+ * @param {string} userId
+ * @param {object} emailData
+ * @returns {Promise<object>}
+ */
+export const editApplicationEmail = async (applicationId, userId, emailData) => {
+  try {
+    const application = await findApplicationById(applicationId);
+    if (!application) {
+      throw new appError("Job application not found", 404);
+    }
+
+    if (application.userId._id.toString() !== userId && application.userId.toString() !== userId) {
+      throw new appError("Unauthorized access to job application", 403);
+    }
+
+    await updateApplicationEmail(applicationId, {
+      recipient: emailData.recipient || application.email.recipient,
+      subject: emailData.subject || application.email.subject,
+      body: emailData.body || application.email.body,
+    });
+
+    return await findApplicationById(applicationId);
+  } catch (error) {
+    await logError("applicationService.editApplicationEmail", error.message);
+    throw error;
+  }
+};
+
+/**
+ * Fetches user applications list
+ * @param {string} userId
+ * @param {object} filter
+ * @returns {Promise<object>}
+ */
+export const getUserApplications = async (userId, filter) => {
+  return await repositoryGetUserApplications(userId, filter);
+};
+
+/**
+ * Fetches single application by ID
+ * @param {string} applicationId
+ * @param {string} userId
+ * @returns {Promise<object>}
+ */
+export const getApplicationById = async (applicationId, userId) => {
+  const appDoc = await findApplicationById(applicationId);
+  if (!appDoc) {
+    throw new appError("Application not found", 404);
+  }
+  if (appDoc.userId._id.toString() !== userId && appDoc.userId.toString() !== userId) {
+    throw new appError("Unauthorized access to job application", 403);
+  }
+  return appDoc;
+};
