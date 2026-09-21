@@ -1,6 +1,6 @@
 import { StateGraph, END, START, MemorySaver } from "@langchain/langgraph";
 import { getGeminiModel } from "../config/modelConfig.js";
-import { APPLICATION_STATUS, APPLICATION_METHOD } from "../../constant/application.constant.js";
+import { APPLICATION_STATUS, APPLICATION_METHOD, RESUME_PAGE_COUNT } from "../../constant/application.constant.js";
 import {
   findApplicationById,
   findNextPendingApplication,
@@ -164,6 +164,7 @@ const tailorResumeNode = async (state) => {
     const promptText = buildResumeTailoringPrompt({
       candidateResume: state.resume,
       jobDetails: state.job,
+      targetPageLength: state.targetPageLength || RESUME_PAGE_COUNT,
     });
 
     const result = await structuredLlm.invoke([
@@ -359,6 +360,7 @@ const workflow = new StateGraph({
     job: { value: (x, y) => y ?? x, default: () => null },
     resume: { value: (x, y) => y ?? x, default: () => null },
     sourceResumeId: { value: (x, y) => y ?? x, default: () => "" },
+    targetPageLength: { value: (x, y) => y ?? x, default: () => RESUME_PAGE_COUNT },
     applicationMethod: { value: (x, y) => y ?? x, default: () => "email" },
     tailoredResume: { value: (x, y) => y ?? x, default: () => null },
     resumeStrategy: { value: (x, y) => y ?? x, default: () => null },

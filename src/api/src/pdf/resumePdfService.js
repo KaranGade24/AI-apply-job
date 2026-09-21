@@ -93,7 +93,7 @@ export const buildResumeHtml = (resumeData = {}, template = RESUME_PDF_TEMPLATES
           .map(
             (exp) => `<div class="item">
             <div class="item-header">
-              <span>${exp.title || exp.role || "Role"} ${exp.company ? `- ${exp.company}` : ""}</span>
+              <span>${exp.title || exp.role || ""} ${exp.company ? `- ${exp.company}` : ""}</span>
               <span>${exp.duration || exp.dates || ""}</span>
             </div>
             ${exp.location ? `<div class="item-sub">${exp.location}</div>` : ""}
@@ -116,7 +116,7 @@ export const buildResumeHtml = (resumeData = {}, template = RESUME_PDF_TEMPLATES
           .map(
             (proj) => `<div class="item">
             <div class="item-header">
-              <span>${proj.title || proj.name || "Project"}</span>
+              <span>${proj.title || proj.name || ""}</span>
               ${
                 proj.technologies
                   ? `<span>Tech: ${Array.isArray(proj.technologies) ? proj.technologies.join(", ") : proj.technologies}</span>`
@@ -141,7 +141,7 @@ export const buildResumeHtml = (resumeData = {}, template = RESUME_PDF_TEMPLATES
           .map(
             (edu) => `<div class="item">
             <div class="item-header">
-              <span>${edu.degree || "Degree"} ${edu.fieldOfStudy ? `in ${edu.fieldOfStudy}` : ""}</span>
+              <span>${edu.degree || ""} ${edu.fieldOfStudy ? `in ${edu.fieldOfStudy}` : ""}</span>
               <span>${edu.graduationYear || edu.year || edu.dates || ""}</span>
             </div>
             <div class="item-sub">${edu.institution || edu.school || ""}</div>

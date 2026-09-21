@@ -29,3 +29,5 @@ export const RESUME_PDF_TEMPLATES = Object.freeze({
   MINIMAL: "minimal",
   ATS: "ats"
 });
+
+export const RESUME_PAGE_COUNT = 1; // Default resume page count (e.g. 1, 2)
