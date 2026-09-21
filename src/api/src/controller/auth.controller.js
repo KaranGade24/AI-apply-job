@@ -1,10 +1,10 @@
 import { register as registerService, login as loginService } from '../services/auth.service.js';
 import { handleError, appError } from '../utils/errors.js';
 
-export const register = async (req, res) => {
+export const register = async (req, res, next) => {
   try {
-    // Extract values directly from req.body
-    const { username, password, email } = req.body;
+    // Extract values directly from req.body with safe fallback
+    const { username, password, email } = req.body || {};
 
     if (!username || !password || !email) {
       throw new appError('Username, password, and email are required fields.', 400);
@@ -18,14 +18,13 @@ export const register = async (req, res) => {
       data: result
     });
   } catch (error) {
-    // Passes any thrown error to our centralized API error handler
     return handleError(error, res);
   }
 };
 
-export const login = async (req, res) => {
+export const login = async (req, res, next) => {
   try {
-    const { identifier, username, email, password } = req.body;
+    const { identifier, username, email, password } = req.body || {};
     const userIdentifier = identifier || username || email;
 
     if (!userIdentifier || !password) {

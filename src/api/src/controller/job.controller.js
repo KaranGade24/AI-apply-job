@@ -9,7 +9,7 @@ import { handleError } from "../utils/errors.js";
  */
 export const discoverJobsController = async (req, res) => {
   try {
-    const userId = req.user.userId || req.user.userId || req.user._id;
+    const userId = req.user?.userId || req.user?._id;
 
     const {
       sources,
@@ -20,7 +20,7 @@ export const discoverJobsController = async (req, res) => {
       employmentType,
       postedWithin,
       maxJobs,
-    } = req.body;
+    } = req.body || {};
 
     const result = await discoverJobsService({
       userId,
@@ -49,9 +49,10 @@ export const discoverJobsController = async (req, res) => {
  */
 export const getSavedJobsController = async (req, res) => {
   try {
-    const matchStatus = req.query.matchStatus;
+    const query = req.query || {};
+    const matchStatus = query.matchStatus;
     const filter = matchStatus ? { matchStatus } : {};
-    const limit = parseInt(req.query.limit || "50", 10);
+    const limit = parseInt(query.limit || "50", 10);
 
     const jobs = await getSavedJobsService(filter, limit);
 

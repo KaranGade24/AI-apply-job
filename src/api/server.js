@@ -10,6 +10,7 @@ import { flexibleJsonParser } from './src/middlewares/customJsonParser.middlewar
 import { jsonSyntaxErrorHandler } from './src/middlewares/jsonError.middleware.js';
 import { swaggerOptions } from './src/config/swagger.js';
 import { DEFAULT_PORT } from './src/constant/api.constant.js';
+import { appError, globalErrorHandler } from './src/utils/errors.js';
 
 const app = express();
 
@@ -32,6 +33,14 @@ app.use('/api/auth', authRouter);
 app.use('/api/resume', resumeRouter);
 app.use('/api/jobs', jobRouter);
 app.use('/api/applications', applicationRouter);
+
+// 404 Handler for undefined API endpoints
+app.use((req, res, next) => {
+  next(new appError(`Cannot find endpoint ${req.originalUrl} on this server!`, 404));
+});
+
+// Centralized Global Error Handler
+app.use(globalErrorHandler);
 
 const PORT = DEFAULT_PORT;
 

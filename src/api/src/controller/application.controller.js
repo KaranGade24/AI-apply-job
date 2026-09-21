@@ -9,7 +9,7 @@ import { appError } from "../utils/errors.js";
 export const createFromJob = async (req, res, next) => {
   try {
     const { jobId } = req.params;
-    const userId = req.user.userId || req.user._id;
+    const userId = req.user?.userId || req.user?._id;
 
     const application = await applicationService.createApplicationFromJob(
       userId,
@@ -30,8 +30,7 @@ export const createFromJob = async (req, res, next) => {
  */
 export const processNext = async (req, res, next) => {
   try {
-    console.log("user: ", req.user);
-    const userId = req.user.userId || req.user._id;
+    const userId = req.user?.userId || req.user?._id;
     const application =
       await applicationService.processNextPendingApplication(userId);
 
@@ -58,8 +57,8 @@ export const processNext = async (req, res, next) => {
  */
 export const getApplications = async (req, res, next) => {
   try {
-    const userId = req.user.userId || req.user._id;
-    const { status, page, limit } = req.query;
+    const userId = req.user?.userId || req.user?._id;
+    const { status, page, limit } = req.query || {};
 
     const result = await applicationService.getUserApplications(userId, {
       status,
@@ -82,7 +81,7 @@ export const getApplications = async (req, res, next) => {
 export const getApplication = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const userId = req.user.userId || req.user._id;
+    const userId = req.user?.userId || req.user?._id;
 
     const application = await applicationService.getApplicationById(id, userId);
     return res.status(200).json({
@@ -100,7 +99,7 @@ export const getApplication = async (req, res, next) => {
 export const approve = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const userId = req.user.userId || req.user._id;
+    const userId = req.user?.userId || req.user?._id;
 
     const updated = await applicationService.approveAndSendApplication(
       id,
@@ -122,8 +121,8 @@ export const approve = async (req, res, next) => {
 export const reject = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { reason } = req.body;
-    const userId = req.user.userId || req.user._id;
+    const { reason } = req.body || {};
+    const userId = req.user?.userId || req.user?._id;
 
     const updated = await applicationService.rejectApplication(
       id,
@@ -146,8 +145,8 @@ export const reject = async (req, res, next) => {
 export const editEmail = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { recipient, subject, body } = req.body;
-    const userId = req.user.userId || req.user._id;
+    const { recipient, subject, body } = req.body || {};
+    const userId = req.user?.userId || req.user?._id;
 
     const updated = await applicationService.editApplicationEmail(id, userId, {
       recipient,
@@ -171,7 +170,7 @@ export const editEmail = async (req, res, next) => {
 export const downloadPdf = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const userId = req.user.userId || req.user._id;
+    const userId = req.user?.userId || req.user?._id;
 
     const application = await applicationService.getApplicationById(id, userId);
     const pdfPath = application.resume?.pdfPath;
@@ -202,7 +201,7 @@ export const updateResume = async (req, res, next) => {
   try {
     const { id } = req.params;
     const { targetPageLength, pageCount, tailoredResumeData, template, regenerate } = req.body || {};
-    const userId = req.user.userId || req.user._id;
+    const userId = req.user?.userId || req.user?._id;
 
     const updated = await applicationService.updateApplicationResumeService(id, userId, {
       targetPageLength,

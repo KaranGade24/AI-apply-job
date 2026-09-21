@@ -18,6 +18,7 @@ import {
 import {
   APPLICATION_EMAIL_SYSTEM_PROMPT,
   buildApplicationEmailPrompt,
+  formatAndCleanEmailBody,
 } from "../prompt/applicationEmail.js";
 import { generateResumePdf } from "../../pdf/resumePdfService.js";
 import { sendApplicationEmail } from "../../integrations/email/emailService.js";
@@ -243,10 +244,12 @@ const generateEmailNode = async (state) => {
       { role: "user", content: promptText },
     ]);
 
+    const cleanedBody = formatAndCleanEmailBody(result.body, candidateName);
+
     await updateApplicationEmail(state.applicationId, {
       recipient: result.recipient,
       subject: result.subject,
-      body: result.body,
+      body: cleanedBody,
       approved: false,
     });
 

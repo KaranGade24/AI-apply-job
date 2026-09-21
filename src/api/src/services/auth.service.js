@@ -65,9 +65,9 @@ export const register = async (username, password, email) => {
     // Log successful registration
     await logRegisterEvent(newUser.email, 'SUCCESS', `User registered with username: ${newUser.username}`);
 
-    // Create JWT token containing email and username
+    // Create JWT token containing userId, email, username and role
     const token = jwt.sign(
-      { email: newUser.email, username: newUser.username },
+      { userId: newUser._id, email: newUser.email, username: newUser.username, role: newUser.role },
       JWT_SECRET,
       { expiresIn: JWT_EXPIRES_IN }
     );

@@ -12,6 +12,7 @@ import { Job } from "../model/Job.js";
 import { APPLICATION_STATUS, RESUME_PAGE_COUNT, RESUME_PDF_TEMPLATES } from "../constant/application.constant.js";
 import { generateResumePdf } from "../pdf/resumePdfService.js";
 import { sendApplicationEmail } from "../integrations/email/emailService.js";
+import { formatAndCleanEmailBody } from "../agent/prompt/applicationEmail.js";
 import { logError, logJobEvent } from "../utils/logger.js";
 import { appError } from "../utils/errors.js";
 
@@ -232,10 +233,13 @@ export const editApplicationEmail = async (
       throw new appError("Unauthorized access to job application", 403);
     }
 
+    const rawBody = emailData.body || application.email.body;
+    const cleanedBody = formatAndCleanEmailBody(rawBody);
+
     await updateApplicationEmail(applicationId, {
       recipient: emailData.recipient || application.email.recipient,
       subject: emailData.subject || application.email.subject,
-      body: emailData.body || application.email.body,
+      body: cleanedBody,
     });
 
     return await findApplicationById(applicationId);

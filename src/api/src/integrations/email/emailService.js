@@ -1,6 +1,7 @@
 import path from "path";
 import fs from "fs/promises";
 import { getEmailTransporter } from "./emailProvider.js";
+import { formatAndCleanEmailBody } from "../../agent/prompt/applicationEmail.js";
 import { logError } from "../../utils/logger.js";
 import { appError } from "../../utils/errors.js";
 import { EMAIL_FROM } from "../../config/env.js";
@@ -30,12 +31,21 @@ export const sendApplicationEmail = async ({
     const transporter = getEmailTransporter();
     const fromAddress = senderEmail || EMAIL_FROM;
 
+    const cleanedBody = formatAndCleanEmailBody(body);
+
+    const paragraphs = cleanedBody.split(/\n\s*\n/);
+    const htmlBody = `
+      <div style="font-family: Arial, Helvetica, sans-serif; font-size: 15px; line-height: 1.6; color: #1f2937; max-width: 600px;">
+        ${paragraphs.map(p => `<p style="margin: 0 0 16px 0;">${p.replace(/\n/g, "<br>")}</p>`).join("")}
+      </div>
+    `.trim();
+
     const mailOptions = {
       from: `Candidate <${fromAddress}>`,
       to: recipient,
       subject,
-      text: body,
-      html: body.replace(/\n/g, "<br>"),
+      text: cleanedBody,
+      html: htmlBody,
       attachments: [],
     };
 
