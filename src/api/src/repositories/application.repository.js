@@ -1,5 +1,6 @@
 import { JobApplication } from "../model/JobApplication.js";
-import { APPLICATION_STATUS } from "../constant/application.constant.js";
+import { Job, MatchStatus } from "../model/Job.js";
+import { APPLICATION_STATUS, APPLICATION_METHOD } from "../constant/application.constant.js";
 import { logError } from "../utils/logger.js";
 
 /**
@@ -58,12 +59,52 @@ export const findApplicationByJobAndUser = async (userId, jobId) => {
  */
 export const findNextPendingApplication = async (userId) => {
   try {
-    return await JobApplication.findOne({
+    // 1. Check for existing pending application for this user
+    const pendingApp = await JobApplication.findOne({
       userId,
       status: APPLICATION_STATUS.PENDING,
     })
       .sort({ createdAt: 1 })
       .populate("jobId");
+
+    if (pendingApp) {
+      return pendingApp;
+    }
+
+    // 2. Get list of jobIds for which an application already exists for this user
+    const existingJobIds = await JobApplication.find({ userId }).distinct("jobId");
+
+    // 3. Find next available job from Job model that does not have an application yet
+    let candidateJob = await Job.findOne({
+      _id: { $nin: existingJobIds },
+      matchStatus: { $ne: MatchStatus.DISCARDED },
+    }).sort({ createdAt: -1 });
+
+    if (!candidateJob) {
+      // Fallback: search any job not applied to yet
+      candidateJob = await Job.findOne({
+        _id: { $nin: existingJobIds },
+      }).sort({ createdAt: -1 });
+    }
+
+    if (!candidateJob) {
+      return null;
+    }
+
+    // 4. Create new pending application record for this candidate job
+    const method = candidateJob.applicationMethod && candidateJob.applicationMethod !== "NOT_SPECIFIED"
+      ? candidateJob.applicationMethod
+      : APPLICATION_METHOD.EMAIL;
+
+    const newApp = new JobApplication({
+      userId,
+      jobId: candidateJob._id,
+      status: APPLICATION_STATUS.PENDING,
+      applicationMethod: method,
+    });
+
+    await newApp.save();
+    return await JobApplication.findById(newApp._id).populate("jobId");
   } catch (error) {
     await logError("application.repository.findNextPendingApplication", error.message);
     throw error;
