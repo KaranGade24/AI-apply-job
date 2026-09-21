@@ -33,10 +33,12 @@ export const buildResumeTailoringPrompt = ({
 
   if (pageStr === "1") {
     pageLengthGuidance = `
-Target Page Length: 1 Page
-- Keep bullet points concise, high-impact, and punchy (3-4 key highlights per role max).
-- Select only the most relevant 2-3 projects and top skills matching the job.
-- Summarize less relevant roles or older education into short 1-line entries so the output fits cleanly on 1 page.`;
+Target Page Length: 1 Page (STRICT SINGLE PAGE CONSTRAINT)
+- Your output MUST fit on exactly 1 page. Be concise and eliminate fluff.
+- Professional Summary: Maximum 2-3 punchy, high-impact sentences.
+- Skills: Select up to 18-20 most relevant technical skills matching the job description.
+- Work Experience / Projects: Select max 3 key projects or roles. Provide max 2 concise, impact-driven bullet points per project/role.
+- Education: Keep entries short (1 line per degree/institution).`;
   } else if (pageStr === "2") {
     pageLengthGuidance = `
 Target Page Length: 2 Pages

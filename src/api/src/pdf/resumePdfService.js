@@ -23,17 +23,20 @@ export const buildResumeHtml = (resumeData = {}, template = RESUME_PDF_TEMPLATES
 
   const summary = resumeData.summary || "";
 
-  // Extract skills
-  let skillsList = [];
+  // Extract and deduplicate skills
+  let rawSkills = [];
   if (Array.isArray(resumeData.skills)) {
-    skillsList = resumeData.skills;
+    rawSkills = resumeData.skills;
   } else if (resumeData.skills && typeof resumeData.skills === "object") {
-    skillsList = [
+    rawSkills = [
       ...(resumeData.skills.technicalSkills || []),
       ...(resumeData.skills.softSkills || []),
       ...(resumeData.skills.toolsAndFrameworks || []),
     ];
   }
+  const skillsList = Array.from(
+    new Set(rawSkills.map((s) => (typeof s === "string" ? s.trim() : s)).filter(Boolean))
+  );
 
   const experience = Array.isArray(resumeData.experience) ? resumeData.experience : [];
   const projects = Array.isArray(resumeData.projects) ? resumeData.projects : [];
@@ -48,21 +51,22 @@ export const buildResumeHtml = (resumeData = {}, template = RESUME_PDF_TEMPLATES
   <meta charset="UTF-8">
   <title>${name} - Resume</title>
   <style>
+    @page { size: A4 portrait; margin: 6mm 8mm; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: 'Arial', sans-serif; color: #1e293b; line-height: 1.5; font-size: 12px; background: #ffffff; padding: 24px; }
-    header { border-bottom: 2px solid ${primaryColor}; padding-bottom: 12px; margin-bottom: 16px; }
-    h1 { font-size: 22px; color: #0f172a; font-weight: 700; margin-bottom: 4px; text-transform: uppercase; }
-    .contact-info { display: flex; flex-wrap: wrap; gap: 12px; font-size: 11px; color: #475569; margin-top: 4px; }
-    section { margin-bottom: 16px; }
-    h2 { font-size: 13px; text-transform: uppercase; color: ${primaryColor}; letter-spacing: 0.5px; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px; margin-bottom: 8px; font-weight: 700; }
-    p { font-size: 11px; color: #334155; }
-    .skills-container { display: flex; flex-wrap: wrap; gap: 6px; }
-    .skill-badge { background: #f8fafc; color: #1e293b; padding: 3px 8px; border-radius: 4px; font-size: 11px; border: 1px solid #cbd5e1; font-weight: 500; }
-    .item { margin-bottom: 10px; }
-    .item-header { display: flex; justify-content: space-between; font-weight: 700; color: #0f172a; font-size: 12px; }
-    .item-sub { color: #64748b; font-size: 11px; margin-bottom: 4px; font-style: italic; }
-    ul { padding-left: 18px; font-size: 11px; color: #334155; }
-    li { margin-bottom: 3px; }
+    body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #1e293b; line-height: 1.3; font-size: 10.5px; background: #ffffff; padding: 0; margin: 0; }
+    header { border-bottom: 2px solid ${primaryColor}; padding-bottom: 6px; margin-bottom: 8px; }
+    h1 { font-size: 19px; color: #0f172a; font-weight: 700; margin-bottom: 3px; text-transform: uppercase; }
+    .contact-info { display: flex; flex-wrap: wrap; gap: 8px; font-size: 10px; color: #475569; margin-top: 2px; }
+    section { margin-bottom: 8px; page-break-inside: avoid; }
+    h2 { font-size: 11.5px; text-transform: uppercase; color: ${primaryColor}; letter-spacing: 0.5px; border-bottom: 1px solid #e2e8f0; padding-bottom: 2px; margin-bottom: 4px; font-weight: 700; }
+    p { font-size: 10px; color: #334155; }
+    .skills-container { display: flex; flex-wrap: wrap; gap: 4px; }
+    .skill-badge { background: #f8fafc; color: #1e293b; padding: 1px 6px; border-radius: 3px; font-size: 9.5px; border: 1px solid #cbd5e1; font-weight: 500; }
+    .item { margin-bottom: 6px; page-break-inside: avoid; }
+    .item-header { display: flex; justify-content: space-between; font-weight: 700; color: #0f172a; font-size: 10.5px; }
+    .item-sub { color: #64748b; font-size: 9.5px; margin-bottom: 2px; font-style: italic; }
+    ul { padding-left: 14px; font-size: 10px; color: #334155; }
+    li { margin-bottom: 1px; }
   </style>
 </head>
 <body>
