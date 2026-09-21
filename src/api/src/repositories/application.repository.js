@@ -4,18 +4,56 @@ import { APPLICATION_STATUS, APPLICATION_METHOD } from "../constant/application.
 import { logError } from "../utils/logger.js";
 
 /**
+ * Helper to normalize raw application method strings to valid APPLICATION_METHOD enum values
+ * @param {string} rawMethod
+ * @returns {string} Valid APPLICATION_METHOD enum string
+ */
+export const normalizeApplicationMethod = (rawMethod = "") => {
+  if (!rawMethod) return APPLICATION_METHOD.EMAIL;
+
+  const val = String(rawMethod).trim();
+  const lower = val.toLowerCase();
+
+  const validValues = Object.values(APPLICATION_METHOD);
+  if (validValues.includes(val)) {
+    return val;
+  }
+  if (validValues.includes(lower)) {
+    return lower;
+  }
+
+  if (lower.includes("phone") || lower.includes("whatsapp")) {
+    return APPLICATION_METHOD.PHONE;
+  }
+  if (lower.includes("google") || lower.includes("form")) {
+    return APPLICATION_METHOD.GOOGLE_FORM;
+  }
+  if (lower.includes("direct") || lower.includes("link") || lower.includes("website") || lower.includes("portal")) {
+    return APPLICATION_METHOD.WEBSITE_FORM;
+  }
+  if (lower.includes("email") || lower.includes("mailto")) {
+    return APPLICATION_METHOD.EMAIL;
+  }
+
+  return APPLICATION_METHOD.EMAIL;
+};
+
+/**
  * Creates or upserts a job application record
  * @param {object} applicationData
  * @returns {Promise<object>} Created application document
  */
 export const createApplication = async (applicationData) => {
   try {
-    const { userId, jobId } = applicationData;
+    const { userId, jobId, applicationMethod } = applicationData;
     const existing = await JobApplication.findOne({ userId, jobId });
     if (existing) {
       return existing;
     }
-    const application = new JobApplication(applicationData);
+    const application = new JobApplication({
+      ...applicationData,
+      applicationMethod: normalizeApplicationMethod(applicationMethod),
+    });
     return await application.save();
   } catch (error) {
     await logError("application.repository.createApplication", error.message);
@@ -92,9 +130,7 @@ export const findNextPendingApplication = async (userId) => {
     }
 
     // 4. Create new pending application record for this candidate job
-    const method = candidateJob.applicationMethod && candidateJob.applicationMethod !== "NOT_SPECIFIED"
-      ? candidateJob.applicationMethod
-      : APPLICATION_METHOD.EMAIL;
+    const method = normalizeApplicationMethod(candidateJob.applicationMethod);
 
     const newApp = new JobApplication({
       userId,
