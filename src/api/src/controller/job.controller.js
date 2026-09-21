@@ -1,12 +1,15 @@
-import { discoverJobsService, getSavedJobsService } from '../services/job.service.js';
-import { handleError } from '../utils/errors.js';
+import {
+  discoverJobsService,
+  getSavedJobsService,
+} from "../services/job.service.js";
+import { handleError } from "../utils/errors.js";
 
 /**
  * Controller to handle POST /api/jobs/discover
  */
 export const discoverJobsController = async (req, res) => {
   try {
-    const userId = req.user.id || req.user.userId || req.user._id;
+    const userId = req.user.userId || req.user.userId || req.user._id;
 
     const {
       sources,
@@ -16,7 +19,7 @@ export const discoverJobsController = async (req, res) => {
       workMode,
       employmentType,
       postedWithin,
-      maxJobs
+      maxJobs,
     } = req.body;
 
     const result = await discoverJobsService({
@@ -28,13 +31,13 @@ export const discoverJobsController = async (req, res) => {
       workMode,
       employmentType,
       postedWithin,
-      maxJobs
+      maxJobs,
     });
 
     return res.status(200).json({
       success: true,
-      message: 'Job discovery and resume matching completed successfully',
-      data: result
+      message: "Job discovery and resume matching completed successfully",
+      data: result,
     });
   } catch (error) {
     return handleError(error, res);
@@ -48,13 +51,13 @@ export const getSavedJobsController = async (req, res) => {
   try {
     const matchStatus = req.query.matchStatus;
     const filter = matchStatus ? { matchStatus } : {};
-    const limit = parseInt(req.query.limit || '50', 10);
+    const limit = parseInt(req.query.limit || "50", 10);
 
     const jobs = await getSavedJobsService(filter, limit);
 
     return res.status(200).json({
       success: true,
-      data: jobs
+      data: jobs,
     });
   } catch (error) {
     return handleError(error, res);
@@ -63,5 +66,5 @@ export const getSavedJobsController = async (req, res) => {
 
 export default {
   discoverJobsController,
-  getSavedJobsController
+  getSavedJobsController,
 };

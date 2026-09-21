@@ -9,9 +9,12 @@ import { appError } from "../utils/errors.js";
 export const createFromJob = async (req, res, next) => {
   try {
     const { jobId } = req.params;
-    const userId = req.user.id || req.user._id;
+    const userId = req.user.userId || req.user._id;
 
-    const application = await applicationService.createApplicationFromJob(userId, jobId);
+    const application = await applicationService.createApplicationFromJob(
+      userId,
+      jobId,
+    );
     return res.status(201).json({
       success: true,
       message: "Job application created and draft generated successfully",
@@ -27,8 +30,10 @@ export const createFromJob = async (req, res, next) => {
  */
 export const processNext = async (req, res, next) => {
   try {
-    const userId = req.user.id || req.user._id;
-    const application = await applicationService.processNextPendingApplication(userId);
+    console.log("user: ", req.user);
+    const userId = req.user.userId || req.user._id;
+    const application =
+      await applicationService.processNextPendingApplication(userId);
 
     if (!application) {
       return res.status(200).json({
@@ -53,10 +58,14 @@ export const processNext = async (req, res, next) => {
  */
 export const getApplications = async (req, res, next) => {
   try {
-    const userId = req.user.id || req.user._id;
+    const userId = req.user.userId || req.user._id;
     const { status, page, limit } = req.query;
 
-    const result = await applicationService.getUserApplications(userId, { status, page, limit });
+    const result = await applicationService.getUserApplications(userId, {
+      status,
+      page,
+      limit,
+    });
     return res.status(200).json({
       success: true,
       data: result.applications,
@@ -73,7 +82,7 @@ export const getApplications = async (req, res, next) => {
 export const getApplication = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const userId = req.user.id || req.user._id;
+    const userId = req.user.userId || req.user._id;
 
     const application = await applicationService.getApplicationById(id, userId);
     return res.status(200).json({
@@ -91,9 +100,12 @@ export const getApplication = async (req, res, next) => {
 export const approve = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const userId = req.user.id || req.user._id;
+    const userId = req.user.userId || req.user._id;
 
-    const updated = await applicationService.approveAndSendApplication(id, userId);
+    const updated = await applicationService.approveAndSendApplication(
+      id,
+      userId,
+    );
     return res.status(200).json({
       success: true,
       message: "Application approved and email sent successfully",
@@ -111,9 +123,13 @@ export const reject = async (req, res, next) => {
   try {
     const { id } = req.params;
     const { reason } = req.body;
-    const userId = req.user.id || req.user._id;
+    const userId = req.user.userId || req.user._id;
 
-    const updated = await applicationService.rejectApplication(id, userId, reason);
+    const updated = await applicationService.rejectApplication(
+      id,
+      userId,
+      reason,
+    );
     return res.status(200).json({
       success: true,
       message: "Application rejected successfully",
@@ -131,7 +147,7 @@ export const editEmail = async (req, res, next) => {
   try {
     const { id } = req.params;
     const { recipient, subject, body } = req.body;
-    const userId = req.user.id || req.user._id;
+    const userId = req.user.userId || req.user._id;
 
     const updated = await applicationService.editApplicationEmail(id, userId, {
       recipient,
@@ -155,13 +171,16 @@ export const editEmail = async (req, res, next) => {
 export const downloadPdf = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const userId = req.user.id || req.user._id;
+    const userId = req.user.userId || req.user._id;
 
     const application = await applicationService.getApplicationById(id, userId);
     const pdfPath = application.resume?.pdfPath;
 
     if (!pdfPath) {
-      throw new appError("No tailored PDF resume generated for this application yet", 404);
+      throw new appError(
+        "No tailored PDF resume generated for this application yet",
+        404,
+      );
     }
 
     const resolvedPath = path.isAbsolute(pdfPath)

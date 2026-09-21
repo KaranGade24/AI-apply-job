@@ -37,13 +37,16 @@ export const createApplicationFromJob = async (userId, jobId) => {
     const executionResult = await runAgent(
       "jobApplication",
       { applicationId: application._id.toString(), userId },
-      { userId }
+      { userId },
     );
 
     const updatedApp = await findApplicationById(application._id.toString());
     return updatedApp || executionResult;
   } catch (error) {
-    await logError("applicationService.createApplicationFromJob", error.message);
+    await logError(
+      "applicationService.createApplicationFromJob",
+      error.message,
+    );
     throw error;
   }
 };
@@ -55,6 +58,7 @@ export const createApplicationFromJob = async (userId, jobId) => {
  */
 export const processNextPendingApplication = async (userId) => {
   try {
+    console.log("userid:", userId);
     const pendingApp = await findNextPendingApplication(userId);
     if (!pendingApp) {
       return null;
@@ -63,12 +67,15 @@ export const processNextPendingApplication = async (userId) => {
     await runAgent(
       "jobApplication",
       { applicationId: pendingApp._id.toString(), userId },
-      { userId }
+      { userId },
     );
 
     return await findApplicationById(pendingApp._id.toString());
   } catch (error) {
-    await logError("applicationService.processNextPendingApplication", error.message);
+    await logError(
+      "applicationService.processNextPendingApplication",
+      error.message,
+    );
     throw error;
   }
 };
@@ -86,12 +93,18 @@ export const approveAndSendApplication = async (applicationId, userId) => {
       throw new appError("Job application not found", 404);
     }
 
-    if (application.userId._id.toString() !== userId && application.userId.toString() !== userId) {
+    if (
+      application.userId._id.toString() !== userId &&
+      application.userId.toString() !== userId
+    ) {
       throw new appError("Unauthorized access to job application", 403);
     }
 
     if (application.status !== APPLICATION_STATUS.WAITING_FOR_REVIEW) {
-      throw new appError(`Cannot approve application in '${application.status}' status. Must be 'waiting_for_review'`, 400);
+      throw new appError(
+        `Cannot approve application in '${application.status}' status. Must be 'waiting_for_review'`,
+        400,
+      );
     }
 
     const recipient = application.email?.recipient;
@@ -100,7 +113,10 @@ export const approveAndSendApplication = async (applicationId, userId) => {
     const pdfPath = application.resume?.pdfPath;
 
     if (!recipient || recipient === "unknown") {
-      throw new appError("A valid recipient email address is required before sending", 400);
+      throw new appError(
+        "A valid recipient email address is required before sending",
+        400,
+      );
     }
 
     await updateApplicationStatus(applicationId, APPLICATION_STATUS.SENDING, {
@@ -130,7 +146,7 @@ export const approveAndSendApplication = async (applicationId, userId) => {
     await logJobEvent(
       "approveAndSendApplication",
       "SUCCESS",
-      `Application ${applicationId} approved and sent to ${recipient}`
+      `Application ${applicationId} approved and sent to ${recipient}`,
     );
 
     return await findApplicationById(applicationId);
@@ -140,7 +156,10 @@ export const approveAndSendApplication = async (applicationId, userId) => {
         logMessage: `Email dispatch failed: ${error.message}`,
       }).catch(() => {});
     }
-    await logError("applicationService.approveAndSendApplication", error.message);
+    await logError(
+      "applicationService.approveAndSendApplication",
+      error.message,
+    );
     throw error;
   }
 };
@@ -152,21 +171,32 @@ export const approveAndSendApplication = async (applicationId, userId) => {
  * @param {string} [reason]
  * @returns {Promise<object>}
  */
-export const rejectApplication = async (applicationId, userId, reason = "User rejected draft") => {
+export const rejectApplication = async (
+  applicationId,
+  userId,
+  reason = "User rejected draft",
+) => {
   try {
     const application = await findApplicationById(applicationId);
     if (!application) {
       throw new appError("Job application not found", 404);
     }
 
-    if (application.userId._id.toString() !== userId && application.userId.toString() !== userId) {
+    if (
+      application.userId._id.toString() !== userId &&
+      application.userId.toString() !== userId
+    ) {
       throw new appError("Unauthorized access to job application", 403);
     }
 
-    const updated = await updateApplicationStatus(applicationId, APPLICATION_STATUS.REJECTED, {
-      rejectionReason: reason,
-      logMessage: `Application rejected by user: ${reason}`,
-    });
+    const updated = await updateApplicationStatus(
+      applicationId,
+      APPLICATION_STATUS.REJECTED,
+      {
+        rejectionReason: reason,
+        logMessage: `Application rejected by user: ${reason}`,
+      },
+    );
 
     return updated;
   } catch (error) {
@@ -182,14 +212,21 @@ export const rejectApplication = async (applicationId, userId, reason = "User re
  * @param {object} emailData
  * @returns {Promise<object>}
  */
-export const editApplicationEmail = async (applicationId, userId, emailData) => {
+export const editApplicationEmail = async (
+  applicationId,
+  userId,
+  emailData,
+) => {
   try {
     const application = await findApplicationById(applicationId);
     if (!application) {
       throw new appError("Job application not found", 404);
     }
 
-    if (application.userId._id.toString() !== userId && application.userId.toString() !== userId) {
+    if (
+      application.userId._id.toString() !== userId &&
+      application.userId.toString() !== userId
+    ) {
       throw new appError("Unauthorized access to job application", 403);
     }
 
@@ -227,7 +264,10 @@ export const getApplicationById = async (applicationId, userId) => {
   if (!appDoc) {
     throw new appError("Application not found", 404);
   }
-  if (appDoc.userId._id.toString() !== userId && appDoc.userId.toString() !== userId) {
+  if (
+    appDoc.userId._id.toString() !== userId &&
+    appDoc.userId.toString() !== userId
+  ) {
     throw new appError("Unauthorized access to job application", 403);
   }
   return appDoc;
