@@ -20,7 +20,12 @@ export class ResumeRenderer {
     try {
       const preparedData = prepareResumeData(resumeData);
 
-      const templatesDir = path.resolve(process.cwd(), "src/api/src/pdf/templates", themeName);
+      let templatesDir = path.resolve(process.cwd(), "src/api/src/pdf/templates", themeName);
+      try {
+        await fs.access(templatesDir);
+      } catch {
+        templatesDir = path.resolve(process.cwd(), "templates", themeName);
+      }
 
       // Load theme CSS and layout template
       const themeCssPath = path.join(templatesDir, "theme.css");
@@ -34,10 +39,10 @@ export class ResumeRenderer {
       const sectionNames = [
         "header",
         "summary",
-        "experience",
-        "education",
         "skills",
         "projects",
+        "experience",
+        "education",
         "certifications",
       ];
 
@@ -67,8 +72,12 @@ export class ResumeRenderer {
 
       return finalHtml;
     } catch (error) {
-      await logError("ResumeRenderer.render", error.message);
-      throw new appError(`Resume HTML rendering failed: ${error.message}`, 500);
+      if (typeof logError === "function") {
+        await logError("ResumeRenderer.render", error.message);
+      } else {
+        console.error("ResumeRenderer.render error:", error);
+      }
+      throw new Error(`Resume HTML rendering failed: ${error.message}`);
     }
   }
 }

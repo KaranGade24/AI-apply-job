@@ -16,6 +16,7 @@ export const prepareResumeData = (resumeData = {}) => {
   const websiteUrl = personalInfo.website || personalInfo.portfolio || personalInfo.websiteUrl || "";
 
   const summary = (resumeData.summary || "").trim();
+  const targetPages = resumeData.targetPages || 1;
 
   // Process Technical & General Skills
   let rawSkillsList = [];
@@ -24,27 +25,21 @@ export const prepareResumeData = (resumeData = {}) => {
   if (Array.isArray(resumeData.skills)) {
     rawSkillsList = resumeData.skills;
   } else if (resumeData.skills && typeof resumeData.skills === "object") {
-    if (Array.isArray(resumeData.skills.technicalSkills) && resumeData.skills.technicalSkills.length > 0) {
-      categorizedSkills.push({
-        category: "Technical Skills",
-        itemsText: resumeData.skills.technicalSkills.join(", "),
-      });
-      rawSkillsList.push(...resumeData.skills.technicalSkills);
-    }
-    if (Array.isArray(resumeData.skills.toolsAndFrameworks) && resumeData.skills.toolsAndFrameworks.length > 0) {
-      categorizedSkills.push({
-        category: "Tools & Frameworks",
-        itemsText: resumeData.skills.toolsAndFrameworks.join(", "),
-      });
-      rawSkillsList.push(...resumeData.skills.toolsAndFrameworks);
-    }
-    if (Array.isArray(resumeData.skills.softSkills) && resumeData.skills.softSkills.length > 0) {
-      categorizedSkills.push({
-        category: "Soft Skills",
-        itemsText: resumeData.skills.softSkills.join(", "),
-      });
-      rawSkillsList.push(...resumeData.skills.softSkills);
-    }
+    Object.entries(resumeData.skills).forEach(([categoryKey, items]) => {
+      if (Array.isArray(items) && items.length > 0) {
+        categorizedSkills.push({
+          category: categoryKey,
+          itemsText: items.join(", "),
+        });
+        rawSkillsList.push(...items);
+      } else if (typeof items === "string" && items.trim()) {
+        categorizedSkills.push({
+          category: categoryKey,
+          itemsText: items.trim(),
+        });
+        rawSkillsList.push(...items.split(",").map((s) => s.trim()));
+      }
+    });
   }
 
   // Deduplicate flat skills list
@@ -64,7 +59,7 @@ export const prepareResumeData = (resumeData = {}) => {
     company: exp.company || exp.companyName || "",
     startDate: exp.startDate || "",
     endDate: exp.endDate || "",
-    dateRange: exp.duration || exp.dates || [exp.startDate, exp.endDate].filter(Boolean).join(" – "),
+    dateRange: exp.duration || exp.dates || exp.date || [exp.startDate, exp.endDate].filter(Boolean).join(" – "),
     location: exp.location || "",
     description: exp.description || "",
     highlights: Array.isArray(exp.highlights) ? exp.highlights.filter(Boolean) : [],
@@ -87,10 +82,11 @@ export const prepareResumeData = (resumeData = {}) => {
     return {
       name: proj.title || proj.name || "",
       description: proj.description || "",
-      technologiesText: techArray.join(" · "),
+      technologiesText: techArray.join(", "),
       highlights: Array.isArray(proj.highlights) ? proj.highlights.filter(Boolean) : [],
       githubUrl: proj.links?.github || proj.githubUrl || proj.github || "",
       demoUrl: proj.links?.liveDemo || proj.links?.demo || proj.demoUrl || proj.liveDemo || "",
+      dateRange: proj.date || proj.dates || proj.duration || proj.dateRange || "",
     };
   });
 
@@ -99,7 +95,7 @@ export const prepareResumeData = (resumeData = {}) => {
   const education = rawEdu.map((edu) => ({
     degree: edu.degree || "",
     fieldOfStudy: edu.fieldOfStudy || edu.field || "",
-    degreeFull: [edu.degree, edu.fieldOfStudy].filter(Boolean).join(" in "),
+    degreeFull: edu.degreeFull || [edu.degree, edu.fieldOfStudy].filter(Boolean).join(", "),
     institution: edu.institution || edu.school || edu.university || "",
     location: edu.location || "",
     graduationYear: edu.graduationYear || edu.year || edu.dates || "",
@@ -125,6 +121,7 @@ export const prepareResumeData = (resumeData = {}) => {
     githubUrl,
     websiteUrl,
     summary,
+    targetPages,
     flatSkills,
     categorizedSkills,
     workExperience,

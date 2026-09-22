@@ -7,8 +7,46 @@
   <style>
     {{{themeCss}}}
   </style>
+  <script>
+    (function autoFitToPage() {
+      function adjustScale() {
+        const pageEl = document.querySelector('.resume') || document.querySelector('.page');
+        if (!pageEl) return;
+        
+        const targetPages = parseInt(document.body.getAttribute('data-target-pages') || '1', 10);
+        const maxAllowedHeight = targetPages * 1080;
+        
+        let minScale = 0.50;
+        let maxScale = 1.0;
+        let bestScale = 1.0;
+        
+        document.documentElement.style.setProperty('--scale-factor', '1');
+        
+        if (pageEl.scrollHeight > maxAllowedHeight) {
+          for (let i = 0; i < 25; i++) {
+            let midScale = (minScale + maxScale) / 2;
+            document.documentElement.style.setProperty('--scale-factor', midScale.toFixed(3));
+            if (pageEl.scrollHeight <= maxAllowedHeight) {
+              bestScale = midScale;
+              minScale = midScale;
+            } else {
+              maxScale = midScale;
+            }
+          }
+          document.documentElement.style.setProperty('--scale-factor', bestScale.toFixed(3));
+        }
+      }
+      
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', adjustScale);
+      } else {
+        adjustScale();
+      }
+      window.addEventListener('resize', adjustScale);
+    })();
+  </script>
 </head>
-<body>
+<body data-target-pages="{{targetPages}}">
   <main class="resume">
     {{{sections.header}}}
     {{{sections.summary}}}

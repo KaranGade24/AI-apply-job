@@ -1,18 +1,21 @@
 {{#if hasProjects}}
 <section class="resume-section projects-section">
-  <h2>Key Projects</h2>
+  <h2>PROJECTS</h2>
   {{#each projects}}
   <article class="entry-item project-item">
-    <div class="entry-header">
-      <h3>{{name}}</h3>
+    <div class="project-header">
+      <div class="project-title-row">
+        <h3 class="project-title">{{name}}</h3>
+        {{#if dateRange}}<span class="project-date">{{dateRange}}</span>{{/if}}
+      </div>
       <div class="project-links">
-        {{#if githubUrl}}<a href="{{githubUrl}}">GitHub</a>{{/if}}
-        {{#if demoUrl}}<a href="{{demoUrl}}">Live Demo</a>{{/if}}
+        {{#if demoUrl}}<a href="{{demoUrl}}" target="_blank">Live Demo</a>{{/if}}
+        {{#if githubUrl}}<span class="link-sep">|</span> <a href="{{githubUrl}}" target="_blank">GitHub</a>{{/if}}
       </div>
     </div>
-    {{#if description}}<p style="font-size: 10px; color: #334155; margin-top: 1px;">{{description}}</p>{{/if}}
+    {{#if description}}<p class="project-description">{{description}}</p>{{/if}}
     {{#if highlights.length}}
-    <ul>
+    <ul class="highlights">
       {{#each highlights}}
       <li>{{this}}</li>
       {{/each}}

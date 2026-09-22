@@ -1,15 +1,15 @@
 {{#if hasCertifications}}
 <section class="resume-section certifications-section">
-  <h2>Certifications</h2>
-  {{#each certifications}}
-  <article class="entry-item certification-item">
-    <div class="entry-header">
-      <h3>{{name}}</h3>
-      {{#if issueDate}}<div class="date">{{issueDate}}</div>{{/if}}
-    </div>
-    {{#if organization}}<p style="font-size: 9.5px; color: #475569;">{{organization}}</p>{{/if}}
-    {{#if url}}<p style="font-size: 9px;"><a href="{{url}}" style="color: #2563eb; text-decoration: none;">Verify Credential</a></p>{{/if}}
-  </article>
-  {{/each}}
+  <h2>CERTIFICATIONS</h2>
+  <ul class="certifications">
+    {{#each certifications}}
+    <li>
+      <strong>{{name}}</strong>
+      {{#if organization}} - {{organization}}{{/if}}
+      {{#if issueDate}} ({{issueDate}}){{/if}}
+      {{#if url}} - <a href="{{url}}" target="_blank">Verify Credential</a>{{/if}}
+    </li>
+    {{/each}}
+  </ul>
 </section>
 {{/if}}

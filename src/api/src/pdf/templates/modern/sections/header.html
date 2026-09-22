@@ -1,26 +1,26 @@
 <header class="resume-header">
-  <h1>{{name}}</h1>
+  <h1 class="name">{{name}}</h1>
   {{#if headline}}
-    <p class="headline">{{headline}}</p>
+  <div class="headline">{{headline}}</div>
   {{/if}}
   <div class="contact-info">
     {{#if email}}
-      <span>📧 <a href="mailto:{{email}}">{{email}}</a></span>
+    <span class="contact-item"><a href="mailto:{{email}}">{{email}}</a></span>
     {{/if}}
     {{#if phone}}
-      <span>📱 <a href="tel:{{phone}}">{{phone}}</a></span>
-    {{/if}}
-    {{#if location}}
-      <span>📍 {{location}}</span>
+    <span class="contact-item"><a href="tel:{{phone}}">{{phone}}</a></span>
     {{/if}}
     {{#if linkedinUrl}}
-      <span>🔗 <a href="{{linkedinUrl}}">LinkedIn</a></span>
+    <span class="contact-item"><a href="{{linkedinUrl}}" target="_blank">linkedin.com/in/karan-gade</a></span>
     {{/if}}
     {{#if githubUrl}}
-      <span>💻 <a href="{{githubUrl}}">GitHub</a></span>
+    <span class="contact-item"><a href="{{githubUrl}}" target="_blank">github.com/KaranGade24</a></span>
     {{/if}}
     {{#if websiteUrl}}
-      <span>🌐 <a href="{{websiteUrl}}">Portfolio</a></span>
+    <span class="contact-item"><a href="{{websiteUrl}}" target="_blank">portfolio-karan-gade.vercel.app</a></span>
+    {{/if}}
+    {{#if location}}
+    <span class="contact-item">{{location}}</span>
     {{/if}}
   </div>
 </header>

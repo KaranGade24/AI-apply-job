@@ -1,18 +1,21 @@
 {{#if hasSkills}}
 <section class="resume-section skills-section">
-  <h2>Technical Skills</h2>
-  {{#if categorizedSkills.length}}
-    {{#each categorizedSkills}}
-    <div class="skill-group">
-      <strong>{{category}}:</strong> {{itemsText}}
-    </div>
-    {{/each}}
-  {{else}}
-    <div class="skills-container">
-      {{#each flatSkills}}
-      <span class="skill-badge">{{this}}</span>
+  <h2>SKILLS</h2>
+  <div class="skills-list">
+    {{#if categorizedSkills.length}}
+      {{#each categorizedSkills}}
+      <div class="skill-row">
+        <span class="skill-category"><strong>{{category}}:</strong></span>
+        <span class="skill-values">{{itemsText}}</span>
+      </div>
       {{/each}}
-    </div>
-  {{/if}}
+    {{else}}
+      <div class="skills-container">
+        {{#each flatSkills}}
+        <span class="skill-badge">{{this}}</span>
+        {{/each}}
+      </div>
+    {{/if}}
+  </div>
 </section>
 {{/if}}
