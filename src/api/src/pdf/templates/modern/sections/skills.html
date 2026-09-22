@@ -1,0 +1,18 @@
+{{#if hasSkills}}
+<section class="resume-section skills-section">
+  <h2>Technical Skills</h2>
+  {{#if categorizedSkills.length}}
+    {{#each categorizedSkills}}
+    <div class="skill-group">
+      <strong>{{category}}:</strong> {{itemsText}}
+    </div>
+    {{/each}}
+  {{else}}
+    <div class="skills-container">
+      {{#each flatSkills}}
+      <span class="skill-badge">{{this}}</span>
+      {{/each}}
+    </div>
+  {{/if}}
+</section>
+{{/if}}
