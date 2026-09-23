@@ -17,6 +17,8 @@ const applicationRouter = express.Router();
  *         description: Unauthorized
  */
 applicationRouter.post("/process-next", authMiddleware, applicationController.processNext);
+applicationRouter.post("/", authMiddleware, applicationController.createApplicationDirect);
+applicationRouter.patch("/:id/status", authMiddleware, applicationController.updateStatusDirect);
 
 /**
  * @swagger

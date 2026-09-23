@@ -88,6 +88,62 @@ export const getSingleResume = async (req, res) => {
   }
 };
 
+/**
+ * Save resume parsed data directly
+ */
+export const saveResumeData = async (req, res) => {
+  try {
+    const userId = req.user?.userId || req.user?._id || req.user?.id;
+    const { resumeData } = req.body || {};
+
+    const { Resume } = await import('../model/Resume.js');
+    let resumeDoc = await Resume.findOne({ userId, type: 'ORIGINAL' });
+    if (resumeDoc) {
+      resumeDoc.parsedData = resumeData;
+      await resumeDoc.save();
+    } else {
+      resumeDoc = await Resume.create({
+        userId,
+        parsedData: resumeData,
+        type: 'ORIGINAL',
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Resume saved successfully',
+      data: resumeDoc,
+    });
+  } catch (error) {
+    return handleError(error, res);
+  }
+};
+
+/**
+ * Generate Resume PDF endpoint
+ */
+export const generateResumePdfController = async (req, res) => {
+  try {
+    const userId = req.user?.userId || req.user?._id || req.user?.id;
+    const { tailoredResumeData, template } = req.body || {};
+
+    const { generateResumePdf } = await import('../pdf/resumePdfService.js');
+    const pdfPath = await generateResumePdf({
+      resumeData: tailoredResumeData || {},
+      template: template || 'modern',
+      userId,
+    });
+
+    return res.status(200).json({
+      success: true,
+      pdfUrl: `/api/applications/pdf?path=${encodeURIComponent(pdfPath)}`,
+      pdfPath,
+    });
+  } catch (error) {
+    return handleError(error, res);
+  }
+};
+
 export default {
   upload,
   uploadResume,

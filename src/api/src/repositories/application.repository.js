@@ -259,7 +259,7 @@ export const getUserApplications = async (userId, { status, page = 1, limit = 10
         .sort({ updatedAt: -1 })
         .skip(skip)
         .limit(limit)
-        .populate("jobId", "title companyName location workMode applicationMethod sourceUrl"),
+        .populate("jobId", "title company location workMode applicationMethod sourceUrl"),
       JobApplication.countDocuments(query),
     ]);
 

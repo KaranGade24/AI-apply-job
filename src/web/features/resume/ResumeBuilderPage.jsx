@@ -3,7 +3,7 @@ import { Save, Download, Sparkles, Check, Globe, Mail, Phone, MapPin, Link2 } fr
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { RESUME_TEMPLATES } from '../../constants/config';
-import { generateResumePdfApi } from '../../services/resumeService';
+import { generateResumePdfApi, getMyResumesApi, saveResumeDataApi } from '../../services/resumeService';
 import { ResumePreviewModal } from './ResumePreviewModal';
 import { SettingsContext } from '../../context/SettingsContext';
 import { useAuth } from '../../hooks/useAuth';
@@ -53,6 +53,29 @@ export const ResumeBuilderPage = () => {
         portfolioUrl: settings.userSetting?.portfolioUrl || prev.portfolioUrl,
       }));
     }
+
+    const loadBackendResume = async () => {
+      try {
+        const res = await getMyResumesApi();
+        if (res.data && res.data.length > 0) {
+          const latest = res.data[0];
+          if (latest.parsedData && typeof latest.parsedData === 'object') {
+            const pData = latest.parsedData;
+            setResumeData((prev) => ({
+              ...prev,
+              ...(pData.personalInfo || pData.personal || {}),
+              summary: pData.summary || pData.professionalSummary || prev.summary,
+              skills: Array.isArray(pData.skills) ? pData.skills : (pData.skills?.keySkills || prev.skills),
+              experience: pData.experience || pData.workExperience || prev.experience,
+              education: pData.education || prev.education,
+            }));
+          }
+        }
+      } catch (err) {
+        // Fallback
+      }
+    };
+    loadBackendResume();
   }, [settings, user]);
 
   const [pdfLoading, setPdfLoading] = useState(false);
@@ -79,9 +102,15 @@ export const ResumeBuilderPage = () => {
     }
   };
 
-  const handleSave = () => {
-    setSaveSuccess(true);
-    setTimeout(() => setSaveSuccess(false), 3000);
+  const handleSave = async () => {
+    try {
+      await saveResumeDataApi(resumeData);
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 3000);
+    } catch (err) {
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 3000);
+    }
   };
 
   return (

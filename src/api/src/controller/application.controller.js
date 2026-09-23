@@ -26,6 +26,55 @@ export const createFromJob = async (req, res, next) => {
 };
 
 /**
+ * Direct application creation from custom job payload or jobId
+ */
+export const createApplicationDirect = async (req, res, next) => {
+  try {
+    const userId = req.user?.userId || req.user?._id;
+    const { jobId, jobTitle, company, location, sourceUrl, status } = req.body || {};
+
+    if (jobId) {
+      const app = await applicationService.createApplicationFromJob(userId, jobId);
+      return res.status(201).json({ success: true, data: app });
+    }
+
+    const app = await applicationService.createDirectApplicationService(userId, {
+      jobTitle,
+      company,
+      location,
+      sourceUrl,
+      status: status || 'Applied',
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: "Application logged successfully",
+      data: app,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Update application status directly
+ */
+export const updateStatusDirect = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body || {};
+    const updated = await applicationService.updateApplicationStatusDirectService(id, status);
+    return res.status(200).json({
+      success: true,
+      message: "Application status updated successfully",
+      data: updated,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * Process next pending application automatically
  */
 export const processNext = async (req, res, next) => {

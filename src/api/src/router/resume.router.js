@@ -1,8 +1,11 @@
 import { Router } from 'express';
 import { authMiddleware } from '../middlewares/auth.middleware.js';
-import { upload, uploadResume, getMyResumes, getSingleResume } from '../controller/resume.controller.js';
+import { upload, uploadResume, getMyResumes, getSingleResume, saveResumeData, generateResumePdfController } from '../controller/resume.controller.js';
 
 const router = Router();
+
+router.post('/save', authMiddleware, saveResumeData);
+router.post('/generate-pdf', authMiddleware, generateResumePdfController);
 
 /**
  * @swagger

@@ -1,5 +1,15 @@
 import { fetchWithAuth } from './api';
 
+export const getMyResumesApi = async () => {
+  return await fetchWithAuth('/resume');
+};
+
+export const saveResumeDataApi = async (resumeData) => {
+  return await fetchWithAuth('/resume/save', {
+    method: 'POST',
+    body: JSON.stringify({ resumeData }),
+  });
+};
 export const generateResumePdfApi = async (resumeData, template = 'ATS Modern') => {
   return await fetchWithAuth('/resume/generate-pdf', {
     method: 'POST',

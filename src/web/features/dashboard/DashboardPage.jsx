@@ -65,7 +65,7 @@ export const DashboardPage = () => {
       {/* Header Greeting */}
       <div>
         <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
-          Welcome back, {user?.username || 'Karan'}! 👋
+          Welcome back, {user?.username || user?.email?.split('@')[0] || 'User'}! 👋
         </h1>
         <p className="text-sm text-slate-500 mt-0.5">
           Let's find your next opportunity with AI.

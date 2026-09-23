@@ -120,54 +120,65 @@ export const ApplicationsPage = () => {
                   </td>
                 </tr>
               ) : (
-                filteredApps.map((app) => (
-                  <tr key={app._id} className="hover:bg-slate-50/80 transition-colors">
-                    {/* Job Title */}
-                    <td className="py-4 px-6 font-semibold text-slate-900 flex items-center gap-3">
-                      <div className={`w-8 h-8 rounded-lg ${getLogoColor(app.company)} text-white font-bold text-xs flex items-center justify-center shrink-0`}>
-                        {getLogoInitial(app.company)}
-                      </div>
-                      <span className="truncate max-w-xs">{app.jobTitle}</span>
-                    </td>
+                filteredApps.map((app) => {
+                  const title = app.jobTitle || app.jobId?.title || 'Position';
+                  const company = app.company || app.jobId?.company || 'Company';
+                  const location = app.location || app.jobId?.location || 'Remote';
+                  const sourceUrl = app.sourceUrl || app.jobId?.sourceUrl || '';
+                  const appliedDate = app.appliedDate || app.createdAt;
 
-                    {/* Company */}
-                    <td className="py-4 px-6 text-slate-600 font-medium">{app.company}</td>
+                  return (
+                    <tr key={app._id} className="hover:bg-slate-50/80 transition-colors">
+                      {/* Job Title */}
+                      <td className="py-4 px-6 font-semibold text-slate-900 flex items-center gap-3">
+                        <div className={`w-8 h-8 rounded-lg ${getLogoColor(company)} text-white font-bold text-xs flex items-center justify-center shrink-0`}>
+                          {getLogoInitial(company)}
+                        </div>
+                        <span className="truncate max-w-xs">{title}</span>
+                      </td>
 
-                    {/* Location */}
-                    <td className="py-4 px-6 text-slate-500">{app.location || 'Remote'}</td>
+                      {/* Company */}
+                      <td className="py-4 px-6 text-slate-600 font-medium">{company}</td>
 
-                    {/* Applied Date */}
-                    <td className="py-4 px-6 text-slate-500 tabular-nums">{formatDate(app.appliedDate)}</td>
+                      {/* Location */}
+                      <td className="py-4 px-6 text-slate-500">{location}</td>
 
-                    {/* Status Badge */}
-                    <td className="py-4 px-6">
-                      <select
-                        value={app.status}
-                        onChange={(e) => handleStatusChange(app._id, e.target.value)}
-                        className={`text-xs font-semibold px-2.5 py-1 rounded-md border cursor-pointer ${getStatusBadgeStyle(app.status)}`}
-                      >
-                        <option value="Applied">Applied</option>
-                        <option value="Interview">Interview</option>
-                        <option value="Offer">Offer</option>
-                        <option value="Rejected">Rejected</option>
-                      </select>
-                    </td>
+                      {/* Applied Date */}
+                      <td className="py-4 px-6 text-slate-500 tabular-nums">{formatDate(appliedDate)}</td>
 
-                    {/* Actions */}
-                    <td className="py-4 px-6 text-right space-x-2 whitespace-nowrap">
-                      {app.sourceUrl && (
-                        <a
-                          href={app.sourceUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 hover:text-blue-700 bg-blue-50 px-3 py-1.5 rounded-lg transition-colors"
+                      {/* Status Badge */}
+                      <td className="py-4 px-6">
+                        <select
+                          value={app.status || 'Applied'}
+                          onChange={(e) => handleStatusChange(app._id, e.target.value)}
+                          className={`text-xs font-semibold px-2.5 py-1 rounded-md border cursor-pointer ${getStatusBadgeStyle(app.status)}`}
                         >
-                          View <ExternalLink className="w-3 h-3" />
-                        </a>
-                      )}
-                    </td>
-                  </tr>
-                ))
+                          <option value="Applied">Applied</option>
+                          <option value="pending">Pending</option>
+                          <option value="waiting_for_review">Review</option>
+                          <option value="sent">Sent</option>
+                          <option value="Interview">Interview</option>
+                          <option value="Offer">Offer</option>
+                          <option value="Rejected">Rejected</option>
+                        </select>
+                      </td>
+
+                      {/* Actions */}
+                      <td className="py-4 px-6 text-right space-x-2 whitespace-nowrap">
+                        {sourceUrl && (
+                          <a
+                            href={sourceUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 hover:text-blue-700 bg-blue-50 px-3 py-1.5 rounded-lg transition-colors"
+                          >
+                            View <ExternalLink className="w-3 h-3" />
+                          </a>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>

@@ -370,3 +370,45 @@ export const updateApplicationResumeService = async (
     throw error;
   }
 };
+
+/**
+ * Creates an application record directly (e.g. from Job Search apply button)
+ */
+export const createDirectApplicationService = async (userId, appData) => {
+  try {
+    const { jobTitle, company, location, sourceUrl, status } = appData;
+    let job = await Job.findOne({ sourceUrl: sourceUrl || `https://example.com/${Date.now()}` });
+    if (!job) {
+      job = await Job.create({
+        title: jobTitle || 'Position',
+        company: company || 'Company',
+        location: location || 'Remote',
+        sourceUrl: sourceUrl || `https://example.com/${Date.now()}`,
+        source: 'Job Search',
+      });
+    }
+
+    const application = await createApplication({
+      userId,
+      jobId: job._id,
+      status: status || 'Applied',
+    });
+
+    return application;
+  } catch (error) {
+    await logError("applicationService.createDirectApplicationService", error.message);
+    throw error;
+  }
+};
+
+/**
+ * Directly updates application status
+ */
+export const updateApplicationStatusDirectService = async (id, status) => {
+  try {
+    return await updateApplicationStatus(id, status, { logMessage: `Status manually updated to ${status}` });
+  } catch (error) {
+    await logError("applicationService.updateApplicationStatusDirectService", error.message);
+    throw error;
+  }
+};
