@@ -60,9 +60,9 @@ export const compareJobWithConfig = (job = {}, searchConfig = {}) => {
     const fullText = `${job.title || ''} ${job.description || ''} ${(job.skills || []).join(' ')} ${job.location || ''}`.toLowerCase();
 
     // 0. Preferred Application Method Matching
-    const preferredMethods = searchConfig.preferredApplicationMethods || searchConfig.preferredMethods;
+    const preferredMethods = searchConfig.preferredApplicationMethods || searchConfig.preferredMethods || searchConfig.applicationMethods || searchConfig.methods;
     if (Array.isArray(preferredMethods) && preferredMethods.length > 0) {
-      let detectedMethod = (job.applicationMethod || '').toLowerCase();
+      let detectedMethod = (job.applicationMethod || '').toLowerCase().trim();
       if (!detectedMethod || detectedMethod === 'unknown') {
         const sourceContext = `${job.sourceUrl || ''} ${job.description || ''}`.toLowerCase();
         if (sourceContext.includes('docs.google.com/forms') || sourceContext.includes('forms.gle')) {
@@ -76,8 +76,21 @@ export const compareJobWithConfig = (job = {}, searchConfig = {}) => {
         }
       }
 
-      const normalizedPreferred = preferredMethods.map(m => m.toLowerCase());
-      if (!normalizedPreferred.includes(detectedMethod)) {
+      const normalizeStr = (str) => String(str || '').toLowerCase().replace(/[^a-z]/g, '');
+      const targetDetected = normalizeStr(detectedMethod);
+      const normalizedPreferred = preferredMethods.map(normalizeStr);
+
+      const isMethodSupported = normalizedPreferred.some(pref => {
+        if (pref === targetDetected) return true;
+        if ((pref === 'phone' || pref === 'phonenumber' || pref === 'call') && targetDetected === 'phone') return true;
+        if ((pref === 'googleform' || pref === 'gform') && targetDetected === 'googleform') return true;
+        if ((pref === 'websiteform' || pref === 'siteform') && targetDetected === 'websiteform') return true;
+        if (pref === 'email' && targetDetected === 'email') return true;
+        if (pref === 'unknown' && targetDetected === 'unknown') return true;
+        return false;
+      });
+
+      if (!isMethodSupported) {
         failReasons.push(`Application method '${detectedMethod}' is not included in user preferred methods [${preferredMethods.join(', ')}]`);
         return {
           isMatch: false,
