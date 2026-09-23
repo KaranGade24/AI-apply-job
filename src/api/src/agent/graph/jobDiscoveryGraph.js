@@ -196,24 +196,13 @@ const applyFiltersNode = async (state) => {
     const existingSet = await getExistingSourceUrls(sourceUrls);
 
     const passedJobs = [];
-    const skippedJobs = [...(state.skippedJobs || [])];
+    const skippedJobs = [];
     let skippedExistingCount = 0;
 
     for (const job of normalized) {
-      // Skip if job already exists in database
+      // Do not re-process or re-count jobs that already exist in MongoDB
       if (job.sourceUrl && existingSet.has(job.sourceUrl)) {
         skippedExistingCount++;
-        skippedJobs.push({
-          userId: config?.userId,
-          job,
-          skipReason: 'ALREADY_EXISTS',
-          skipDetails: 'Job source URL already present in database',
-        });
-        await logJobEvent(
-          "applyFiltersNode",
-          "SKIP_EXISTING",
-          `Job already exists in database, skipping: ${job.sourceUrl}`,
-        );
         continue;
       }
 
@@ -393,22 +382,24 @@ const storeSkippedJobsNode = async (state) => {
     }
 
     let storedCount = 0;
+    const seenUrls = new Set();
     for (const item of skippedList) {
-      if (item.job && item.job.sourceUrl) {
-        await logSkippedJobService({
+      if (item.job && item.job.sourceUrl && !seenUrls.has(item.job.sourceUrl)) {
+        seenUrls.add(item.job.sourceUrl);
+        const doc = await logSkippedJobService({
           userId: item.userId || userId,
           job: item.job,
           skipReason: item.skipReason,
           skipDetails: item.skipDetails,
         }).catch(() => null);
-        storedCount++;
+        if (doc) storedCount++;
       }
     }
 
     await logJobEvent(
       "storeSkippedJobsNode",
       "SUCCESS",
-      `Persisted ${storedCount}/${skippedList.length} skipped jobs with reasons into MongoDB`,
+      `Persisted ${storedCount}/${seenUrls.size} new unique skipped jobs with reasons into MongoDB`,
     );
 
     return { storedSkippedCount: storedCount };
@@ -419,26 +410,10 @@ const storeSkippedJobsNode = async (state) => {
 };
 
 /**
- * Conditional Edge Router: Determines if workflow should end or discover next source/batch
+ * Conditional Edge Router: Terminates workflow upon completion of discovery and persistence
  */
-const checkEnoughJobsEdge = (state) => {
-  const matched = (state.matchedJobs || []).filter(
-    (j) => j.matchStatus === "MATCHED",
-  );
-  const maxJobs = state.config?.maxJobs || 10;
-  const currentSourceIndex = state.currentSourceIndex || 0;
-  const sourcesCount = state.config?.sources?.length || 1;
-  const rawJobsCount = (state.rawJobs || []).length;
-
-  if (
-    matched.length >= maxJobs ||
-    rawJobsCount === 0 ||
-    currentSourceIndex + 1 >= sourcesCount
-  ) {
-    return END;
-  }
-
-  return "discoverJobs";
+const checkEnoughJobsEdge = () => {
+  return END;
 };
 
 /**

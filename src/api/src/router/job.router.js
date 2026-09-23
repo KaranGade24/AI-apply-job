@@ -83,30 +83,7 @@ const jobRouter = express.Router();
  *         description: Internal server error
  */
 jobRouter.post('/discover', authMiddleware, discoverJobsController);
-
-/**
- * @swagger
- * /api/jobs:
- *   get:
- *     summary: Retrieve saved/matched jobs from database
- *     tags: [Jobs]
- *     parameters:
- *       - in: query
- *         name: matchStatus
- *         schema:
- *           type: string
- *           enum: [MATCHED, NOT_MATCHED, PENDING_MATCH]
- *       - in: query
- *         name: limit
- *         schema:
- *           type: integer
- *           default: 50
- *     responses:
- *       200:
- *         description: List of saved jobs
- *       401:
- *         description: Unauthorized
- */
+jobRouter.get('/discovered', authMiddleware, getSavedJobsController);
 jobRouter.get('/', authMiddleware, getSavedJobsController);
 
 export default jobRouter;

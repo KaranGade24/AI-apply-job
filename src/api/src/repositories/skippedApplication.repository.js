@@ -12,11 +12,17 @@ export const upsertSkippedApplication = async (skipData = {}) => {
       return null;
     }
 
-    return await SkippedApplication.findOneAndUpdate(
-      { userId: skipData.userId, sourceUrl: skipData.sourceUrl },
-      { $set: skipData },
-      { returnDocument: 'after', upsert: true, runValidators: true }
-    );
+    const existing = await SkippedApplication.findOne({
+      userId: skipData.userId,
+      sourceUrl: skipData.sourceUrl
+    });
+
+    if (existing) {
+      return { doc: existing, isNew: false };
+    }
+
+    const doc = await SkippedApplication.create(skipData);
+    return { doc, isNew: true };
   } catch (error) {
     await logError('skippedApplicationRepository.upsertSkippedApplication', error.message);
     return null;

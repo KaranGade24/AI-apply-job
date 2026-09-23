@@ -155,43 +155,34 @@ export const discoverJobs = async (page, searchConfig = {}) => {
     const context = page.context();
     const discoveredJobs = [];
 
-    // Scrape job details concurrently in small batches of 3 tabs for speed
-    const BATCH_SIZE = 3;
-    for (let i = 0; i < newTargetUrls.length; i += BATCH_SIZE) {
-      const batchUrls = newTargetUrls.slice(i, i + BATCH_SIZE);
-
-      const batchResults = await Promise.all(
-        batchUrls.map(async (jobUrl) => {
-          let detailPage = null;
-          try {
-            detailPage = await context.newPage();
-            // Block media/tracking to accelerate page loading
-            await detailPage.route('**/*.{png,jpg,jpeg,gif,svg,webp,mp4,mp3,wav,woff,woff2}', r => r.abort());
-            await detailPage.route(/(?:google-analytics|doubleclick|googlesyndication|facebook|analytics|tracker)/i, r => r.abort());
-
-            await detailPage.goto(jobUrl, { waitUntil: 'domcontentloaded', timeout: 6000 });
-            const jobData = await parseJobDetails(detailPage, jobUrl);
-            return jobData;
-          } catch (itemError) {
-            await logError('jobViaReferralSource.discoverJobs.item', itemError.message);
-            return null;
-          } finally {
-            if (detailPage) {
-              await detailPage.close().catch(() => {});
-            }
-          }
-        })
-      );
-
-      for (const res of batchResults) {
-        if (res && res.title) {
-          discoveredJobs.push(res);
+    // Scrape job detail pages with a 1-2 second delay in between jobs (not at the start)
+    for (let i = 0; i < newTargetUrls.length; i++) {
+      const jobUrl = newTargetUrls[i];
+      let detailPage = null;
+      try {
+        detailPage = await context.newPage();
+        await detailPage.goto(jobUrl, { waitUntil: 'domcontentloaded', timeout: 8000 });
+        const jobData = await parseJobDetails(detailPage, jobUrl);
+        if (jobData && jobData.title) {
+          discoveredJobs.push(jobData);
           await logJobEvent(
             'discoverJobs',
             'PROGRESS',
-            `[${discoveredJobs.length}/${newTargetUrls.length}] Scraped new job: ${res.title} @ ${res.company}`
+            `[${discoveredJobs.length}/${newTargetUrls.length}] Scraped new job: ${jobData.title} @ ${jobData.company}`
           );
         }
+      } catch (itemError) {
+        await logError('jobViaReferralSource.discoverJobs.item', itemError.message);
+      } finally {
+        if (detailPage) {
+          await detailPage.close().catch(() => {});
+        }
+      }
+
+      // 1 to 2 sec delay in between jobs (never at start or after last item)
+      if (i < newTargetUrls.length - 1) {
+        const delayMs = Math.floor(Math.random() * 1000) + 1000;
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
       }
     }
 

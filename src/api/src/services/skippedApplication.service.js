@@ -29,13 +29,18 @@ export const logSkippedJobService = async ({
       skipDetails: skipDetails || ''
     };
 
-    const doc = await upsertSkippedApplication(skipData);
+    const result = await upsertSkippedApplication(skipData);
+    if (!result || !result.isNew) {
+      // Already skipped previously; do not duplicate event or count
+      return result?.doc || null;
+    }
+
     await logJobEvent(
       'logSkippedJobService',
       'JOB_SKIPPED',
       `Job skipped for User ${userId}: ${job.sourceUrl} (${skipReason})`
     );
-    return doc;
+    return result.doc;
   } catch (error) {
     await logError('skippedApplicationService.logSkippedJobService', error.message);
     return null;
