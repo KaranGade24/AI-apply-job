@@ -5,7 +5,11 @@ import { RESUME_PDF_TEMPLATES } from "../../../constant/application.constant.js"
 import { logError } from "../../../utils/logger.js";
 
 export const generateResumePdfTool = tool(
-  async ({ tailoredResumeData, template = RESUME_PDF_TEMPLATES.MODERN, userId }) => {
+  async ({
+    tailoredResumeData,
+    template = RESUME_PDF_TEMPLATES.MODERN,
+    userId,
+  }) => {
     try {
       const pdfPath = await generateResumePdf({
         resumeData: tailoredResumeData,
@@ -24,11 +28,22 @@ export const generateResumePdfTool = tool(
   },
   {
     name: "generateResumePdfTool",
-    description: "Generates a deterministic PDF file from structured tailored resume JSON",
+    description:
+      "Generates a deterministic PDF file from structured tailored resume JSON",
     schema: z.object({
-      tailoredResumeData: z.object({}).passthrough().describe("Tailored resume JSON object"),
-      template: z.string().optional().default(RESUME_PDF_TEMPLATES.MODERN).describe("Resume PDF template choice"),
-      userId: z.string().optional().describe("MongoDB User ID to enrich candidate profile if needed"),
+      tailoredResumeData: z
+        .object({})
+        .passthrough()
+        .describe("Tailored resume JSON object"),
+      template: z
+        .string()
+        .optional()
+        .default(RESUME_PDF_TEMPLATES.MODERN)
+        .describe("Resume PDF template choice"),
+      userId: z
+        .string()
+        .optional()
+        .describe("MongoDB User ID to enrich candidate profile if needed"),
     }),
-  }
+  },
 );
