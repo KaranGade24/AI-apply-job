@@ -39,19 +39,47 @@ export const normalizeApplicationMethod = (rawMethod = "") => {
 };
 
 /**
+ * Helper to normalize raw status string
+ * @param {string} rawStatus
+ * @returns {string} Normalized status
+ */
+export const normalizeApplicationStatus = (rawStatus = '') => {
+  if (!rawStatus) return APPLICATION_STATUS.PENDING;
+  const val = String(rawStatus).trim();
+  const lower = val.toLowerCase();
+
+  if (lower === 'applied') return 'Applied';
+  if (lower === 'interview') return 'Interview';
+  if (lower === 'offer') return 'Offer';
+  if (lower === 'rejected') return 'Rejected';
+  if (lower === 'sent') return 'sent';
+  if (lower === 'pending') return 'pending';
+  if (lower === 'waiting_for_review') return 'waiting_for_review';
+  if (lower === 'approved') return 'approved';
+  if (lower === 'failed') return 'failed';
+
+  return val;
+};
+
+/**
  * Creates or upserts a job application record
  * @param {object} applicationData
  * @returns {Promise<object>} Created application document
  */
 export const createApplication = async (applicationData) => {
   try {
-    const { userId, jobId, applicationMethod } = applicationData;
+    const { userId, jobId, applicationMethod, status } = applicationData;
     const existing = await JobApplication.findOne({ userId, jobId });
     if (existing) {
+      if (status) {
+        existing.status = normalizeApplicationStatus(status);
+        await existing.save();
+      }
       return existing;
     }
     const application = new JobApplication({
       ...applicationData,
+      status: normalizeApplicationStatus(status),
       applicationMethod: normalizeApplicationMethod(applicationMethod),
     });
     return await application.save();
@@ -156,15 +184,16 @@ export const findNextPendingApplication = async (userId) => {
  */
 export const updateApplicationStatus = async (id, status, extraData = {}) => {
   try {
+    const normalizedStatus = normalizeApplicationStatus(status);
     const updateDoc = {
-      status,
+      status: normalizedStatus,
       ...extraData,
     };
 
     const logEntry = {
       timestamp: new Date(),
-      event: `STATUS_CHANGED_${status.toUpperCase()}`,
-      message: extraData.logMessage || `Application status set to ${status}`,
+      event: `STATUS_CHANGED_${String(normalizedStatus).toUpperCase()}`,
+      message: extraData.logMessage || `Application status set to ${normalizedStatus}`,
     };
 
     return await JobApplication.findByIdAndUpdate(
