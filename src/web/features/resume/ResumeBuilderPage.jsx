@@ -24,19 +24,62 @@ export const ResumeBuilderPage = () => {
   });
 
   const [resumeData, setResumeData] = useState({
-    fullName: settings.userSetting?.fullName || user?.username || '',
-    headline: settings.userSetting?.headline || 'Full Stack Web Developer',
-    email: settings.userSetting?.email || user?.email || '',
-    phone: settings.userSetting?.phone || '',
-    location: settings.userSetting?.location || '',
-    linkedinUrl: settings.userSetting?.linkedinUrl || '',
-    githubUrl: settings.userSetting?.githubUrl || '',
-    portfolioUrl: settings.userSetting?.portfolioUrl || '',
+    fullName: settings.userSetting?.fullName || user?.username || 'Karan Gade',
+    headline: settings.userSetting?.headline || 'Full Stack Web Developer (MERN) | AI-Integrated Web Applications',
+    email: settings.userSetting?.email || user?.email || 'karan@example.com',
+    phone: settings.userSetting?.phone || '+91 8446726903',
+    location: settings.userSetting?.location || 'Pune, Maharashtra',
+    linkedinUrl: settings.userSetting?.linkedinUrl || 'https://linkedin.com/in/karan-gade',
+    githubUrl: settings.userSetting?.githubUrl || 'https://github.com/KaranGade24',
+    portfolioUrl: settings.userSetting?.portfolioUrl || 'https://portfolio-karan-gade.vercel.app',
     summary:
       'Full Stack Developer focused on building scalable, user-centric web applications and intelligent features.',
-    skills: ['JavaScript', 'React.js', 'Node.js', 'Express.js', 'MongoDB', 'REST APIs', 'Git'],
-    experience: [],
-    education: [],
+    skills: ['JavaScript', 'React.js', 'Node.js', 'Express.js', 'MongoDB', 'REST APIs', 'Git', 'Tailwind CSS'],
+    experience: [
+      {
+        role: 'Full Stack Web Developer Intern',
+        company: 'TechCorp Solutions',
+        period: '2024 - Present',
+        bullets: [
+          'Engineered scalable MERN stack web applications with AI features using Node.js, Express, and React.',
+          'Designed RESTful API endpoints and integrated MongoDB schemas with Mongoose ORM.',
+          'Optimized frontend performance, reducing initial bundle load times by 28% with Vite and Tailwind CSS.'
+        ]
+      }
+    ],
+    education: [
+      {
+        degree: 'Bachelor of Technology (B.Tech) in Computer Engineering',
+        institution: 'Savitribai Phule Pune University',
+        period: '2020 - 2024'
+      }
+    ],
+    projects: [
+      {
+        title: 'AI Auto Job Applicator & Resume Tailorer',
+        description: 'Full-stack AI application that discovers job postings, tailors resumes using LLM APIs, and automates application tracking.',
+        technologies: ['React.js', 'Node.js', 'Express', 'MongoDB', 'Gemini API', 'Tailwind CSS'],
+        link: 'https://github.com/KaranGade24/ai-job-applicator'
+      },
+      {
+        title: 'Real-time Collaborative Task Workspace',
+        description: 'Interactive dashboard with WebSockets, drag-and-drop kanban boards, and role-based access control.',
+        technologies: ['React', 'Node.js', 'Socket.io', 'MongoDB', 'JWT Auth'],
+        link: 'https://portfolio-karan-gade.vercel.app'
+      }
+    ],
+    certifications: [
+      {
+        name: 'Full Stack Development Certification (MERN)',
+        issuer: 'Meta / Coursera',
+        date: '2024'
+      },
+      {
+        name: 'Node.js & MongoDB Developer Certification',
+        issuer: 'HackerRank',
+        date: '2023'
+      }
+    ],
   });
 
   useEffect(() => {
@@ -66,8 +109,10 @@ export const ResumeBuilderPage = () => {
               ...(pData.personalInfo || pData.personal || {}),
               summary: pData.summary || pData.professionalSummary || prev.summary,
               skills: Array.isArray(pData.skills) ? pData.skills : (pData.skills?.keySkills || prev.skills),
-              experience: pData.experience || pData.workExperience || prev.experience,
-              education: pData.education || prev.education,
+              experience: (pData.experience && pData.experience.length > 0) ? pData.experience : ((pData.workExperience && pData.workExperience.length > 0) ? pData.workExperience : prev.experience),
+              education: (pData.education && pData.education.length > 0) ? pData.education : prev.education,
+              projects: (pData.projects && pData.projects.length > 0) ? pData.projects : prev.projects,
+              certifications: (pData.certifications && pData.certifications.length > 0) ? pData.certifications : prev.certifications,
             }));
           }
         }
@@ -274,7 +319,7 @@ export const ResumeBuilderPage = () => {
           )}
 
           {/* Education */}
-          {sections.education && (
+          {sections.education && (resumeData.education?.length > 0) && (
             <div className="space-y-2">
               <h2 className="text-xs font-bold text-slate-900 uppercase tracking-wider border-b border-slate-200 pb-1">
                 Education
@@ -283,9 +328,63 @@ export const ResumeBuilderPage = () => {
                 <div key={idx} className="flex items-center justify-between text-xs">
                   <div>
                     <p className="font-bold text-slate-900">{edu.degree}</p>
-                    <p className="text-slate-500">{edu.institution}</p>
+                    <p className="text-slate-500">{edu.institution || edu.school}</p>
                   </div>
-                  <span className="text-slate-500 font-medium">{edu.period}</span>
+                  <span className="text-slate-500 font-medium">{edu.period || edu.graduationYear}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Projects */}
+          {sections.projects && (resumeData.projects?.length > 0) && (
+            <div className="space-y-3">
+              <h2 className="text-xs font-bold text-slate-900 uppercase tracking-wider border-b border-slate-200 pb-1">
+                Projects
+              </h2>
+              {resumeData.projects.map((proj, idx) => (
+                <div key={idx} className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-bold text-slate-900">{proj.title || proj.name}</p>
+                    {proj.link && (
+                      <a
+                        href={proj.link}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-[11px] font-semibold text-blue-600 hover:underline flex items-center gap-1"
+                      >
+                        View Project <Globe className="w-3 h-3" />
+                      </a>
+                    )}
+                  </div>
+                  <p className="text-xs text-slate-600 leading-relaxed">{proj.description}</p>
+                  {proj.technologies && proj.technologies.length > 0 && (
+                    <div className="flex flex-wrap gap-1 pt-0.5">
+                      {proj.technologies.map((tech, i) => (
+                        <span key={i} className="text-[10px] font-semibold text-slate-600 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded">
+                          {tech}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Certifications */}
+          {sections.certifications && (resumeData.certifications?.length > 0) && (
+            <div className="space-y-2">
+              <h2 className="text-xs font-bold text-slate-900 uppercase tracking-wider border-b border-slate-200 pb-1">
+                Certifications
+              </h2>
+              {resumeData.certifications.map((cert, idx) => (
+                <div key={idx} className="flex items-center justify-between text-xs">
+                  <div>
+                    <p className="font-bold text-slate-900">{cert.name || cert.title}</p>
+                    <p className="text-slate-500">{cert.issuer || cert.organization}</p>
+                  </div>
+                  <span className="text-slate-500 font-medium">{cert.date || cert.issueDate}</span>
                 </div>
               ))}
             </div>

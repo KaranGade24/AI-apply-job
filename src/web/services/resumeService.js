@@ -22,7 +22,7 @@ export const generateResumePdfApi = async (resumeData, template = 'ATS Modern') 
 
 export const parseResumeApi = async (formData) => {
   const token = localStorage.getItem('token');
-  const response = await fetch('/api/resume/parse', {
+  const response = await fetch('/api/resume/upload', {
     method: 'POST',
     headers: {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),

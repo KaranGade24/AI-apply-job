@@ -4,43 +4,42 @@ import { appError, handleError } from "../utils/errors.js";
 import { JWT_SECRET } from "../config/env.js";
 
 /**
- * Authentication Middleware
- * Extracts JWT token from req.body.token (or Authorization header / query string for flexibility)
- * Attaches decoded user payload to req.user
+ * Strict Authentication Middleware
+ * Extracts JWT token from Authorization header, req.body.token, or req.query.token
+ * Validates token signature and expiration against JWT_SECRET.
  */
 export const authMiddleware = (req, res, next) => {
   try {
     let token = null;
 
-    // Primary source: req.body.token as requested
-    if (req.body && req.body.token) {
-      token = req.body.token;
-    }
-    // Secondary source: Authorization header (Bearer <token>)
-    else if (
+    // 1. Authorization header (Bearer <token>)
+    if (
       req.headers.authorization &&
       req.headers.authorization.startsWith("Bearer ")
     ) {
       token = req.headers.authorization.split(" ")[1];
     }
-    // Tertiary source: req.query.token
+    // 2. req.body.token
+    else if (req.body && req.body.token) {
+      token = req.body.token;
+    }
+    // 3. req.query.token
     else if (req.query && req.query.token) {
       token = req.query.token;
     }
 
     if (!token) {
       throw new appError(
-        "Authentication failed. JWT token is required in request body (req.body.token) or Authorization header.",
-        401,
+        "Authentication required. JWT token must be provided in Authorization header or body.",
+        401
       );
     }
 
     const decoded = jwt.verify(token, JWT_SECRET);
-
     req.user = decoded;
-    next();
+    return next();
   } catch (error) {
-    // If a file was uploaded by multer prior to auth check, clean it up on auth failure
+    // If a file was uploaded by multer prior to auth check, clean it up
     if (req.file && req.file.path && fs.existsSync(req.file.path)) {
       try {
         fs.unlinkSync(req.file.path);
@@ -48,15 +47,17 @@ export const authMiddleware = (req, res, next) => {
         // silent catch
       }
     }
+
     if (
       error.name === "JsonWebTokenError" ||
       error.name === "TokenExpiredError"
     ) {
       return handleError(
-        new appError(`Invalid or expired token: ${error.message}`, 401),
-        res,
+        new appError(`Invalid or expired authentication token: ${error.message}`, 401),
+        res
       );
     }
+
     return handleError(error, res);
   }
 };
