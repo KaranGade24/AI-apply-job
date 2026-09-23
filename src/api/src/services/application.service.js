@@ -22,26 +22,37 @@ import { appError } from "../utils/errors.js";
  * Creates an application for a specific job and initiates the application graph
  * @param {string} userId
  * @param {string} jobId
+ * @param {object} options
  * @returns {Promise<object>} Created application record
  */
-export const createApplicationFromJob = async (userId, jobId) => {
+export const createApplicationFromJob = async (userId, jobId, options = {}) => {
   try {
     const job = await Job.findById(jobId);
     if (!job) {
       throw new appError("Job posting not found", 404);
     }
 
-    // Pass jobId + userId directly — the graph's initApplicationNode will create the
-    // application record. Passing a pre-created applicationId here would route every
-    // fresh application through loadExistingApplicationNode, setting isRegeneration=true
-    // and skipping resume tailoring + email generation entirely.
+    // If an application already exists in waiting_for_review and regeneration is not forced, return it
+    if (!options.forceRegenerate) {
+      const existing = await findApplicationByJobAndUser(userId, jobId);
+      if (
+        existing &&
+        (existing.status === APPLICATION_STATUS.WAITING_FOR_REVIEW ||
+          existing.status === APPLICATION_STATUS.APPLIED)
+      ) {
+        return existing;
+      }
+    }
+
+    // Pass jobId + userId directly — the graph's initApplicationNode will create or load
+    // the application record and execute resume tailoring + email drafting.
     await runAgent(
       "jobApplication",
       { jobId: jobId.toString(), userId },
       { userId },
     );
 
-    // Fetch the application record that was created by the graph during this run.
+    // Fetch the application record that was created and transitioned to waiting_for_review.
     const updatedApp = await findApplicationByJobAndUser(userId, jobId);
     return updatedApp;
   } catch (error) {
@@ -431,43 +442,93 @@ export const getApplicationByJobAndUserService = async (userId, jobId) => {
  */
 export const previewOrGenerateDraftService = async (userId, payload) => {
   try {
-    const { jobId, jobTitle, company, description, requirements, skills, hrEmail, applicationMethod } = payload || {};
+    const {
+      jobId,
+      jobTitle,
+      company,
+      description,
+      requirements,
+      skills,
+      hrEmail,
+      applicationMethod,
+      forceRegenerate,
+    } = payload || {};
 
-    // 1. Check if an application already exists for this job & user
+    // 1. If jobId is provided, check existing application or run the application tailoring agent
     if (jobId) {
       const existing = await findApplicationByJobAndUser(userId, jobId);
-      if (existing) {
+      if (
+        existing &&
+        (existing.status === APPLICATION_STATUS.WAITING_FOR_REVIEW ||
+          existing.status === APPLICATION_STATUS.APPLIED) &&
+        !forceRegenerate
+      ) {
         return {
           application: existing,
           email: existing.email || {},
-          applicationMethod: existing.applicationMethod || applicationMethod || 'email',
+          applicationMethod: existing.applicationMethod || applicationMethod || "email",
           isExisting: true,
           status: existing.status,
+          candidateInfo: {
+            fullName:
+              existing.resume?.tailoredResumeData?.personalInfo?.fullName || "Candidate",
+            email: existing.resume?.tailoredResumeData?.personalInfo?.email || "",
+            phone: existing.resume?.tailoredResumeData?.personalInfo?.phone || "",
+            skills: existing.resume?.tailoredResumeData?.skills || skills || [],
+          },
         };
+      }
+
+      // Execute the job application agent pipeline:
+      // Fetches the job, normalizes method, tailors resume, creates PDF, generates email, and sets to waiting_for_review
+      try {
+        const tailoredApp = await createApplicationFromJob(userId, jobId, { forceRegenerate });
+        if (tailoredApp) {
+          return {
+            application: tailoredApp,
+            email: tailoredApp.email || {},
+            applicationMethod: tailoredApp.applicationMethod || applicationMethod || "email",
+            isExisting: true,
+            status: tailoredApp.status || APPLICATION_STATUS.WAITING_FOR_REVIEW,
+            candidateInfo: {
+              fullName:
+                tailoredApp.resume?.tailoredResumeData?.personalInfo?.fullName || "Candidate",
+              email: tailoredApp.resume?.tailoredResumeData?.personalInfo?.email || "",
+              phone: tailoredApp.resume?.tailoredResumeData?.personalInfo?.phone || "",
+              skills: tailoredApp.resume?.tailoredResumeData?.skills || skills || [],
+            },
+          };
+        }
+      } catch (agentErr) {
+        await logError(
+          "applicationService.previewOrGenerateDraftService.agentRun",
+          agentErr.message,
+        );
       }
     }
 
-    // 2. Fetch candidate info from active resume
+    // 2. Fallback candidate info from active resume or user
     const activeResume = await getActiveResumeByUserId(userId).catch(() => null);
     const parsedData = activeResume?.parsedData || {};
-    const candidateName = parsedData.personalInfo?.fullName || 'Candidate';
-    const candidateEmail = parsedData.personalInfo?.email || '';
-    const candidatePhone = parsedData.personalInfo?.phone || '';
+    const candidateName = parsedData.personalInfo?.fullName || "Candidate";
+    const candidateEmail = parsedData.personalInfo?.email || "";
+    const candidatePhone = parsedData.personalInfo?.phone || "";
     const candidateSkills = Array.isArray(parsedData.skills)
       ? parsedData.skills
-      : (skills || ['React', 'Node.js', 'TypeScript']);
+      : skills || ["React", "Node.js", "TypeScript"];
 
-    const targetTitle = jobTitle || 'Software Engineer';
-    const targetCompany = company || 'Hiring Team';
-    const recipient = (hrEmail && hrEmail !== 'unknown' && hrEmail !== 'NOT_SPECIFIED')
-      ? hrEmail
-      : '';
+    const targetTitle = jobTitle || "Software Engineer";
+    const targetCompany = company || "Hiring Team";
+    const recipient =
+      hrEmail && hrEmail !== "unknown" && hrEmail !== "NOT_SPECIFIED"
+        ? hrEmail
+        : "";
 
     const defaultSubject = `Application for ${targetTitle} - ${candidateName}`;
     const defaultBody = formatAndCleanEmailBody(
       `Dear Hiring Team at ${targetCompany},
 
-I am writing to express my strong enthusiasm for the ${targetTitle} opportunity. With my hands-on background and proven expertise in ${candidateSkills.slice(0, 4).join(', ') || 'modern software engineering'}, I am confident in my ability to deliver immediate value to your development team.
+I am writing to express my strong enthusiasm for the ${targetTitle} opportunity. With my hands-on background and proven expertise in ${candidateSkills.slice(0, 4).join(", ") || "modern software engineering"}, I am confident in my ability to deliver immediate value to your development team.
 
 Throughout my experience, I have developed and deployed robust, scalable applications, ensuring high reliability, clean architecture, and optimized performance. I am particularly excited about the work being done at ${targetCompany} and welcome the chance to contribute to your ongoing goals and technical milestones.
 
@@ -476,7 +537,7 @@ My resume is attached for your review. I look forward to the opportunity to disc
 Sincerely,
 
 ${candidateName}`,
-      candidateName
+      candidateName,
     );
 
     return {
@@ -494,12 +555,15 @@ ${candidateName}`,
         skills: candidateSkills,
         resumeId: activeResume?._id || null,
       },
-      applicationMethod: applicationMethod || 'email',
+      applicationMethod: applicationMethod || "email",
       isExisting: false,
-      status: 'pending',
+      status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
     };
   } catch (error) {
-    await logError("applicationService.previewOrGenerateDraftService", error.message);
+    await logError(
+      "applicationService.previewOrGenerateDraftService",
+      error.message,
+    );
     throw error;
   }
 };

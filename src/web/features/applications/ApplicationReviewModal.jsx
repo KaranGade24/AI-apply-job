@@ -238,6 +238,45 @@ export const ApplicationReviewModal = ({
     }
   };
 
+  // Re-tailor and re-generate AI draft on demand
+  const handleRegenerateDraft = async () => {
+    setLoading(true);
+    try {
+      const draftRes = await previewDraftApi({
+        jobId: job._id,
+        jobTitle: job.title,
+        company: job.company,
+        description: job.description,
+        requirements: job.requirements,
+        skills: job.skills,
+        hrEmail: job.hrEmail,
+        applicationMethod: detectedMethod,
+        forceRegenerate: true,
+      });
+
+      if (draftRes?.data) {
+        if (draftRes.data.application) {
+          setApplication(draftRes.data.application);
+          setCurrentStatus(draftRes.data.application.status || 'waiting_for_review');
+        }
+        if (draftRes.data.email) {
+          setRecipient(draftRes.data.email.recipient || job.hrEmail || '');
+          setSubject(draftRes.data.email.subject || `Application for ${job.title}`);
+          setBody(draftRes.data.email.body || '');
+        }
+        if (draftRes.data.candidateInfo) {
+          setCandidateInfo(draftRes.data.candidateInfo);
+        }
+        showToast('AI re-tailored resume and generated new outreach draft!');
+        if (onApplicationUpdated) onApplicationUpdated();
+      }
+    } catch (err) {
+      showToast('Error regenerating draft: ' + (err.message || 'Please retry'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Status change handler
   const handleStatusChange = async (newStatus) => {
     setCurrentStatus(newStatus);
@@ -350,15 +389,53 @@ export const ApplicationReviewModal = ({
         {/* Tab Content */}
         <div className="p-6 overflow-y-auto flex-1 space-y-6">
           {loading ? (
-            <div className="py-12 text-center text-slate-400 text-xs flex flex-col items-center gap-2">
-              <RefreshCw className="w-6 h-6 animate-spin text-blue-600" />
-              Loading job details & verifying outreach parameters...
+            <div className="py-14 text-center text-slate-500 flex flex-col items-center justify-center gap-4">
+              <div className="relative">
+                <div className="w-14 h-14 rounded-2xl bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-600 shadow-sm animate-pulse">
+                  <Sparkles className="w-7 h-7 text-blue-600 animate-spin" style={{ animationDuration: '3s' }} />
+                </div>
+              </div>
+              <div className="space-y-1.5 max-w-md">
+                <h3 className="text-sm font-bold text-slate-900">
+                  AI Agent is Preparing Your Tailored Application
+                </h3>
+                <p className="text-xs text-slate-500 leading-relaxed">
+                  Fetching job details, matching requirements for <span className="font-semibold text-slate-700">{job.title}</span> at <span className="font-semibold text-slate-700">{job.company}</span>, tailoring your resume, drafting outreach mail, and setting status to <span className="font-semibold text-blue-600">Waiting for Review</span>...
+                </p>
+              </div>
+              <div className="flex items-center gap-2 text-[11px] font-semibold text-slate-400 mt-2">
+                <RefreshCw className="w-3.5 h-3.5 animate-spin text-blue-600" />
+                <span>LangGraph Agent Pipeline in progress</span>
+              </div>
             </div>
           ) : (
             <>
               {/* TAB 1: VERIFICATION & METHOD (The core requirement) */}
               {activeTab === 'review' && (
                 <div className="space-y-6">
+                  {/* Status Banner */}
+                  {(currentStatus === 'waiting_for_review' || currentStatus === 'pending') && (
+                    <div className="p-3.5 rounded-xl border border-blue-200 bg-blue-50/70 flex items-center justify-between gap-3 text-xs">
+                      <div className="flex items-center gap-2.5">
+                        <Sparkles className="w-4 h-4 text-blue-600 shrink-0" />
+                        <div>
+                          <span className="font-bold text-blue-950">AI Tailoring Complete — Waiting for Review</span>
+                          <p className="text-blue-800 text-[11px] mt-0.5">
+                            Your resume has been tailored and outreach email drafted. Please verify the recipient, subject, and body below before applying.
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleRegenerateDraft}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-blue-200 hover:bg-blue-100 text-blue-700 font-bold rounded-lg transition-colors cursor-pointer shrink-0 shadow-2xs"
+                      >
+                        <RefreshCw className="w-3 h-3" />
+                        Re-tailor with AI
+                      </button>
+                    </div>
+                  )}
+
                   {/* Method Header Banner */}
                   <div className="p-4 rounded-xl border border-slate-200 bg-slate-50 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div className="flex items-center gap-2.5">
@@ -389,6 +466,18 @@ export const ApplicationReviewModal = ({
                     </div>
 
                     <div className="flex items-center gap-2">
+                      {application?._id && (
+                        <a
+                          href={`/api/applications/${application._id}/pdf`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 rounded-lg text-xs font-semibold transition-colors shadow-2xs"
+                          title="Download Tailored ATS PDF Resume"
+                        >
+                          <FileText className="w-3.5 h-3.5 text-blue-600" />
+                          <span>PDF Resume</span>
+                        </a>
+                      )}
                       <select
                         value={currentStatus}
                         onChange={(e) => handleStatusChange(e.target.value)}
