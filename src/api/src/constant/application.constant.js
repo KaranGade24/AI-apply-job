@@ -13,7 +13,7 @@ export const APPLICATION_STATUS = Object.freeze({
   REJECTED: "rejected",
   SENDING: "sending",
   SENT: "sent",
-  FAILED: "failed"
+  FAILED: "failed",
 });
 
 export const APPLICATION_METHOD = Object.freeze({
@@ -21,13 +21,13 @@ export const APPLICATION_METHOD = Object.freeze({
   PHONE: "phone",
   GOOGLE_FORM: "googleForm",
   WEBSITE_FORM: "websiteForm",
-  UNKNOWN: "unknown"
+  UNKNOWN: "unknown",
 });
 
 export const RESUME_PDF_TEMPLATES = Object.freeze({
   MODERN: "modern",
   MINIMAL: "minimal",
-  ATS: "ats"
+  ATS: "ats",
 });
 
-export const RESUME_PAGE_COUNT = 1; // Default resume page count (e.g. 1, 2)
+export const RESUME_PAGE_COUNT = 2; // Default resume page count (e.g. 1, 2)
