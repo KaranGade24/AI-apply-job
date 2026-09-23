@@ -293,10 +293,24 @@ const tailorResumeNode = async (state) => {
 };
 
 /**
+ * Conditional Edge Router: After Tailoring Resume
+ */
+const routeAfterTailor = (state) => {
+  if (state.status === APPLICATION_STATUS.FAILED || !state.tailoredResume) {
+    return END;
+  }
+  return "generatePdfNode";
+};
+
+/**
  * 5. Generate Resume PDF Node
  */
 const generatePdfNode = async (state) => {
   try {
+    if (!state.tailoredResume) {
+      throw new appError("Tailored resume data is missing or invalid", 400);
+    }
+
     const pdfPath = await generateResumePdf({
       resumeData: state.tailoredResume,
       template: "modern",
@@ -594,7 +608,10 @@ workflow.addConditionalEdges(
 );
 
 workflow.addEdge("getUserResumeNode", "tailorResumeNode");
-workflow.addEdge("tailorResumeNode", "generatePdfNode");
+workflow.addConditionalEdges("tailorResumeNode", routeAfterTailor, {
+  generatePdfNode: "generatePdfNode",
+  [END]: END,
+});
 workflow.addConditionalEdges("generatePdfNode", routeAfterPdf, {
   generateEmailNode: "generateEmailNode",
   [END]: END,

@@ -19,14 +19,12 @@ export const tailoredResumeSchema = z.object({
       portfolio: z.string().optional().default(""),
     }),
     summary: z.string().describe("Tailored professional summary matching job context without inventing facts"),
-    skills: z.union([
-      z.record(z.union([z.array(z.string()), z.string()])),
-      z.object({
-        technicalSkills: z.array(z.string()).optional().default([]),
-        softSkills: z.array(z.string()).optional().default([]),
-        toolsAndFrameworks: z.array(z.string()).optional().default([]),
-      })
-    ]).optional(),
+    skills: z.object({
+      technicalSkills: z.array(z.string()).optional().default([]),
+      softSkills: z.array(z.string()).optional().default([]),
+      toolsAndFrameworks: z.array(z.string()).optional().default([]),
+      languages: z.array(z.string()).optional().default([]),
+    }).optional().default({}),
     experience: z.array(
       z.object({
         title: z.string(),
