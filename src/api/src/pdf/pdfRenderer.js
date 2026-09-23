@@ -44,30 +44,50 @@ export const renderHtmlToPdf = async (htmlContent, outputPath) => {
       if (document.fonts?.ready) {
         await document.fonts.ready;
       }
+
       const pageEl = document.querySelector('.resume') || document.querySelector('.page');
       if (!pageEl) return;
 
       const targetPages = parseInt(document.body.getAttribute('data-target-pages') || '1', 10);
-      const maxAllowedHeight = targetPages * 1080;
 
-      let minScale = 0.50;
-      let maxScale = 1.45;
+      // Measure real A4 page height in pixels by probing a 297mm element.
+      // This is accurate regardless of browser DPI / zoom settings.
+      const probe = document.createElement('div');
+      probe.style.cssText = 'position:absolute;visibility:hidden;height:297mm;width:1px;top:0;left:0;';
+      document.body.appendChild(probe);
+      const a4HeightPx = probe.getBoundingClientRect().height;
+      document.body.removeChild(probe);
+
+      const maxAllowedHeight = targetPages * a4HeightPx;
+
+      // Measure content height at scale 1.0 baseline
+      document.documentElement.style.setProperty('--scale-factor', '1.0');
+      // Allow a reflow tick
+      await new Promise(r => requestAnimationFrame(r));
+
+      let minScale = 0.45;
+      let maxScale = 1.50;
       let bestScale = 1.0;
 
-      document.documentElement.style.setProperty('--scale-factor', '1.0');
+      // Binary search: 35 iterations gives ~0.002 precision
+      for (let i = 0; i < 35; i++) {
+        const midScale = (minScale + maxScale) / 2;
+        document.documentElement.style.setProperty('--scale-factor', midScale.toFixed(4));
 
-      for (let i = 0; i < 30; i++) {
-        let midScale = (minScale + maxScale) / 2;
-        document.documentElement.style.setProperty('--scale-factor', midScale.toFixed(3));
-        if (pageEl.scrollHeight <= maxAllowedHeight) {
+        // Measure the actual content height inside the resume container
+        const contentHeight = pageEl.scrollHeight;
+
+        if (contentHeight <= maxAllowedHeight) {
+          // Content fits: record this as a valid scale and try scaling UP to fill empty space
           bestScale = midScale;
-          minScale = midScale; // Fit succeeded: try scaling UP further to fill empty bottom space
+          minScale = midScale;
         } else {
-          maxScale = midScale; // Content overflowed page: scale DOWN
+          // Content overflows: scale DOWN
+          maxScale = midScale;
         }
       }
 
-      document.documentElement.style.setProperty('--scale-factor', bestScale.toFixed(3));
+      document.documentElement.style.setProperty('--scale-factor', bestScale.toFixed(4));
     });
 
     await page.emulateMedia({

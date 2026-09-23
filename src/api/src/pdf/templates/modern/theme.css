@@ -22,7 +22,7 @@
   --margin-section: calc(9.5px * var(--scale-factor));
   --margin-entry: calc(7.5px * var(--scale-factor));
   --margin-bullet: calc(2px * var(--scale-factor));
-  --line-height: calc(1.4 * var(--scale-factor));
+  --line-height: 1.4;
 }
 
 * {
@@ -43,13 +43,13 @@ body {
 
 .resume {
   width: 210mm;
+  /* Use min-height so scrollHeight reflects real content for auto-fit scaling */
   min-height: 297mm;
-  height: 297mm;
   background: #ffffff;
   margin: 0 auto;
   padding: var(--padding-page);
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
-  overflow: hidden;
+  overflow: visible;
   display: flex;
   flex-direction: column;
 }
@@ -240,7 +240,8 @@ body {
     box-shadow: none;
     width: 210mm;
     min-height: 297mm;
-    height: 297mm;
+    max-height: 297mm;
+    overflow: hidden;
     padding: var(--padding-page);
   }
 }

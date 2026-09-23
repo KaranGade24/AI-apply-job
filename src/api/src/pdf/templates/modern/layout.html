@@ -12,30 +12,43 @@
       function adjustScale() {
         const pageEl = document.querySelector('.resume') || document.querySelector('.page');
         if (!pageEl) return;
-        
+
         const targetPages = parseInt(document.body.getAttribute('data-target-pages') || '1', 10);
-        const maxAllowedHeight = targetPages * 1080;
-        
-        let minScale = 0.50;
-        let maxScale = 1.45;
-        let bestScale = 1.0;
-        
+
+        // Measure real A4 height in pixels using a probe element (accurate across DPI/zoom)
+        const probe = document.createElement('div');
+        probe.style.cssText = 'position:absolute;visibility:hidden;height:297mm;width:1px;top:0;left:0;';
+        document.body.appendChild(probe);
+        const a4HeightPx = probe.getBoundingClientRect().height;
+        document.body.removeChild(probe);
+
+        const maxAllowedHeight = targetPages * a4HeightPx;
+
+        // Reset to baseline
         document.documentElement.style.setProperty('--scale-factor', '1.0');
-        
-        for (let i = 0; i < 30; i++) {
-          let midScale = (minScale + maxScale) / 2;
-          document.documentElement.style.setProperty('--scale-factor', midScale.toFixed(3));
+
+        let minScale = 0.45;
+        let maxScale = 1.50;
+        let bestScale = 1.0;
+
+        // Bidirectional binary search: scale DOWN on overflow, scale UP on empty space
+        for (let i = 0; i < 35; i++) {
+          const midScale = (minScale + maxScale) / 2;
+          document.documentElement.style.setProperty('--scale-factor', midScale.toFixed(4));
+
           if (pageEl.scrollHeight <= maxAllowedHeight) {
+            // Fits — try to scale up more to fill the page
             bestScale = midScale;
             minScale = midScale;
           } else {
+            // Overflows — scale down
             maxScale = midScale;
           }
         }
-        
-        document.documentElement.style.setProperty('--scale-factor', bestScale.toFixed(3));
+
+        document.documentElement.style.setProperty('--scale-factor', bestScale.toFixed(4));
       }
-      
+
       if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', adjustScale);
       } else {
