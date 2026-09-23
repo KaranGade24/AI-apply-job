@@ -5,33 +5,37 @@
 
 export const JOB_VIA_REFERRAL_SELECTORS = Object.freeze({
   // Listing / Category Page Selectors
-  jobCards: 'article.post, article.type-post, article, div.post, .entry',
-  jobCardTitleLink: 'h2.entry-title a, header.entry-header h2 a, .entry-title a, h2 a',
-  jobCardExcerpt: '.entry-summary, .entry-content p, .post-excerpt',
-  jobCardDate: 'time.entry-date, .posted-on, .entry-meta time',
-  nextPageLink: 'a.next, .nav-previous a, .pagination a.next, a.next-page',
+  jobCards: 'h2.gb-text, h2, article.post, article.type-post, article, div.post, .entry',
+  jobCardTitleLink: 'h2.gb-text a, h2 a, h2.entry-title a, header.entry-header h2 a',
+  jobCardExcerpt: '.entry-summary, .entry-content p, .post-excerpt, p.gb-text',
+  jobCardDate: 'time.entry-date, .posted-on, .entry-meta time, p.gb-text',
+  nextPageLink: 'a.next, .nav-previous a, .pagination a.next, a.next-page, .page-numbers.next',
 
   // Job Detail Page Selectors
-  detailTitle: 'h1.entry-title, header.entry-header h1, .entry-title, h1',
-  detailContent: '.entry-content, main#main article, .post-content',
-  detailMeta: '.entry-meta, .posted-on, time.entry-date',
+  detailTitle: 'h1.entry-title, h1.gb-text, header.entry-header h1, .entry-title, h1',
+  detailContent: 'article, main#main article, .entry-content, main#main, .post-content',
+  detailMeta: '.entry-meta, .posted-on, time.entry-date, p.gb-text',
 
   // Application Link & Contact Selectors inside Detail Page Content
   applicationLinks: [
+    'article a[href*="forms"]',
+    'article a[href*="docs.google.com"]',
+    'article a[href*="linkedin.com/jobs"]',
+    'article a[href*="myworkdayjobs.com"]',
+    'article a[href*="greenhouse.io"]',
+    'article a[href*="lever.co"]',
+    'article a.wp-block-button__link',
+    'article a.gb-button',
+    'article a.btn',
+    'article p a[target="_blank"]',
+    'article a[target="_blank"]',
     '.entry-content a[href*="forms"]',
     '.entry-content a[href*="docs.google.com"]',
-    '.entry-content a[href*="linkedin.com"]',
-    '.entry-content a[href*="myworkdayjobs.com"]',
-    '.entry-content a[href*="greenhouse.io"]',
-    '.entry-content a[href*="lever.co"]',
-    '.entry-content a.wp-block-button__link',
-    '.entry-content a.btn',
-    '.entry-content p a[target="_blank"]',
     '.entry-content a[target="_blank"]'
   ].join(', '),
 
-  mailtoLinks: '.entry-content a[href^="mailto:"]',
-  phoneLinks: '.entry-content a[href^="tel:"], .entry-content a[href*="wa.me"], .entry-content a[href*="api.whatsapp.com"]',
+  mailtoLinks: 'article a[href^="mailto:"], .entry-content a[href^="mailto:"], a[href^="mailto:"]',
+  phoneLinks: 'article a[href^="tel:"], article a[href*="wa.me"], article a[href*="api.whatsapp.com"], a[href^="tel:"]',
 
   // Section Headings & Meta Selectors
   authorLink: 'a[href*="/author/"]',

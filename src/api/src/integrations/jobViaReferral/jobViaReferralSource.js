@@ -19,6 +19,7 @@ export const openJobViaReferral = async (
       waitUntil: 'domcontentloaded',
       timeout: 8000
     });
+    await page.waitForSelector('h2 a, .gb-text a', { timeout: 3000 }).catch(() => {});
   } catch (error) {
     await logError('jobViaReferralSource.openJobViaReferral', error.message);
   }
@@ -37,7 +38,7 @@ export const getJobListingUrls = async (page, searchConfig = {}) => {
     const urls = await page.evaluate((maxLimit) => {
       const links = new Set();
       const elements = document.querySelectorAll(
-        'article h2 a, h2.entry-title a, header.entry-header h2 a, .entry-title a, main article a'
+        'h2.gb-text a, h2 a, .gb-text a, header h2 a, main a'
       );
       for (const el of elements) {
         const href = el.href || el.getAttribute('href');
@@ -52,11 +53,13 @@ export const getJobListingUrls = async (page, searchConfig = {}) => {
           normalized.includes('/terms') ||
           normalized.includes('/about') ||
           normalized.includes('/contact') ||
+          normalized.includes('/feed/') ||
+          normalized.includes('/wp-') ||
           normalized.endsWith('/#')
         ) {
           continue;
         }
-        if (normalized.startsWith('http')) {
+        if (normalized.startsWith('http') && normalized.includes('jobviareferral.com/')) {
           links.add(normalized);
           if (links.size >= maxLimit) break;
         }
