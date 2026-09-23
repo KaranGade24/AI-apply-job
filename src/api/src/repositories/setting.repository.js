@@ -16,6 +16,6 @@ export const updateSettingByUserId = async (userId, updateData) => {
   return await Setting.findOneAndUpdate(
     { userId },
     { $set: updateData },
-    { new: true, upsert: true, runValidators: true }
+    { returnDocument: 'after', upsert: true, runValidators: true }
   );
 };

@@ -23,6 +23,30 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 
+// Request logging middleware for backend debugging
+app.use((req, res, next) => {
+  const start = Date.now();
+  const { method, originalUrl } = req;
+  const authHeader = req.headers.authorization ? 'Bearer ***' : 'None';
+  console.log(`\n--------------------------------------------------`);
+  console.log(`📥 [API REQ] ${method} ${originalUrl} | Auth: ${authHeader}`);
+  if (req.body && Object.keys(req.body).length > 0) {
+    const safeBody = { ...req.body };
+    if (safeBody.password) safeBody.password = '***';
+    if (safeBody.token) safeBody.token = '***';
+    console.log(`📦 [REQ BODY]`, JSON.stringify(safeBody, null, 2));
+  }
+
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    const emoji = res.statusCode >= 400 ? '❌' : '✅';
+    console.log(`${emoji} [API RES] ${method} ${originalUrl} -> Status ${res.statusCode} (${duration}ms)`);
+    console.log(`--------------------------------------------------\n`);
+  });
+
+  next();
+});
+
 // Enable CORS for frontend client calls
 app.use(cors({ origin: true, credentials: true }));
 
