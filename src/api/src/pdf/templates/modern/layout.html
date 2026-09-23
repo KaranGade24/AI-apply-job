@@ -25,43 +25,39 @@
         // Printable page height taking 12mm top + 12mm bottom page margins into account (273mm of 297mm)
         const printablePageHeightPx = (273 / 297) * a4HeightPx;
 
-        const maxAllowedHeight = (targetPages * printablePageHeightPx) - 10;
-
-        // Reset to baseline and clear min-height for unconstrained measurement
-        const prevMinHeight = pageEl.style.minHeight;
-        pageEl.style.minHeight = '0px';
-
-        document.documentElement.style.setProperty('--scale-factor', '1.0');
-
-        const getEffectiveHeight = () => {
-          const containerTop = pageEl.getBoundingClientRect().top;
-          const breakables = Array.from(pageEl.querySelectorAll(
-            '.skill-row, .education-item, .highlights li, .summary-text, .resume-section h2, .section-title, .project-header, .item-header, .resume-header'
+        // Simulate exact page layout to determine required page count
+        const getRequiredPageCount = () => {
+          const blocks = Array.from(pageEl.querySelectorAll(
+            '.resume-header, .header, .summary-text, .summary, .skill-row, .entry-item, .experience-item, .project, .education-item, .certifications, h2, .section-title, .project-description, .highlights'
           ));
 
-          let gapSum = 0;
-          for (let i = 0; i < breakables.length; i++) {
-            const el = breakables[i];
+          const leafBlocks = blocks.filter(b => !blocks.some(parent => parent !== b && parent.contains(b)));
+
+          let currentPageHeight = 0;
+          let pageCount = 1;
+
+          for (let i = 0; i < leafBlocks.length; i++) {
+            const el = leafBlocks[i];
             const rect = el.getBoundingClientRect();
-            const itemTop = rect.top - containerTop;
-            const itemHeight = rect.height;
-            if (itemHeight <= 0) continue;
+            if (rect.height <= 0) continue;
 
-            const effectiveTop = itemTop + gapSum;
-            const pageIndex = Math.floor(effectiveTop / printablePageHeightPx);
-            const pageEnd = (pageIndex + 1) * printablePageHeightPx;
+            const style = window.getComputedStyle(el);
+            const marginBottom = parseFloat(style.marginBottom || '0');
+            const h = rect.height + marginBottom;
 
-            if (effectiveTop + itemHeight > pageEnd && itemHeight < printablePageHeightPx) {
-              const gap = pageEnd - effectiveTop;
-              gapSum += gap;
+            if (currentPageHeight + h <= printablePageHeightPx) {
+              currentPageHeight += h;
+            } else {
+              pageCount++;
+              currentPageHeight = h;
             }
           }
 
-          return pageEl.scrollHeight + gapSum;
+          return pageCount;
         };
 
-        let minScale = 0.55;
-        let maxScale = 1.35;
+        let minScale = 0.50;
+        let maxScale = 1.30;
         let bestScale = 1.0;
 
         // Bidirectional binary search
@@ -69,9 +65,9 @@
           const midScale = (minScale + maxScale) / 2;
           document.documentElement.style.setProperty('--scale-factor', midScale.toFixed(4));
 
-          const effectiveHeight = getEffectiveHeight();
+          const requiredPages = getRequiredPageCount();
 
-          if (effectiveHeight <= maxAllowedHeight) {
+          if (requiredPages <= targetPages) {
             bestScale = midScale;
             minScale = midScale;
           } else {
