@@ -115,11 +115,29 @@ export const getJobs = async (filter = {}, limit = 50) => {
   }
 };
 
+/**
+ * Finds a job document by ID
+ * @param {string} jobId
+ * @returns {Promise<object|null>}
+ */
+export const findJobById = async (jobId) => {
+  try {
+    return await Job.findById(jobId);
+  } catch (error) {
+    await logError('jobRepository.findJobById', error.message);
+    return null;
+  }
+};
+
+export const getJobById = findJobById;
+
 export default {
   upsertJob,
   saveBulkJobs,
   getJobBySourceUrl,
   getExistingSourceUrls,
   updateJobMatchStatus,
-  getJobs
+  getJobs,
+  findJobById,
+  getJobById
 };

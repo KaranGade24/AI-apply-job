@@ -16,7 +16,8 @@ import {
   APPLICATION_METHOD,
   RESUME_PAGE_COUNT,
 } from "../../constant/application.constant.js";
-import { normalizeApplicationMethod, findJobById } from "../../repositories/application.repository.js";
+import { normalizeApplicationMethod } from "../../repositories/application.repository.js";
+import { findJobById } from "../../repositories/job.repository.js";
 import { logError, logJobEvent } from "../../utils/logger.js";
 import { appError } from "../../utils/errors.js";
 import {
