@@ -16,12 +16,16 @@ export const openJobViaReferral = async (
 ) => {
   try {
     await page.goto(categoryUrl, {
-      waitUntil: 'domcontentloaded',
-      timeout: 8000
+      waitUntil: 'commit',
+      timeout: 5000
+    }).catch(async () => {
+      // Fallback if network is slow
+      await page.goto(categoryUrl, { waitUntil: 'domcontentloaded', timeout: 5000 }).catch(() => {});
     });
+    // Wait briefly for main content container
+    await page.waitForSelector('.post, article, .entry-title, body', { timeout: 3000 }).catch(() => {});
   } catch (error) {
     await logError('jobViaReferralSource.openJobViaReferral', error.message);
-    throw error;
   }
 };
 
