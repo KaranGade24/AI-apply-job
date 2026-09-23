@@ -56,6 +56,18 @@ const jobRouter = express.Router();
  *                 items:
  *                   type: string
  *                 example: ["fullTime"]
+ *               preferredApplicationMethods:
+ *                 type: array
+ *                 description: Preferred application methods to filter discovered jobs (e.g., email, googleForm, websiteForm, phone, unknown)
+ *                 items:
+ *                   type: string
+ *                 example: ["email", "googleForm", "phone", "unknown"]
+ *               preferredMethods:
+ *                 type: array
+ *                 description: Alias for preferredApplicationMethods
+ *                 items:
+ *                   type: string
+ *                 example: ["email", "googleForm", "phone"]
  *               postedWithin:
  *                 type: string
  *                 example: "24h"
