@@ -61,8 +61,11 @@ export const renderHtmlToPdf = async (htmlContent, outputPath) => {
       const a4HeightPx = probe.getBoundingClientRect().height;
       document.body.removeChild(probe);
 
+      // Printable page height taking 12mm top + 12mm bottom page margins into account (273mm of 297mm)
+      const printablePageHeightPx = (273 / 297) * a4HeightPx;
+
       // Safety margin threshold (10px buffer) to prevent accidental overflow to targetPages + 1
-      const maxAllowedHeight = (targetPages * a4HeightPx) - 10;
+      const maxAllowedHeight = (targetPages * printablePageHeightPx) - 10;
 
       // Reset to baseline and clear min-height for unconstrained measurement
       const prevMinHeight = pageEl.style.minHeight;
@@ -87,10 +90,10 @@ export const renderHtmlToPdf = async (htmlContent, outputPath) => {
           if (itemHeight <= 0) continue;
 
           const effectiveTop = itemTop + gapSum;
-          const pageIndex = Math.floor(effectiveTop / a4HeightPx);
-          const pageEnd = (pageIndex + 1) * a4HeightPx;
+          const pageIndex = Math.floor(effectiveTop / printablePageHeightPx);
+          const pageEnd = (pageIndex + 1) * printablePageHeightPx;
 
-          if (effectiveTop + itemHeight > pageEnd && itemHeight < a4HeightPx) {
+          if (effectiveTop + itemHeight > pageEnd && itemHeight < printablePageHeightPx) {
             const gap = pageEnd - effectiveTop;
             gapSum += gap;
           }

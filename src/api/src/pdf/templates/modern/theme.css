@@ -1,6 +1,6 @@
 @page {
   size: A4 portrait;
-  margin: 0;
+  margin: 12mm 0;
 }
 
 :root {
@@ -255,9 +255,9 @@ body {
   .resume {
     box-shadow: none;
     width: 210mm;
-    min-height: calc(297mm * var(--target-pages, 1));
+    min-height: calc(273mm * var(--target-pages, 1));
     overflow: visible;
-    padding: var(--padding-page);
+    padding: 0 calc(14mm * var(--scale-factor));
     display: flex;
     flex-direction: column;
     justify-content: flex-start;
