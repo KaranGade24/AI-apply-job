@@ -1,4 +1,5 @@
 import { Job, MatchStatus } from '../model/Job.js';
+import { SkippedApplication } from '../model/SkippedApplication.js';
 import { logError } from '../utils/logger.js';
 
 /**
@@ -54,8 +55,15 @@ export const saveBulkJobs = async (jobsList = []) => {
 export const getExistingSourceUrls = async (urls = []) => {
   try {
     if (!urls || urls.length === 0) return new Set();
-    const existing = await Job.find({ sourceUrl: { $in: urls } }, { sourceUrl: 1 }).lean();
-    return new Set(existing.map(j => j.sourceUrl));
+    const [existingJobs, existingSkipped] = await Promise.all([
+      Job.find({ sourceUrl: { $in: urls } }, { sourceUrl: 1 }).lean(),
+      SkippedApplication.find({ sourceUrl: { $in: urls } }, { sourceUrl: 1 }).lean(),
+    ]);
+
+    const set = new Set();
+    existingJobs.forEach((j) => j.sourceUrl && set.add(j.sourceUrl));
+    existingSkipped.forEach((s) => s.sourceUrl && set.add(s.sourceUrl));
+    return set;
   } catch (error) {
     await logError('jobRepository.getExistingSourceUrls', error.message);
     return new Set();

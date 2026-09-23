@@ -3,36 +3,10 @@ import { JOB_VIA_REFERRAL_SELECTORS } from './jobViaReferralSelectors.js';
 import { SCRAPER_DEFAULTS } from '../../constant/job.constant.js';
 import { JOB_VIA_REFERRAL_CATEGORIES } from '../../constant/jobViaReferral.constant.js';
 import { logError, logJobEvent } from '../../utils/logger.js';
+import { getExistingSourceUrls } from '../../repositories/job.repository.js';
 
 /**
- * Utility to introduce fast, subtle randomized delay simulating human pauses
- * @param {number} minMs
- * @param {number} maxMs
- */
-const randomDelay = (minMs = 400, maxMs = 1000) => {
-  const ms = Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs;
-  return new Promise((resolve) => setTimeout(resolve, ms));
-};
-
-/**
- * Simulates human-like scrolling behavior on the page
- * @param {import('playwright').Page} page
- */
-const simulateHumanScroll = async (page) => {
-  try {
-    await page.evaluate(() => {
-      window.scrollBy({
-        top: Math.floor(Math.random() * 300) + 150,
-        behavior: 'smooth'
-      });
-    });
-  } catch (err) {
-    // ignore scroll errors
-  }
-};
-
-/**
- * Navigates to JobViaReferral target category or homepage
+ * Navigates to JobViaReferral target category page quickly
  * @param {import('playwright').Page} page
  * @param {string} categoryUrl
  */
@@ -41,13 +15,10 @@ export const openJobViaReferral = async (
   categoryUrl = JOB_VIA_REFERRAL_CATEGORIES.FRESHER_REFERRAL
 ) => {
   try {
-    await randomDelay(300, 600);
     await page.goto(categoryUrl, {
       waitUntil: 'domcontentloaded',
-      timeout: 12000
+      timeout: 8000
     });
-    await simulateHumanScroll(page);
-    await randomDelay(400, 800);
   } catch (error) {
     await logError('jobViaReferralSource.openJobViaReferral', error.message);
     throw error;
@@ -84,19 +55,16 @@ export const getJobListingUrls = async (page, searchConfig = {}) => {
 };
 
 /**
- * Navigates to an individual job detail page
+ * Navigates to an individual job detail page fast
  * @param {import('playwright').Page} page
  * @param {string} jobUrl
  */
 export const openJobDetails = async (page, jobUrl) => {
   try {
-    await randomDelay(300, 600);
     await page.goto(jobUrl, {
       waitUntil: 'domcontentloaded',
-      timeout: 10000
+      timeout: 6000
     });
-    await simulateHumanScroll(page);
-    await randomDelay(300, 600);
   } catch (error) {
     await logError('jobViaReferralSource.openJobDetails', error.message);
     throw error;
@@ -105,43 +73,105 @@ export const openJobDetails = async (page, jobUrl) => {
 
 /**
  * Main Orchestrator: Discovers and extracts normalized job listings from JobViaReferral
+ * Pre-filters existing/skipped URLs in DB before opening detail pages to avoid re-scraping and unnecessary API usage.
  * @param {import('playwright').Page} page - Active Playwright page instance
  * @param {object} searchConfig - Scraper options (categoryUrl, maxJobs, etc.)
  * @returns {Promise<Array<object>>} List of normalized job objects
  */
 export const discoverJobs = async (page, searchConfig = {}) => {
   try {
-    const categoryUrl = searchConfig.categoryUrl || JOB_VIA_REFERRAL_CATEGORIES.FRESHER_REFERRAL;
+    const baseCategoryUrl = searchConfig.categoryUrl || JOB_VIA_REFERRAL_CATEGORIES.FRESHER_REFERRAL;
     const maxJobs = searchConfig.maxJobs || SCRAPER_DEFAULTS.MAX_JOBS_PER_RUN;
 
-    // 1. Open JobViaReferral category page
-    await logJobEvent('discoverJobs', 'PROGRESS', `Navigating to target category page: ${categoryUrl}`);
-    await openJobViaReferral(page, categoryUrl);
+    const newTargetUrls = [];
+    let pageNum = 1;
+    const MAX_PAGES_TO_SCAN = 3;
 
-    // 2. Collect job detail URLs from listing
-    const jobUrls = await getJobListingUrls(page, { maxJobs });
-    await logJobEvent('discoverJobs', 'PROGRESS', `Discovered ${jobUrls.length} job posting URLs on listing page`);
+    // Scan listing pages until we find unscraped target URLs
+    while (newTargetUrls.length < maxJobs && pageNum <= MAX_PAGES_TO_SCAN) {
+      const currentCategoryUrl = pageNum === 1
+        ? baseCategoryUrl
+        : `${baseCategoryUrl.replace(/\/$/, '')}/page/${pageNum}/`;
 
+      await logJobEvent('discoverJobs', 'PROGRESS', `Scanning category listing page ${pageNum}: ${currentCategoryUrl}`);
+      await openJobViaReferral(page, currentCategoryUrl);
+
+      const listingUrls = await getJobListingUrls(page, { maxJobs: 20 });
+      if (listingUrls.length === 0) break;
+
+      // Query DB for existing jobs or skipped jobs
+      const existingUrlsSet = await getExistingSourceUrls(listingUrls);
+      const unscrapedUrls = listingUrls.filter((url) => !existingUrlsSet.has(url));
+
+      const skippedInBatch = listingUrls.length - unscrapedUrls.length;
+      if (skippedInBatch > 0) {
+        await logJobEvent(
+          'discoverJobs',
+          'PROGRESS',
+          `Skipped ${skippedInBatch} previously processed/skipped URLs on page ${pageNum}`
+        );
+      }
+
+      for (const url of unscrapedUrls) {
+        if (!newTargetUrls.includes(url) && newTargetUrls.length < maxJobs) {
+          newTargetUrls.push(url);
+        }
+      }
+
+      pageNum++;
+    }
+
+    await logJobEvent(
+      'discoverJobs',
+      'PROGRESS',
+      `Identified ${newTargetUrls.length} new unscraped job posting URLs`
+    );
+
+    if (newTargetUrls.length === 0) {
+      await logJobEvent('discoverJobs', 'SUCCESS', 'No new unscraped jobs found on current category pages.');
+      return [];
+    }
+
+    const context = page.context();
     const discoveredJobs = [];
 
-    // 3. Open each job detail page and parse structured job data
-    for (let i = 0; i < jobUrls.length; i++) {
-      if (discoveredJobs.length >= maxJobs) break;
-      const jobUrl = jobUrls[i];
+    // Scrape job details concurrently in small batches of 3 tabs for speed
+    const BATCH_SIZE = 3;
+    for (let i = 0; i < newTargetUrls.length; i += BATCH_SIZE) {
+      const batchUrls = newTargetUrls.slice(i, i + BATCH_SIZE);
 
-      try {
-        await openJobDetails(page, jobUrl);
-        const jobData = await parseJobDetails(page, jobUrl);
-        if (jobData && jobData.title) {
-          discoveredJobs.push(jobData);
+      const batchResults = await Promise.all(
+        batchUrls.map(async (jobUrl) => {
+          let detailPage = null;
+          try {
+            detailPage = await context.newPage();
+            // Block media/tracking to accelerate page loading
+            await detailPage.route('**/*.{png,jpg,jpeg,gif,svg,webp,mp4,mp3,wav,woff,woff2}', r => r.abort());
+            await detailPage.route(/(?:google-analytics|doubleclick|googlesyndication|facebook|analytics|tracker)/i, r => r.abort());
+
+            await detailPage.goto(jobUrl, { waitUntil: 'domcontentloaded', timeout: 6000 });
+            const jobData = await parseJobDetails(detailPage, jobUrl);
+            return jobData;
+          } catch (itemError) {
+            await logError('jobViaReferralSource.discoverJobs.item', itemError.message);
+            return null;
+          } finally {
+            if (detailPage) {
+              await detailPage.close().catch(() => {});
+            }
+          }
+        })
+      );
+
+      for (const res of batchResults) {
+        if (res && res.title) {
+          discoveredJobs.push(res);
           await logJobEvent(
             'discoverJobs',
             'PROGRESS',
-            `[${discoveredJobs.length}/${maxJobs}] Scraped job: ${jobData.title} @ ${jobData.companyName}`
+            `[${discoveredJobs.length}/${newTargetUrls.length}] Scraped new job: ${res.title} @ ${res.company}`
           );
         }
-      } catch (itemError) {
-        await logError('jobViaReferralSource.discoverJobs.item', itemError.message);
       }
     }
 

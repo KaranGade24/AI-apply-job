@@ -414,8 +414,13 @@ const checkEnoughJobsEdge = (state) => {
   const maxJobs = state.config?.maxJobs || 10;
   const currentSourceIndex = state.currentSourceIndex || 0;
   const sourcesCount = state.config?.sources?.length || 1;
+  const rawJobsCount = (state.rawJobs || []).length;
 
-  if (matched.length >= maxJobs || currentSourceIndex + 1 >= sourcesCount) {
+  if (
+    matched.length >= maxJobs ||
+    rawJobsCount === 0 ||
+    currentSourceIndex + 1 >= sourcesCount
+  ) {
     return END;
   }
 
