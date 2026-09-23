@@ -13,6 +13,7 @@ export const searchConfigSchema = z.object({
   }).default({ min: 0, max: 2 }),
   workMode: z.array(z.string()).default(["remote", "hybrid", "workFromOffice"]),
   employmentType: z.array(z.string()).default(["fullTime"]),
+  preferredApplicationMethods: z.array(z.string()).default(["email", "googleForm", "websiteForm", "phone", "unknown"]),
   postedWithin: z.string().default("24h"),
   maxJobs: z.number().default(10),
   userId: z.string().optional()
@@ -38,6 +39,7 @@ export const initialJobDiscoveryState = Object.freeze({
   normalizedJobs: [],
   filteredJobs: [],
   matchedJobs: [],
+  skippedJobs: [],
   currentSourceIndex: 0,
   candidateResumeText: '',
   errors: []

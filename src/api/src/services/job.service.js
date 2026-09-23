@@ -25,6 +25,7 @@ export const discoverJobsService = async ({
   experience = { min: 0, max: 2 },
   workMode = ['remote', 'hybrid', 'workFromOffice'],
   employmentType = ['fullTime'],
+  preferredApplicationMethods = ['email', 'googleForm', 'websiteForm', 'phone', 'unknown'],
   postedWithin = '24h',
   maxJobs = 10
 }) => {
@@ -54,6 +55,7 @@ export const discoverJobsService = async ({
       experience,
       workMode,
       employmentType,
+      preferredApplicationMethods,
       postedWithin,
       maxJobs,
       candidateResumeText

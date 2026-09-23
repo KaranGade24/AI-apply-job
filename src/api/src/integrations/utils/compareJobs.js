@@ -55,8 +55,41 @@ export const compareJobWithConfig = (job = {}, searchConfig = {}) => {
     const matchReasons = [];
     const failReasons = [];
     let score = 100;
+    let skipReason = 'OTHER';
 
     const fullText = `${job.title || ''} ${job.description || ''} ${(job.skills || []).join(' ')} ${job.location || ''}`.toLowerCase();
+
+    // 0. Preferred Application Method Matching
+    const preferredMethods = searchConfig.preferredApplicationMethods || searchConfig.preferredMethods;
+    if (Array.isArray(preferredMethods) && preferredMethods.length > 0) {
+      let detectedMethod = (job.applicationMethod || '').toLowerCase();
+      if (!detectedMethod || detectedMethod === 'unknown') {
+        const sourceContext = `${job.sourceUrl || ''} ${job.description || ''}`.toLowerCase();
+        if (sourceContext.includes('docs.google.com/forms') || sourceContext.includes('forms.gle')) {
+          detectedMethod = 'googleform';
+        } else if (sourceContext.includes('mailto:') || /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/.test(sourceContext)) {
+          detectedMethod = 'email';
+        } else if (sourceContext.includes('tel:') || /\b\d{10}\b/.test(sourceContext)) {
+          detectedMethod = 'phone';
+        } else {
+          detectedMethod = 'websiteform';
+        }
+      }
+
+      const normalizedPreferred = preferredMethods.map(m => m.toLowerCase());
+      if (!normalizedPreferred.includes(detectedMethod)) {
+        failReasons.push(`Application method '${detectedMethod}' is not included in user preferred methods [${preferredMethods.join(', ')}]`);
+        return {
+          isMatch: false,
+          score: 0,
+          skipReason: 'UNSUPPORTED_METHOD',
+          matchReasons,
+          failReasons
+        };
+      } else {
+        matchReasons.push(`Matched preferred application method '${detectedMethod}'`);
+      }
+    }
 
     // 1. Keyword Matching
     if (Array.isArray(searchConfig.keywords) && searchConfig.keywords.length > 0) {
@@ -68,6 +101,7 @@ export const compareJobWithConfig = (job = {}, searchConfig = {}) => {
         matchReasons.push(`Matched keywords: ${matchedKeywords.join(', ')}`);
       } else {
         score -= 40;
+        skipReason = 'KEYWORD_MISMATCH';
         failReasons.push(`No matching keywords found from [${searchConfig.keywords.join(', ')}]`);
       }
     }
@@ -94,6 +128,7 @@ export const compareJobWithConfig = (job = {}, searchConfig = {}) => {
         return {
           isMatch: false,
           score: 0,
+          skipReason: 'LOCATION_MISMATCH',
           matchReasons,
           failReasons
         };
@@ -119,6 +154,7 @@ export const compareJobWithConfig = (job = {}, searchConfig = {}) => {
         matchReasons.push(`Matched requested work mode (${job.workMode || 'detected'})`);
       } else {
         score -= 20;
+        if (skipReason === 'OTHER') skipReason = 'WORK_MODE_MISMATCH';
         failReasons.push(`Work mode '${job.workMode || 'unspecified'}' did not match requested modes [${searchConfig.workMode.join(', ')}]`);
       }
     }
@@ -130,6 +166,7 @@ export const compareJobWithConfig = (job = {}, searchConfig = {}) => {
         matchReasons.push(`Posted within window (${searchConfig.postedWithin})`);
       } else {
         score -= 30;
+        if (skipReason === 'OTHER') skipReason = 'CONFIG_MISMATCH';
         failReasons.push(`Posted date (${job.postedDate}) older than required window (${searchConfig.postedWithin})`);
       }
     }
@@ -139,6 +176,7 @@ export const compareJobWithConfig = (job = {}, searchConfig = {}) => {
     return {
       isMatch,
       score: Math.max(0, score),
+      skipReason: isMatch ? null : skipReason,
       matchReasons,
       failReasons
     };

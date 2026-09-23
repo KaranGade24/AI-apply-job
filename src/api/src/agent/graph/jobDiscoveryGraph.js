@@ -13,6 +13,7 @@ import { upsertJob, getExistingSourceUrls } from "../../repositories/job.reposit
 import { Resume } from "../../model/Resume.js";
 import { logError, logResumeEvent, logJobEvent } from "../../utils/logger.js";
 import { calculateScrapeLimit } from "../../constant/agent.constant.js";
+import { logSkippedJobService } from "../../services/skippedApplication.service.js";
 
 export { searchConfigSchema };
 
@@ -181,12 +182,19 @@ const applyFiltersNode = async (state) => {
     const existingSet = await getExistingSourceUrls(sourceUrls);
 
     const passedJobs = [];
+    const skippedJobs = [...(state.skippedJobs || [])];
     let skippedExistingCount = 0;
 
     for (const job of normalized) {
       // Skip if job already exists in database
       if (job.sourceUrl && existingSet.has(job.sourceUrl)) {
         skippedExistingCount++;
+        skippedJobs.push({
+          userId: config?.userId,
+          job,
+          skipReason: 'ALREADY_EXISTS',
+          skipDetails: 'Job source URL already present in database',
+        });
         await logJobEvent(
           "applyFiltersNode",
           "SKIP_EXISTING",
@@ -202,17 +210,25 @@ const applyFiltersNode = async (state) => {
           deterministicScore: evaluation.score,
           matchReasons: evaluation.matchReasons,
         });
+      } else {
+        skippedJobs.push({
+          userId: config?.userId,
+          job,
+          skipReason: evaluation.skipReason || 'CONFIG_MISMATCH',
+          skipDetails: (evaluation.failReasons || []).join('; '),
+        });
       }
     }
 
     await logJobEvent(
       "applyFiltersNode",
       "SUCCESS",
-      `Filtered ${passedJobs.length}/${normalized.length} jobs based on criteria (skipped ${skippedExistingCount} already in database)`,
+      `Filtered ${passedJobs.length}/${normalized.length} jobs based on criteria (skipped ${skippedJobs.length} total)`,
     );
 
     return {
       filteredJobs: passedJobs,
+      skippedJobs,
     };
   } catch (error) {
     await logError("jobDiscoveryGraph.applyFiltersNode", error.message);
@@ -229,6 +245,7 @@ const matchWithResumeNode = async (state) => {
   try {
     const candidateText = state.candidateResumeText;
     const jobsToMatch = state.filteredJobs || [];
+    const skippedJobs = [...(state.skippedJobs || [])];
 
     if (!candidateText || jobsToMatch.length === 0) {
       const defaultMatched = jobsToMatch.map((job) => ({
@@ -244,7 +261,7 @@ const matchWithResumeNode = async (state) => {
         "BYPASS",
         `Bypassed LLM evaluation for ${jobsToMatch.length} jobs (no candidate resume or jobs empty)`,
       );
-      return { matchedJobs: defaultMatched };
+      return { matchedJobs: defaultMatched, skippedJobs };
     }
 
     await logJobEvent(
@@ -272,6 +289,15 @@ const matchWithResumeNode = async (state) => {
           const parsedMatch = JSON.parse(rawContent);
 
           const isMatch = parsedMatch.isMatch && parsedMatch.matchScore >= 50;
+
+          if (!isMatch) {
+            skippedJobs.push({
+              userId: state.config?.userId,
+              job,
+              skipReason: 'SKILL_MISMATCH',
+              skipDetails: parsedMatch.matchReason || `LLM Match score ${parsedMatch.matchScore || 0}% below threshold`,
+            });
+          }
 
           return {
             ...job,
@@ -301,7 +327,7 @@ const matchWithResumeNode = async (state) => {
       "SUCCESS",
       `Completed LLM evaluation for ${matchedResults.length} jobs`,
     );
-    return { matchedJobs: matchedResults };
+    return { matchedJobs: matchedResults, skippedJobs };
   } catch (error) {
     await logError("jobDiscoveryGraph.matchWithResumeNode", error.message);
     return { matchedJobs: state.filteredJobs || [] };
@@ -313,7 +339,9 @@ const matchWithResumeNode = async (state) => {
  */
 const storeEligibleJobsNode = async (state) => {
   try {
-    const jobsToStore = state.matchedJobs || [];
+    const jobsToStore = (state.matchedJobs || []).filter(
+      (j) => j.matchStatus === "MATCHED",
+    );
     const storedList = [];
 
     for (const jobData of jobsToStore) {
@@ -326,7 +354,7 @@ const storeEligibleJobsNode = async (state) => {
     await logJobEvent(
       "storeEligibleJobsNode",
       "SUCCESS",
-      `Persisted ${storedList.length}/${jobsToStore.length} jobs to MongoDB`,
+      `Persisted ${storedList.length}/${jobsToStore.length} matched jobs to MongoDB`,
     );
 
     return {
@@ -335,6 +363,44 @@ const storeEligibleJobsNode = async (state) => {
   } catch (error) {
     await logError("jobDiscoveryGraph.storeEligibleJobsNode", error.message);
     return { storedJobsCount: 0 };
+  }
+};
+
+/**
+ * Node 7: Skip Node - Persist Skipped Jobs with Exact Reasons into MongoDB
+ */
+const storeSkippedJobsNode = async (state) => {
+  try {
+    const skippedList = state.skippedJobs || [];
+    const userId = state.config?.userId;
+
+    if (!userId || skippedList.length === 0) {
+      return { storedSkippedCount: 0 };
+    }
+
+    let storedCount = 0;
+    for (const item of skippedList) {
+      if (item.job && item.job.sourceUrl) {
+        await logSkippedJobService({
+          userId: item.userId || userId,
+          job: item.job,
+          skipReason: item.skipReason,
+          skipDetails: item.skipDetails,
+        }).catch(() => null);
+        storedCount++;
+      }
+    }
+
+    await logJobEvent(
+      "storeSkippedJobsNode",
+      "SUCCESS",
+      `Persisted ${storedCount}/${skippedList.length} skipped jobs with reasons into MongoDB`,
+    );
+
+    return { storedSkippedCount: storedCount };
+  } catch (error) {
+    await logError("jobDiscoveryGraph.storeSkippedJobsNode", error.message);
+    return { storedSkippedCount: 0 };
   }
 };
 
@@ -366,6 +432,7 @@ const graphBuilder = new StateGraph({
     normalizedJobs: { value: (x, y) => y ?? x, default: () => [] },
     filteredJobs: { value: (x, y) => y ?? x, default: () => [] },
     matchedJobs: { value: (x, y) => y ?? x, default: () => [] },
+    skippedJobs: { value: (x, y) => y ?? x, default: () => [] },
     currentSourceIndex: { value: (x, y) => y ?? x, default: () => 0 },
     candidateResumeText: { value: (x, y) => y ?? x, default: () => "" },
     errors: { value: (x, y) => (x || []).concat(y || []), default: () => [] },
@@ -379,13 +446,15 @@ graphBuilder
   .addNode("applyFilters", applyFiltersNode)
   .addNode("matchWithResume", matchWithResumeNode)
   .addNode("storeEligibleJobs", storeEligibleJobsNode)
+  .addNode("storeSkippedJobs", storeSkippedJobsNode)
   .addEdge(START, "validateConfig")
   .addEdge("validateConfig", "discoverJobs")
   .addEdge("discoverJobs", "normalizeJobs")
   .addEdge("normalizeJobs", "applyFilters")
   .addEdge("applyFilters", "matchWithResume")
   .addEdge("matchWithResume", "storeEligibleJobs")
-  .addConditionalEdges("storeEligibleJobs", checkEnoughJobsEdge, {
+  .addEdge("storeEligibleJobs", "storeSkippedJobs")
+  .addConditionalEdges("storeSkippedJobs", checkEnoughJobsEdge, {
     discoverJobs: "discoverJobs",
     [END]: END,
   });

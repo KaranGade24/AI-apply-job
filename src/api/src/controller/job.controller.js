@@ -18,6 +18,8 @@ export const discoverJobsController = async (req, res) => {
       experience,
       workMode,
       employmentType,
+      preferredApplicationMethods,
+      preferredMethods,
       postedWithin,
       maxJobs,
     } = req.body || {};
@@ -30,6 +32,7 @@ export const discoverJobsController = async (req, res) => {
       experience,
       workMode,
       employmentType,
+      preferredApplicationMethods: preferredApplicationMethods || preferredMethods,
       postedWithin,
       maxJobs,
     });

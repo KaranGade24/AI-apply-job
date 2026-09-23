@@ -118,6 +118,8 @@ body {
   padding-bottom: calc(2px * var(--scale-factor));
   margin-bottom: calc(5px * var(--scale-factor));
   font-weight: 700;
+  break-after: avoid;
+  page-break-after: avoid;
 }
 
 /* Summary */
@@ -138,6 +140,8 @@ body {
 .skill-row {
   font-size: calc(9.8px * var(--scale-factor));
   line-height: calc(1.38 * var(--scale-factor));
+  break-inside: avoid;
+  page-break-inside: avoid;
 }
 
 .skill-category {
@@ -152,18 +156,24 @@ body {
 /* Projects & Experience */
 .entry-item {
   margin-bottom: var(--margin-entry);
+  break-inside: avoid;
+  page-break-inside: avoid;
 }
 
 .project-header {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
+  break-after: avoid;
+  page-break-after: avoid;
 }
 
 .project-title-row {
   display: flex;
   align-items: baseline;
   gap: calc(10px * var(--scale-factor));
+  break-after: avoid;
+  page-break-after: avoid;
 }
 
 .project-title {
@@ -202,17 +212,23 @@ body {
 .highlights li {
   margin-bottom: var(--margin-bullet);
   line-height: calc(1.38 * var(--scale-factor));
+  break-inside: avoid;
+  page-break-inside: avoid;
 }
 
 .technologies {
   font-size: var(--font-sub);
   color: var(--color-body);
   margin-top: calc(3px * var(--scale-factor));
+  break-inside: avoid;
+  page-break-inside: avoid;
 }
 
 /* Education */
 .education-item {
   margin-bottom: calc(5px * var(--scale-factor));
+  break-inside: avoid;
+  page-break-inside: avoid;
 }
 
 .degree-title {
