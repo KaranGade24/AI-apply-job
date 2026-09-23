@@ -15,20 +15,27 @@ export const tailoredResumeSchema = z.object({
       location: z.string().optional().default(""),
       linkedin: z.string().optional().default(""),
       github: z.string().optional().default(""),
+      website: z.string().optional().default(""),
+      portfolio: z.string().optional().default(""),
     }),
     summary: z.string().describe("Tailored professional summary matching job context without inventing facts"),
-    skills: z.object({
-      technicalSkills: z.array(z.string()),
-      softSkills: z.array(z.string()).optional().default([]),
-      toolsAndFrameworks: z.array(z.string()).optional().default([]),
-    }),
+    skills: z.union([
+      z.record(z.union([z.array(z.string()), z.string()])),
+      z.object({
+        technicalSkills: z.array(z.string()).optional().default([]),
+        softSkills: z.array(z.string()).optional().default([]),
+        toolsAndFrameworks: z.array(z.string()).optional().default([]),
+      })
+    ]).optional(),
     experience: z.array(
       z.object({
         title: z.string(),
         company: z.string().optional().default(""),
         duration: z.string().optional().default(""),
+        date: z.string().optional().default(""),
         location: z.string().optional().default(""),
         highlights: z.array(z.string()),
+        technologies: z.array(z.string()).optional().default([]),
       })
     ).optional().default([]),
     projects: z.array(
@@ -37,6 +44,14 @@ export const tailoredResumeSchema = z.object({
         description: z.string().optional().default(""),
         technologies: z.array(z.string()).optional().default([]),
         highlights: z.array(z.string()).optional().default([]),
+        date: z.string().optional().default(""),
+        links: z.object({
+          github: z.string().optional().default(""),
+          liveDemo: z.string().optional().default(""),
+          demo: z.string().optional().default(""),
+        }).optional().default({}),
+        githubUrl: z.string().optional().default(""),
+        demoUrl: z.string().optional().default(""),
       })
     ).optional().default([]),
     education: z.array(
@@ -45,6 +60,7 @@ export const tailoredResumeSchema = z.object({
         fieldOfStudy: z.string().optional().default(""),
         institution: z.string().optional().default(""),
         graduationYear: z.string().optional().default(""),
+        cgpa: z.string().optional().default(""),
       })
     ).optional().default([]),
   }),

@@ -53,9 +53,25 @@ export const findOriginalResumeByUserId = async (userId) => {
   }
 };
 
+/**
+ * Gets active resume for a User ID
+ */
+export const getActiveResumeByUserId = async (userId) => {
+  try {
+    const resume = await Resume.findOne({ userId, type: ResumeType.ORIGINAL }).sort({ createdAt: -1 });
+    if (!resume) {
+      return await Resume.findOne({ userId }).sort({ createdAt: -1 });
+    }
+    return resume;
+  } catch (error) {
+    throw new appError(`Database error fetching active resume: ${error.message}`, 500);
+  }
+};
+
 export default {
   createResume,
   findResumesByUserId,
   findResumeById,
-  findOriginalResumeByUserId
+  findOriginalResumeByUserId,
+  getActiveResumeByUserId
 };

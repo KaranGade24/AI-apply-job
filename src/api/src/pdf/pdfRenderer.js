@@ -5,7 +5,7 @@ import { logError } from "../utils/logger.js";
 import { appError } from "../utils/errors.js";
 
 /**
- * Renders an HTML document to an A4 PDF using Playwright Chromium with dynamic page-fitting auto-scaling.
+ * Renders an HTML document to an A4 PDF using Playwright Chromium with bidirectional dynamic page-fit scaling.
  *
  * @param {string} htmlContent - Complete HTML document
  * @param {string} outputPath - Relative or absolute PDF destination
@@ -28,7 +28,6 @@ export const renderHtmlToPdf = async (htmlContent, outputPath) => {
       ? outputPath
       : path.resolve(process.cwd(), outputPath);
 
-    // Ensure the output directory exists.
     await fs.mkdir(path.dirname(resolvedPath), {
       recursive: true,
     });
@@ -40,7 +39,7 @@ export const renderHtmlToPdf = async (htmlContent, outputPath) => {
       waitUntil: "networkidle",
     });
 
-    // Make sure fonts are loaded & run auto-fit loop to scale fonts/margins exactly to target page count
+    // Run dynamic bidirectional auto-scaling loop in Playwright browser
     await page.evaluate(async () => {
       if (document.fonts?.ready) {
         await document.fonts.ready;
@@ -52,25 +51,25 @@ export const renderHtmlToPdf = async (htmlContent, outputPath) => {
       const maxAllowedHeight = targetPages * 1080;
 
       let minScale = 0.50;
-      let maxScale = 1.0;
+      let maxScale = 1.45;
       let bestScale = 1.0;
 
-      if (pageEl.scrollHeight > maxAllowedHeight) {
-        for (let i = 0; i < 25; i++) {
-          let midScale = (minScale + maxScale) / 2;
-          document.documentElement.style.setProperty('--scale-factor', midScale.toFixed(3));
-          if (pageEl.scrollHeight <= maxAllowedHeight) {
-            bestScale = midScale;
-            minScale = midScale;
-          } else {
-            maxScale = midScale;
-          }
+      document.documentElement.style.setProperty('--scale-factor', '1.0');
+
+      for (let i = 0; i < 30; i++) {
+        let midScale = (minScale + maxScale) / 2;
+        document.documentElement.style.setProperty('--scale-factor', midScale.toFixed(3));
+        if (pageEl.scrollHeight <= maxAllowedHeight) {
+          bestScale = midScale;
+          minScale = midScale; // Fit succeeded: try scaling UP further to fill empty bottom space
+        } else {
+          maxScale = midScale; // Content overflowed page: scale DOWN
         }
-        document.documentElement.style.setProperty('--scale-factor', bestScale.toFixed(3));
       }
+
+      document.documentElement.style.setProperty('--scale-factor', bestScale.toFixed(3));
     });
 
-    // Use print media styles.
     await page.emulateMedia({
       media: "print",
     });

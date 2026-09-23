@@ -10,7 +10,7 @@
       </div>
       <div class="project-links">
         {{#if demoUrl}}<a href="{{demoUrl}}" target="_blank">Live Demo</a>{{/if}}
-        {{#if githubUrl}}<span class="link-sep">|</span> <a href="{{githubUrl}}" target="_blank">GitHub</a>{{/if}}
+        {{#if githubUrl}}{{#if demoUrl}}<span class="link-sep">|</span>{{/if}} <a href="{{githubUrl}}" target="_blank">GitHub</a>{{/if}}
       </div>
     </div>
     {{#if description}}<p class="project-description">{{description}}</p>{{/if}}

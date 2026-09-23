@@ -2,6 +2,7 @@ import { runAgent } from "../agent/agent.js";
 import {
   createApplication,
   findApplicationById,
+  findApplicationByJobAndUser,
   findNextPendingApplication,
   updateApplicationStatus,
   updateApplicationEmail,
@@ -29,22 +30,19 @@ export const createApplicationFromJob = async (userId, jobId) => {
       throw new appError("Job posting not found", 404);
     }
 
-    const application = await createApplication({
-      userId,
-      jobId,
-      status: APPLICATION_STATUS.PENDING,
-      applicationMethod: job.applicationMethod || "email",
-    });
-
-    // Run application pipeline asynchronously / synchronously
-    const executionResult = await runAgent(
+    // Pass jobId + userId directly — the graph's initApplicationNode will create the
+    // application record. Passing a pre-created applicationId here would route every
+    // fresh application through loadExistingApplicationNode, setting isRegeneration=true
+    // and skipping resume tailoring + email generation entirely.
+    await runAgent(
       "jobApplication",
-      { applicationId: application._id.toString(), userId },
+      { jobId: jobId.toString(), userId },
       { userId },
     );
 
-    const updatedApp = await findApplicationById(application._id.toString());
-    return updatedApp || executionResult;
+    // Fetch the application record that was created by the graph during this run.
+    const updatedApp = await findApplicationByJobAndUser(userId, jobId);
+    return updatedApp;
   } catch (error) {
     await logError(
       "applicationService.createApplicationFromJob",
@@ -61,17 +59,36 @@ export const createApplicationFromJob = async (userId, jobId) => {
  */
 export const processNextPendingApplication = async (userId) => {
   try {
-    console.log("userid:", userId);
     const pendingApp = await findNextPendingApplication(userId);
     if (!pendingApp) {
       return null;
     }
 
-    await runAgent(
-      "jobApplication",
-      { applicationId: pendingApp._id.toString(), userId },
-      { userId },
-    );
+    // Route based on whether this application has ever been processed before.
+    // If tailoredResumeData exists, it is a genuine re-generation run (applicationId path).
+    // If not, treat it as a brand-new run so the full pipeline (tailor + email) executes.
+    const hasExistingTailoredResume = !!(pendingApp.resume?.tailoredResumeData);
+
+    if (hasExistingTailoredResume) {
+      // Re-generation: let loadExistingApplicationNode handle it.
+      await runAgent(
+        "jobApplication",
+        { applicationId: pendingApp._id.toString(), userId },
+        { userId },
+      );
+    } else {
+      // First-time processing: pass jobId so initApplicationNode creates a fresh run.
+      // The graph will reuse the existing application via createApplication's upsert logic.
+      const jobId =
+        pendingApp.jobId?._id?.toString?.() ||
+        pendingApp.jobId?.toString?.() ||
+        pendingApp.jobId;
+      await runAgent(
+        "jobApplication",
+        { jobId: jobId.toString(), userId },
+        { userId },
+      );
+    }
 
     return await findApplicationById(pendingApp._id.toString());
   } catch (error) {

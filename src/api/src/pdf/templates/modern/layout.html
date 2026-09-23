@@ -17,24 +17,23 @@
         const maxAllowedHeight = targetPages * 1080;
         
         let minScale = 0.50;
-        let maxScale = 1.0;
+        let maxScale = 1.45;
         let bestScale = 1.0;
         
-        document.documentElement.style.setProperty('--scale-factor', '1');
+        document.documentElement.style.setProperty('--scale-factor', '1.0');
         
-        if (pageEl.scrollHeight > maxAllowedHeight) {
-          for (let i = 0; i < 25; i++) {
-            let midScale = (minScale + maxScale) / 2;
-            document.documentElement.style.setProperty('--scale-factor', midScale.toFixed(3));
-            if (pageEl.scrollHeight <= maxAllowedHeight) {
-              bestScale = midScale;
-              minScale = midScale;
-            } else {
-              maxScale = midScale;
-            }
+        for (let i = 0; i < 30; i++) {
+          let midScale = (minScale + maxScale) / 2;
+          document.documentElement.style.setProperty('--scale-factor', midScale.toFixed(3));
+          if (pageEl.scrollHeight <= maxAllowedHeight) {
+            bestScale = midScale;
+            minScale = midScale;
+          } else {
+            maxScale = midScale;
           }
-          document.documentElement.style.setProperty('--scale-factor', bestScale.toFixed(3));
         }
+        
+        document.documentElement.style.setProperty('--scale-factor', bestScale.toFixed(3));
       }
       
       if (document.readyState === 'loading') {

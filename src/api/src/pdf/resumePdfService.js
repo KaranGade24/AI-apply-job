@@ -19,15 +19,16 @@ export const buildResumeHtml = async (resumeData = {}, template = RESUME_PDF_TEM
 };
 
 /**
- * Generates a tailored PDF resume from structured JSON data
+ * Generates a tailored PDF resume from structured JSON data with dynamic single-page auto-fit scaling.
  * @param {object} params
  * @param {object} params.resumeData - Tailored structured resume JSON
  * @param {string} [params.template] - Resume PDF template choice ('modern', 'minimal', 'ats')
  * @param {string} [params.filename] - Custom output filename
  * @param {string} [params.userId] - Optional User ID to fetch fallback user profile details
+ * @param {number|string} [params.targetPages] - Target page length (default: 1)
  * @returns {Promise<string>} Output PDF file path
  */
-export const generateResumePdf = async ({ resumeData, template = RESUME_PDF_TEMPLATES.MODERN, filename, userId }) => {
+export const generateResumePdf = async ({ resumeData, template = RESUME_PDF_TEMPLATES.MODERN, filename, userId, targetPages = 1 }) => {
   try {
     if (!resumeData || typeof resumeData !== "object") {
       throw new appError("Valid resumeData object is required to generate PDF", 400);
@@ -77,12 +78,14 @@ export const generateResumePdf = async ({ resumeData, template = RESUME_PDF_TEMP
           personalInfo.github = profileLinks.github || "";
         }
       } catch (dbErr) {
-        // Log DB fetch warning but continue with available resumeData
-        await logError("resumePdfService.generateResumePdf.fetchUserInfo", dbErr.message);
+        if (typeof logError === "function") {
+          await logError("resumePdfService.generateResumePdf.fetchUserInfo", dbErr.message);
+        }
       }
     }
 
     resumeData.personalInfo = personalInfo;
+    resumeData.targetPages = targetPages || resumeData.targetPages || 1;
 
     const themeName = template === RESUME_PDF_TEMPLATES.MINIMAL ? "minimal" : template === RESUME_PDF_TEMPLATES.ATS ? "ats" : "modern";
     const htmlContent = await resumeRenderer.render(resumeData, themeName);
@@ -102,7 +105,9 @@ export const generateResumePdf = async ({ resumeData, template = RESUME_PDF_TEMP
     const savedPath = await renderHtmlToPdf(htmlContent, outputPath);
     return savedPath;
   } catch (error) {
-    await logError("resumePdfService.generateResumePdf", error.message);
+    if (typeof logError === "function") {
+      await logError("resumePdfService.generateResumePdf", error.message);
+    }
     throw error;
   }
 };

@@ -1,14 +1,5 @@
-import { StateGraph, END, START, MemorySaver } from "@langchain/langgraph";
+import { StateGraph, START, END, MemorySaver } from "@langchain/langgraph";
 import { getGeminiModel } from "../config/modelConfig.js";
-import { APPLICATION_STATUS, APPLICATION_METHOD, RESUME_PAGE_COUNT } from "../../constant/application.constant.js";
-import {
-  findApplicationById,
-  findNextPendingApplication,
-  updateApplicationStatus,
-  updateApplicationResume,
-  updateApplicationEmail,
-} from "../../repositories/application.repository.js";
-import { Resume } from "../../model/Resume.js";
 import { tailoredResumeSchema } from "../schema/tailoredResumeSchema.js";
 import { applicationEmailSchema } from "../schema/applicationEmailSchema.js";
 import {
@@ -20,51 +11,45 @@ import {
   buildApplicationEmailPrompt,
   formatAndCleanEmailBody,
 } from "../prompt/applicationEmail.js";
-import { generateResumePdf } from "../../pdf/resumePdfService.js";
-import { sendApplicationEmail } from "../../integrations/email/emailService.js";
+import {
+  APPLICATION_STATUS,
+  APPLICATION_METHOD,
+  RESUME_PAGE_COUNT,
+} from "../../constant/application.constant.js";
+import { normalizeApplicationMethod } from "../../repositories/application.repository.js";
 import { logError, logJobEvent } from "../../utils/logger.js";
 import { appError } from "../../utils/errors.js";
+import {
+  createApplication,
+  findApplicationById,
+  updateApplicationStatus,
+  updateApplicationResume,
+  updateApplicationEmail,
+} from "../../repositories/application.repository.js";
+import { getActiveResumeByUserId } from "../../repositories/resume.repository.js";
+import { generateResumePdf } from "../../pdf/resumePdfService.js";
+import { sendApplicationEmail } from "../../integrations/email/emailService.js";
 
 /**
- * 1. Initialize or load Application Node
+ * 1. Init Application Node
  */
 const initApplicationNode = async (state) => {
   try {
-    let application = null;
-    if (state.applicationId) {
-      application = await findApplicationById(state.applicationId);
-    } else if (state.userId) {
-      application = await findNextPendingApplication(state.userId);
-    }
-
-    if (!application) {
-      await logJobEvent("initApplicationNode", "NO_PENDING", "No pending application found to process");
-      return {
-        status: "IDLE",
-        errorInfo: { message: "No pending job application found" },
-      };
-    }
-
-    await updateApplicationStatus(application._id.toString(), APPLICATION_STATUS.PROCESSING, {
-      logMessage: "Initiating job application pipeline",
+    const application = await createApplication({
+      userId: state.userId,
+      jobId: state.jobId,
+      status: APPLICATION_STATUS.PENDING,
     });
 
-    const jobDoc = application.jobId || {};
+    await logJobEvent(
+      "initApplicationNode",
+      "PENDING",
+      `Application ${application._id} initialized for job ${state.jobId}`,
+    );
 
     return {
       applicationId: application._id.toString(),
-      jobId: jobDoc._id ? jobDoc._id.toString() : state.jobId,
-      userId: application.userId ? (application.userId._id || application.userId).toString() : state.userId,
-      job: {
-        id: jobDoc._id ? jobDoc._id.toString() : "",
-        title: jobDoc.title || "Job Posting",
-        companyName: jobDoc.companyName || "Company",
-        location: jobDoc.location || "",
-        description: jobDoc.description || "",
-        applicationMethod: jobDoc.applicationMethod || application.applicationMethod || "email",
-        sourceUrl: jobDoc.sourceUrl || "",
-      },
-      status: APPLICATION_STATUS.PROCESSING,
+      status: APPLICATION_STATUS.PENDING,
     };
   } catch (error) {
     await logError("jobApplicationGraph.initApplicationNode", error.message);
@@ -76,51 +61,50 @@ const initApplicationNode = async (state) => {
 };
 
 /**
- * 2. Check Application Method Node
+ * 1b. Load Existing Application Node (re-run path)
+ * Hydrates jobId and job into state when an applicationId is already provided,
+ * so the rest of the pipeline can proceed without creating a duplicate application.
  */
-const checkApplicationMethodNode = async (state) => {
+const loadExistingApplicationNode = async (state) => {
   try {
-    const rawMethod = state.job?.applicationMethod || "email";
-    const textToAnalyze = `${rawMethod} ${state.job?.description || ""}`.toLowerCase();
-
-    let method = APPLICATION_METHOD.EMAIL;
-    if (/\b(?:phone|call|whatsapp)\b/i.test(textToAnalyze)) {
-      method = APPLICATION_METHOD.PHONE;
-    } else if (/google\.com\/forms|forms\.gle/i.test(textToAnalyze)) {
-      method = APPLICATION_METHOD.GOOGLE_FORM;
-    } else if (/\b(?:apply on website|portal|lever\.co|greenhouse\.io|workday)\b/i.test(textToAnalyze)) {
-      method = APPLICATION_METHOD.WEBSITE_FORM;
+    const application = await findApplicationById(state.applicationId);
+    if (!application) {
+      throw new appError(`Application not found: ${state.applicationId}`, 404);
     }
 
-    if (method !== APPLICATION_METHOD.EMAIL) {
-      await updateApplicationStatus(state.applicationId, APPLICATION_STATUS.UNSUPPORTED_METHOD, {
-        applicationMethod: method,
-        logMessage: `Application method '${method}' is not supported in email-only pipeline`,
-      });
+    // jobId is populated by findApplicationById; convert to plain object to prevent
+    // Mongoose document serialization issues inside LangGraph state channels.
+    const jobDoc = application.jobId.toObject ? application.jobId.toObject() : application.jobId;
+    const jobId = jobDoc._id.toString();
 
-      await logJobEvent(
-        "checkApplicationMethodNode",
-        "UNSUPPORTED",
-        `Job requires unsupported method '${method}'. Application marked as unsupported_method`
-      );
+    // userId may be populated (object) or a raw ObjectId string — normalise to string.
+    const resolvedUserId =
+      state.userId ||
+      (application.userId?._id
+        ? application.userId._id.toString()
+        : application.userId?.toString?.() || "");
 
-      return {
-        applicationMethod: method,
-        status: APPLICATION_STATUS.UNSUPPORTED_METHOD,
-      };
-    }
+    // isRegeneration is only true when a prior tailored resume already exists on this
+    // application. A brand-new application that was pre-created in the service layer
+    // (but never processed) must go through the full pipeline.
+    const isRegeneration = !!(application.resume?.tailoredResumeData);
 
-    await updateApplicationStatus(state.applicationId, APPLICATION_STATUS.RESUME_GENERATING, {
-      applicationMethod: APPLICATION_METHOD.EMAIL,
-      logMessage: "Application method confirmed as EMAIL. Generating tailored resume...",
-    });
+    await logJobEvent(
+      "loadExistingApplicationNode",
+      isRegeneration ? "RESUME_REGEN" : "FIRST_RUN",
+      `Loaded existing application ${application._id} for job ${jobId} (isRegeneration=${isRegeneration})`,
+    );
 
     return {
-      applicationMethod: APPLICATION_METHOD.EMAIL,
-      status: APPLICATION_STATUS.RESUME_GENERATING,
+      userId: resolvedUserId,
+      jobId,
+      job: jobDoc,
+      applicationId: application._id.toString(),
+      isRegeneration,
+      status: APPLICATION_STATUS.PENDING,
     };
   } catch (error) {
-    await logError("jobApplicationGraph.checkApplicationMethodNode", error.message);
+    await logError("jobApplicationGraph.loadExistingApplicationNode", error.message);
     return {
       status: APPLICATION_STATUS.FAILED,
       errorInfo: { message: error.message },
@@ -129,20 +113,64 @@ const checkApplicationMethodNode = async (state) => {
 };
 
 /**
- * 3. Get Candidate Base Resume Node
+ * 2. Check Application Method Node
+ *
+ * Supported routing:
+ *   - APPLICATION_METHOD.EMAIL       → full pipeline (tailor resume + generate email)
+ *   - APPLICATION_METHOD.WEBSITE_FORM
+ *   - APPLICATION_METHOD.GOOGLE_FORM → tailor resume + generate PDF only (portal apply)
+ *   - Everything else (phone, unknown, NOT_SPECIFIED, etc.) → UNSUPPORTED_METHOD
+ */
+const checkApplicationMethodNode = async (state) => {
+  try {
+    const job = state.job;
+
+    // Normalize the raw value stored in the Job document against the APPLICATION_METHOD enum.
+    // This handles values like "NOT_SPECIFIED", "googleForm", "websiteForm", raw freetext, etc.
+    const normalizedMethod = normalizeApplicationMethod(job?.applicationMethod);
+
+    const SUPPORTED_METHODS = [
+      APPLICATION_METHOD.EMAIL,
+      APPLICATION_METHOD.WEBSITE_FORM,
+      APPLICATION_METHOD.GOOGLE_FORM,
+    ];
+
+    if (!SUPPORTED_METHODS.includes(normalizedMethod)) {
+      await updateApplicationStatus(
+        state.applicationId,
+        APPLICATION_STATUS.UNSUPPORTED_METHOD,
+        {
+          rejectionReason: `Unsupported application method: ${job?.applicationMethod} (normalized: ${normalizedMethod})`,
+        },
+      );
+      return { status: APPLICATION_STATUS.UNSUPPORTED_METHOD };
+    }
+
+    return { applicationMethod: normalizedMethod };
+  } catch (error) {
+    await logError(
+      "jobApplicationGraph.checkApplicationMethodNode",
+      error.message,
+    );
+    return {
+      status: APPLICATION_STATUS.FAILED,
+      errorInfo: { message: error.message },
+    };
+  }
+};
+
+/**
+ * 3. Get User Active Resume Node
  */
 const getUserResumeNode = async (state) => {
   try {
-    const activeResume = await Resume.findOne({
-      userId: state.userId,
-    }).sort({ createdAt: -1 });
-
-    if (!activeResume || !activeResume.parsedData) {
-      throw new appError("No active parsed resume found for user. Please upload a resume first.", 404);
+    const activeResume = await getActiveResumeByUserId(state.userId);
+    if (!activeResume) {
+      throw new appError("No active resume found for candidate", 404);
     }
 
     return {
-      resume: activeResume.parsedData,
+      resume: activeResume.parsedData || activeResume,
       sourceResumeId: activeResume._id.toString(),
     };
   } catch (error) {
@@ -155,7 +183,7 @@ const getUserResumeNode = async (state) => {
 };
 
 /**
- * 4. Tailor Resume Node
+ * 4. Tailor Resume Node (With 100% Link Preservation Merge)
  */
 const tailorResumeNode = async (state) => {
   try {
@@ -173,8 +201,86 @@ const tailorResumeNode = async (state) => {
       { role: "user", content: promptText },
     ]);
 
+    const tailored = result.tailoredResume || {};
+    const baseResume = state.resume || {};
+
+    // Merge & preserve personal links from base resume
+    const basePersonal = baseResume.personalInfo || baseResume.personal || {};
+    const tailoredPersonal = tailored.personalInfo || {};
+
+    tailored.personalInfo = {
+      ...tailoredPersonal,
+      linkedin:
+        tailoredPersonal.linkedin ||
+        basePersonal.linkedin ||
+        basePersonal.linkedinUrl ||
+        "",
+      github:
+        tailoredPersonal.github ||
+        basePersonal.github ||
+        basePersonal.githubUrl ||
+        "",
+      website:
+        tailoredPersonal.website ||
+        tailoredPersonal.portfolio ||
+        basePersonal.website ||
+        basePersonal.portfolio ||
+        basePersonal.websiteUrl ||
+        "",
+    };
+
+    // Merge & preserve project links (Live Demo & GitHub repository) from base resume
+    const baseProjects = Array.isArray(baseResume.projects)
+      ? baseResume.projects
+      : [];
+    const tailoredProjects = Array.isArray(tailored.projects)
+      ? tailored.projects
+      : [];
+
+    tailored.projects = tailoredProjects.map((proj) => {
+      const match =
+        baseProjects.find((b) => {
+          const bTitle = (b.title || b.name || "").toLowerCase();
+          const pTitle = (proj.title || proj.name || "").toLowerCase();
+          return (
+            bTitle &&
+            pTitle &&
+            (bTitle.includes(pTitle) || pTitle.includes(bTitle))
+          );
+        }) || {};
+
+      const github =
+        proj.links?.github ||
+        proj.githubUrl ||
+        proj.github ||
+        match.links?.github ||
+        match.githubUrl ||
+        match.github ||
+        "";
+      const liveDemo =
+        proj.links?.liveDemo ||
+        proj.links?.demo ||
+        proj.demoUrl ||
+        proj.liveDemo ||
+        match.links?.liveDemo ||
+        match.links?.demo ||
+        match.demoUrl ||
+        match.liveDemo ||
+        "";
+
+      return {
+        ...proj,
+        links: {
+          github,
+          liveDemo,
+        },
+        githubUrl: github,
+        demoUrl: liveDemo,
+      };
+    });
+
     return {
-      tailoredResume: result.tailoredResume,
+      tailoredResume: tailored,
       resumeStrategy: result.resumeStrategy,
     };
   } catch (error) {
@@ -203,9 +309,38 @@ const generatePdfNode = async (state) => {
       pdfPath,
     });
 
-    await updateApplicationStatus(state.applicationId, APPLICATION_STATUS.EMAIL_GENERATING, {
-      logMessage: "Tailored PDF generated successfully. Generating application email draft...",
-    });
+    // For re-generation runs, keep the existing email draft intact and
+    // return to WAITING_FOR_REVIEW without regenerating the email.
+    if (state.isRegeneration) {
+      await updateApplicationStatus(
+        state.applicationId,
+        APPLICATION_STATUS.WAITING_FOR_REVIEW,
+        {
+          logMessage:
+            "Tailored PDF regenerated successfully. Returning to human review.",
+        },
+      );
+
+      await logJobEvent(
+        "generatePdfNode",
+        "RESUME_REGEN_COMPLETE",
+        `Resume PDF regenerated for application ${state.applicationId}. Awaiting review.`,
+      );
+
+      return {
+        resumePdfPath: pdfPath,
+        status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
+      };
+    }
+
+    await updateApplicationStatus(
+      state.applicationId,
+      APPLICATION_STATUS.EMAIL_GENERATING,
+      {
+        logMessage:
+          "Tailored PDF generated successfully. Generating application email draft...",
+      },
+    );
 
     return {
       resumePdfPath: pdfPath,
@@ -218,6 +353,30 @@ const generatePdfNode = async (state) => {
       errorInfo: { message: error.message },
     };
   }
+};
+
+/**
+ * Conditional Edge Router: After PDF Generation
+ *
+ * - Regeneration runs (re-tailor existing application) → skip email re-generation and exit.
+ * - Portal-only methods (websiteForm, googleForm) → skip email generation and exit at WAITING_FOR_REVIEW.
+ * - Email method new-application runs → continue to generate the email draft.
+ */
+const routeAfterPdf = (state) => {
+  if (state.status === APPLICATION_STATUS.FAILED) {
+    return END;
+  }
+  if (state.isRegeneration || state.status === APPLICATION_STATUS.WAITING_FOR_REVIEW) {
+    return END;
+  }
+  // Portal methods don't send email — PDF is the deliverable, go straight to review.
+  if (
+    state.applicationMethod === APPLICATION_METHOD.WEBSITE_FORM ||
+    state.applicationMethod === APPLICATION_METHOD.GOOGLE_FORM
+  ) {
+    return END;
+  }
+  return "generateEmailNode";
 };
 
 /**
@@ -253,14 +412,19 @@ const generateEmailNode = async (state) => {
       approved: false,
     });
 
-    await updateApplicationStatus(state.applicationId, APPLICATION_STATUS.WAITING_FOR_REVIEW, {
-      logMessage: "Application draft created. Paused at human review checkpoint.",
-    });
+    await updateApplicationStatus(
+      state.applicationId,
+      APPLICATION_STATUS.WAITING_FOR_REVIEW,
+      {
+        logMessage:
+          "Application draft created. Paused at human review checkpoint.",
+      },
+    );
 
     await logJobEvent(
       "generateEmailNode",
       "WAITING_FOR_REVIEW",
-      `Application ${state.applicationId} is ready for human review.`
+      `Application ${state.applicationId} is ready for human review.`,
     );
 
     return {
@@ -286,9 +450,13 @@ const generateEmailNode = async (state) => {
  */
 export const sendApprovedEmailNode = async (state) => {
   try {
-    await updateApplicationStatus(state.applicationId, APPLICATION_STATUS.SENDING, {
-      logMessage: "User approved application. Dispatching email...",
-    });
+    await updateApplicationStatus(
+      state.applicationId,
+      APPLICATION_STATUS.SENDING,
+      {
+        logMessage: "User approved application. Dispatching email...",
+      },
+    );
 
     const sendResult = await sendApplicationEmail({
       recipient: state.email.recipient,
@@ -306,14 +474,18 @@ export const sendApprovedEmailNode = async (state) => {
       sentAt: new Date(),
     });
 
-    await updateApplicationStatus(state.applicationId, APPLICATION_STATUS.SENT, {
-      logMessage: `Email successfully sent. MessageId: ${sendResult.messageId}`,
-    });
+    await updateApplicationStatus(
+      state.applicationId,
+      APPLICATION_STATUS.SENT,
+      {
+        logMessage: `Email successfully sent. MessageId: ${sendResult.messageId}`,
+      },
+    );
 
     await logJobEvent(
       "sendApprovedEmailNode",
       "SENT",
-      `Application ${state.applicationId} sent successfully to ${state.email.recipient}`
+      `Application ${state.applicationId} sent successfully to ${state.email.recipient}`,
     );
 
     return {
@@ -321,9 +493,13 @@ export const sendApprovedEmailNode = async (state) => {
       sendResult,
     };
   } catch (error) {
-    await updateApplicationStatus(state.applicationId, APPLICATION_STATUS.FAILED, {
-      logMessage: `Email dispatch failed: ${error.message}`,
-    });
+    await updateApplicationStatus(
+      state.applicationId,
+      APPLICATION_STATUS.FAILED,
+      {
+        logMessage: `Email dispatch failed: ${error.message}`,
+      },
+    );
     await logError("jobApplicationGraph.sendApprovedEmailNode", error.message);
     return {
       status: APPLICATION_STATUS.FAILED,
@@ -334,22 +510,18 @@ export const sendApprovedEmailNode = async (state) => {
 
 /**
  * Conditional Edge Router: Check Application Method
+ *
+ * Routes to getUserResumeNode for all supported methods (email, websiteForm, googleForm).
+ * Exits for unsupported methods or failures.
  */
 const routeAfterMethodCheck = (state) => {
-  if (state.status === APPLICATION_STATUS.UNSUPPORTED_METHOD || state.status === APPLICATION_STATUS.FAILED) {
+  if (
+    state.status === APPLICATION_STATUS.UNSUPPORTED_METHOD ||
+    state.status === APPLICATION_STATUS.FAILED
+  ) {
     return END;
   }
   return "getUserResumeNode";
-};
-
-/**
- * Conditional Edge Router: Check Failures
- */
-const routeCheckFailure = (state) => {
-  if (state.status === APPLICATION_STATUS.FAILED) {
-    return END;
-  }
-  return "next";
 };
 
 /**
@@ -363,40 +535,75 @@ const workflow = new StateGraph({
     job: { value: (x, y) => y ?? x, default: () => null },
     resume: { value: (x, y) => y ?? x, default: () => null },
     sourceResumeId: { value: (x, y) => y ?? x, default: () => "" },
-    targetPageLength: { value: (x, y) => y ?? x, default: () => RESUME_PAGE_COUNT },
+    targetPageLength: {
+      value: (x, y) => y ?? x,
+      default: () => RESUME_PAGE_COUNT,
+    },
     applicationMethod: { value: (x, y) => y ?? x, default: () => "email" },
     tailoredResume: { value: (x, y) => y ?? x, default: () => null },
     resumeStrategy: { value: (x, y) => y ?? x, default: () => null },
     resumePdfPath: { value: (x, y) => y ?? x, default: () => "" },
     email: { value: (x, y) => y ?? x, default: () => null },
-    status: { value: (x, y) => y ?? x, default: () => APPLICATION_STATUS.PENDING },
+    status: {
+      value: (x, y) => y ?? x,
+      default: () => APPLICATION_STATUS.PENDING,
+    },
     rejectionReason: { value: (x, y) => y ?? x, default: () => null },
     errorInfo: { value: (x, y) => y ?? x, default: () => null },
+    // True when this is a resume re-generation run (applicationId supplied upfront).
+    // Causes generatePdfNode to skip email re-generation and exit at WAITING_FOR_REVIEW.
+    isRegeneration: { value: (x, y) => y ?? x, default: () => false },
   },
 });
 
 workflow.addNode("initApplicationNode", initApplicationNode);
+workflow.addNode("loadExistingApplicationNode", loadExistingApplicationNode);
 workflow.addNode("checkApplicationMethodNode", checkApplicationMethodNode);
 workflow.addNode("getUserResumeNode", getUserResumeNode);
 workflow.addNode("tailorResumeNode", tailorResumeNode);
 workflow.addNode("generatePdfNode", generatePdfNode);
 workflow.addNode("generateEmailNode", generateEmailNode);
 
-// Define edges
-workflow.addEdge(START, "initApplicationNode");
-workflow.addEdge("initApplicationNode", "checkApplicationMethodNode");
+/**
+ * Conditional router from START:
+ * - If applicationId is already set, load the existing application (re-run / resume-regen path).
+ * - Otherwise, create a new application (new application path).
+ */
+const routeFromStart = (state) => {
+  if (state.applicationId) {
+    return "loadExistingApplicationNode";
+  }
+  return "initApplicationNode";
+};
 
-workflow.addConditionalEdges("checkApplicationMethodNode", routeAfterMethodCheck, {
-  [END]: END,
-  getUserResumeNode: "getUserResumeNode",
+// Define edges
+workflow.addConditionalEdges(START, routeFromStart, {
+  initApplicationNode: "initApplicationNode",
+  loadExistingApplicationNode: "loadExistingApplicationNode",
 });
+workflow.addEdge("initApplicationNode", "checkApplicationMethodNode");
+workflow.addEdge("loadExistingApplicationNode", "checkApplicationMethodNode");
+
+workflow.addConditionalEdges(
+  "checkApplicationMethodNode",
+  routeAfterMethodCheck,
+  {
+    [END]: END,
+    getUserResumeNode: "getUserResumeNode",
+  },
+);
 
 workflow.addEdge("getUserResumeNode", "tailorResumeNode");
 workflow.addEdge("tailorResumeNode", "generatePdfNode");
-workflow.addEdge("generatePdfNode", "generateEmailNode");
+workflow.addConditionalEdges("generatePdfNode", routeAfterPdf, {
+  generateEmailNode: "generateEmailNode",
+  [END]: END,
+});
 workflow.addEdge("generateEmailNode", END);
 
 export const memorySaver = new MemorySaver();
-export const jobApplicationGraph = workflow.compile({ checkpointer: memorySaver });
+export const jobApplicationGraph = workflow.compile({
+  checkpointer: memorySaver,
+});
 
 export default jobApplicationGraph;

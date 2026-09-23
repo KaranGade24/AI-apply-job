@@ -70,7 +70,7 @@ export const prepareResumeData = (resumeData = {}) => {
       : "",
   }));
 
-  // Projects normalization
+  // Projects normalization with complete link extractions
   const rawProjects = Array.isArray(resumeData.projects) ? resumeData.projects : [];
   const projects = rawProjects.map((proj) => {
     const techArray = Array.isArray(proj.technologies)
@@ -79,13 +79,16 @@ export const prepareResumeData = (resumeData = {}) => {
       ? proj.technologies.split(",").map((t) => t.trim())
       : [];
 
+    const githubUrl = proj.links?.github || proj.githubUrl || proj.github || "";
+    const demoUrl = proj.links?.liveDemo || proj.links?.demo || proj.demoUrl || proj.liveDemo || "";
+
     return {
       name: proj.title || proj.name || "",
       description: proj.description || "",
       technologiesText: techArray.join(", "),
       highlights: Array.isArray(proj.highlights) ? proj.highlights.filter(Boolean) : [],
-      githubUrl: proj.links?.github || proj.githubUrl || proj.github || "",
-      demoUrl: proj.links?.liveDemo || proj.links?.demo || proj.demoUrl || proj.liveDemo || "",
+      githubUrl,
+      demoUrl,
       dateRange: proj.date || proj.dates || proj.duration || proj.dateRange || "",
     };
   });

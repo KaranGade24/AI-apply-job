@@ -19,10 +19,10 @@
   --font-sub: calc(9.5px * var(--scale-factor));
   
   --padding-page: calc(12mm * var(--scale-factor)) calc(14mm * var(--scale-factor));
-  --margin-section: calc(9px * var(--scale-factor));
-  --margin-entry: calc(7px * var(--scale-factor));
-  --margin-bullet: calc(1.5px * var(--scale-factor));
-  --line-height: calc(1.38 * var(--scale-factor));
+  --margin-section: calc(9.5px * var(--scale-factor));
+  --margin-entry: calc(7.5px * var(--scale-factor));
+  --margin-bullet: calc(2px * var(--scale-factor));
+  --line-height: calc(1.4 * var(--scale-factor));
 }
 
 * {
@@ -44,19 +44,21 @@ body {
 .resume {
   width: 210mm;
   min-height: 297mm;
-  max-height: 297mm;
+  height: 297mm;
   background: #ffffff;
   margin: 0 auto;
   padding: var(--padding-page);
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 /* Header Section */
 .resume-header {
   border-bottom: calc(2px * var(--scale-factor)) solid var(--color-primary);
   padding-bottom: calc(6px * var(--scale-factor));
-  margin-bottom: calc(8px * var(--scale-factor));
+  margin-bottom: calc(9px * var(--scale-factor));
   text-align: center;
 }
 
@@ -105,7 +107,6 @@ body {
 /* Section Common */
 .resume-section {
   margin-bottom: var(--margin-section);
-  page-break-inside: avoid;
 }
 
 .resume-section h2 {
@@ -123,7 +124,7 @@ body {
 .summary-text {
   font-size: calc(10px * var(--scale-factor));
   color: var(--color-body);
-  line-height: calc(1.4 * var(--scale-factor));
+  line-height: calc(1.42 * var(--scale-factor));
   text-align: justify;
 }
 
@@ -131,12 +132,12 @@ body {
 .skills-list {
   display: flex;
   flex-direction: column;
-  gap: calc(2.5px * var(--scale-factor));
+  gap: calc(3px * var(--scale-factor));
 }
 
 .skill-row {
   font-size: calc(9.8px * var(--scale-factor));
-  line-height: calc(1.35 * var(--scale-factor));
+  line-height: calc(1.38 * var(--scale-factor));
 }
 
 .skill-category {
@@ -151,7 +152,6 @@ body {
 /* Projects & Experience */
 .entry-item {
   margin-bottom: var(--margin-entry);
-  page-break-inside: avoid;
 }
 
 .project-header {
@@ -194,20 +194,20 @@ body {
 
 .highlights {
   padding-left: calc(15px * var(--scale-factor));
-  margin-top: calc(2px * var(--scale-factor));
+  margin-top: calc(2.5px * var(--scale-factor));
   font-size: calc(9.8px * var(--scale-factor));
   color: var(--color-body);
 }
 
 .highlights li {
   margin-bottom: var(--margin-bullet);
-  line-height: calc(1.35 * var(--scale-factor));
+  line-height: calc(1.38 * var(--scale-factor));
 }
 
 .technologies {
   font-size: var(--font-sub);
   color: var(--color-body);
-  margin-top: calc(2.5px * var(--scale-factor));
+  margin-top: calc(3px * var(--scale-factor));
 }
 
 /* Education */
@@ -240,7 +240,7 @@ body {
     box-shadow: none;
     width: 210mm;
     min-height: 297mm;
-    max-height: 297mm;
+    height: 297mm;
     padding: var(--padding-page);
   }
 }
