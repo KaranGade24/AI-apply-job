@@ -1,6 +1,6 @@
 import express from "express";
 import * as applicationController from "../controller/application.controller.js";
-import { authMiddleware } from "../middlewares/auth.middleware.js";
+import { authMiddleware, optionalAuthMiddleware } from "../middlewares/auth.middleware.js";
 
 const applicationRouter = express.Router();
 
@@ -21,6 +21,7 @@ applicationRouter.post("/", authMiddleware, applicationController.createApplicat
 applicationRouter.post("/preview-draft", authMiddleware, applicationController.previewDraft);
 applicationRouter.get("/job/:jobId", authMiddleware, applicationController.getApplicationByJob);
 applicationRouter.patch("/:id/status", authMiddleware, applicationController.updateStatusDirect);
+applicationRouter.post("/:id/tailor", authMiddleware, applicationController.tailorApplication);
 
 /**
  * @swagger
@@ -228,6 +229,6 @@ applicationRouter.put("/:id/resume", authMiddleware, applicationController.updat
  *       404:
  *         description: PDF resume not found
  */
-applicationRouter.get("/:id/pdf", authMiddleware, applicationController.downloadPdf);
+applicationRouter.get("/:id/pdf", optionalAuthMiddleware, applicationController.downloadPdf);
 
 export default applicationRouter;

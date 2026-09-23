@@ -33,10 +33,16 @@ export const createApplicationFromJobApi = async (jobId) => {
   });
 };
 
-export const updateApplicationStatusApi = async (id, status) => {
+export const updateApplicationStatusApi = async (id, status, options = {}) => {
   return await fetchWithAuth(`/applications/${id}/status`, {
     method: 'PATCH',
-    body: JSON.stringify({ status }),
+    body: JSON.stringify({ status, ...options }),
+  });
+};
+
+export const tailorApplicationApi = async (id) => {
+  return await fetchWithAuth(`/applications/${id}/tailor`, {
+    method: 'POST',
   });
 };
 

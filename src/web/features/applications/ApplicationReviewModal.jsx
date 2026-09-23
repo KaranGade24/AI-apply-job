@@ -49,6 +49,8 @@ export const ApplicationReviewModal = ({
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
   const [currentStatus, setCurrentStatus] = useState('pending');
+  const [selectedStatus, setSelectedStatus] = useState('pending');
+  const [statusUpdating, setStatusUpdating] = useState(false);
   const [candidateInfo, setCandidateInfo] = useState(null);
 
   // Method detection
@@ -75,7 +77,9 @@ export const ApplicationReviewModal = ({
 
         if (existingApp) {
           setApplication(existingApp);
-          setCurrentStatus(existingApp.status || 'pending');
+          const initialStat = existingApp.status || 'pending';
+          setCurrentStatus(initialStat);
+          setSelectedStatus(initialStat);
           setRecipient(existingApp.email?.recipient || job.hrEmail || '');
           setSubject(existingApp.email?.subject || `Application for ${job.title} - Candidate`);
           setBody(existingApp.email?.body || '');
@@ -104,7 +108,9 @@ export const ApplicationReviewModal = ({
           }
           if (draftRes.data.application) {
             setApplication(draftRes.data.application);
-            setCurrentStatus(draftRes.data.application.status || 'pending');
+            const appStat = draftRes.data.application.status || 'pending';
+            setCurrentStatus(appStat);
+            setSelectedStatus(appStat);
           }
         }
       } catch (err) {
@@ -123,6 +129,33 @@ export const ApplicationReviewModal = ({
 
     loadData();
   }, [isOpen, job, initialApplication]);
+
+  const handleDownloadPdf = async () => {
+    if (!application?._id) return;
+    try {
+      showToast('Opening tailored PDF resume...');
+      const token = localStorage.getItem('token');
+      const res = await fetch(`/api/applications/${application._id}/pdf`, {
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.message || 'PDF not generated yet');
+      }
+
+      const blob = await res.blob();
+      const fileUrl = window.URL.createObjectURL(blob);
+      window.open(fileUrl, '_blank');
+      showToast('Tailored PDF opened in new tab!');
+    } catch (err) {
+      const token = localStorage.getItem('token');
+      const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
+      window.open(`/api/applications/${application._id}/pdf${tokenParam}`, '_blank');
+    }
+  };
 
   if (!isOpen || !job) return null;
 
@@ -241,6 +274,7 @@ export const ApplicationReviewModal = ({
   // Re-tailor and re-generate AI draft on demand
   const handleRegenerateDraft = async () => {
     setLoading(true);
+    showToast('AI Agent reading job, tailoring resume & drafting message...');
     try {
       const draftRes = await previewDraftApi({
         jobId: job._id,
@@ -257,7 +291,8 @@ export const ApplicationReviewModal = ({
       if (draftRes?.data) {
         if (draftRes.data.application) {
           setApplication(draftRes.data.application);
-          setCurrentStatus(draftRes.data.application.status || 'waiting_for_review');
+          setCurrentStatus('waiting_for_review');
+          setSelectedStatus('waiting_for_review');
         }
         if (draftRes.data.email) {
           setRecipient(draftRes.data.email.recipient || job.hrEmail || '');
@@ -267,27 +302,35 @@ export const ApplicationReviewModal = ({
         if (draftRes.data.candidateInfo) {
           setCandidateInfo(draftRes.data.candidateInfo);
         }
-        showToast('AI re-tailored resume and generated new outreach draft!');
+        showToast('AI successfully tailored resume & generated new outreach! Status set to Waiting Review.');
         if (onApplicationUpdated) onApplicationUpdated();
       }
     } catch (err) {
-      showToast('Error regenerating draft: ' + (err.message || 'Please retry'));
+      showToast('Error tailoring draft: ' + (err.message || 'Please retry'));
     } finally {
       setLoading(false);
     }
   };
 
-  // Status change handler
-  const handleStatusChange = async (newStatus) => {
-    setCurrentStatus(newStatus);
-    if (application?._id) {
-      try {
-        await updateApplicationStatusApi(application._id, newStatus);
-        showToast(`Status updated to ${newStatus}`);
+  // Status change handler triggered exclusively by clicking the Submit button
+  const handleSubmitStatusChange = async () => {
+    if (!selectedStatus) return;
+    setStatusUpdating(true);
+    try {
+      if (selectedStatus === 'waiting_for_review') {
+        await handleRegenerateDraft();
+      } else {
+        if (application?._id) {
+          await updateApplicationStatusApi(application._id, selectedStatus);
+        }
+        setCurrentStatus(selectedStatus);
+        showToast(`Status updated to ${selectedStatus}!`);
         if (onApplicationUpdated) onApplicationUpdated();
-      } catch (err) {
-        showToast(`Status updated to ${newStatus}`);
       }
+    } catch (err) {
+      showToast('Status update failed: ' + (err.message || 'Please retry'));
+    } finally {
+      setStatusUpdating(false);
     }
   };
 
@@ -465,33 +508,66 @@ export const ApplicationReviewModal = ({
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       {application?._id && (
-                        <a
-                          href={`/api/applications/${application._id}/pdf`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 rounded-lg text-xs font-semibold transition-colors shadow-2xs"
-                          title="Download Tailored ATS PDF Resume"
+                        <button
+                          type="button"
+                          onClick={handleDownloadPdf}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 rounded-lg text-xs font-semibold transition-colors shadow-2xs cursor-pointer"
+                          title="Download or View Tailored ATS PDF Resume"
                         >
                           <FileText className="w-3.5 h-3.5 text-blue-600" />
                           <span>PDF Resume</span>
-                        </a>
+                        </button>
                       )}
-                      <select
-                        value={currentStatus}
-                        onChange={(e) => handleStatusChange(e.target.value)}
-                        className={`text-xs font-bold px-3 py-1.5 rounded-lg border cursor-pointer ${getStatusBadgeStyle(
-                          currentStatus
-                        )}`}
+
+                      <button
+                        type="button"
+                        onClick={handleRegenerateDraft}
+                        disabled={loading}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 border border-blue-200 hover:bg-blue-100 text-blue-700 rounded-lg text-xs font-bold transition-colors shadow-2xs cursor-pointer"
+                        title="Read job details, tailor resume, and write tailored outreach email or form responses"
                       >
-                        <option value="pending">Pending</option>
-                        <option value="waiting_for_review">Waiting Review</option>
-                        <option value="Applied">Applied</option>
-                        <option value="Interview">Interview</option>
-                        <option value="Offer">Offer</option>
-                        <option value="Rejected">Rejected</option>
-                      </select>
+                        <Sparkles className="w-3.5 h-3.5 text-blue-600" />
+                        <span>Tailor & Draft</span>
+                      </button>
+
+                      {/* Status Selector + Submit Button */}
+                      <div className="flex items-center gap-1.5 bg-white p-0.5 rounded-lg border border-slate-200 shadow-2xs">
+                        <select
+                          value={selectedStatus}
+                          onChange={(e) => setSelectedStatus(e.target.value)}
+                          className={`text-xs font-bold px-2 py-1 rounded-md border-0 cursor-pointer focus:outline-none ${getStatusBadgeStyle(
+                            selectedStatus
+                          )}`}
+                        >
+                          <option value="pending">Pending</option>
+                          <option value="waiting_for_review">Waiting Review</option>
+                          <option value="Applied">Applied</option>
+                          <option value="Interview">Interview</option>
+                          <option value="Offer">Offer</option>
+                          <option value="Rejected">Rejected</option>
+                        </select>
+
+                        <button
+                          type="button"
+                          onClick={handleSubmitStatusChange}
+                          disabled={statusUpdating}
+                          className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-bold transition-all cursor-pointer ${
+                            selectedStatus !== currentStatus
+                              ? 'bg-blue-600 hover:bg-blue-700 text-white animate-pulse'
+                              : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                          }`}
+                          title="Submit selected status change"
+                        >
+                          {statusUpdating ? (
+                            <RefreshCw className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <Check className="w-3 h-3" />
+                          )}
+                          <span>Submit</span>
+                        </button>
+                      </div>
                     </div>
                   </div>
 
@@ -887,21 +963,52 @@ export const ApplicationReviewModal = ({
                       </span>
                     </div>
 
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2">
-                      {['Applied', 'Interview', 'Offer', 'Rejected'].map((st) => (
+                    <div className="space-y-3 pt-2">
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
+                        {['pending', 'waiting_for_review', 'Applied', 'Interview', 'Offer', 'Rejected'].map((st) => {
+                          const isSelected = (selectedStatus || currentStatus).toLowerCase() === st.toLowerCase();
+                          const label = st === 'waiting_for_review' ? 'Waiting Review' : st === 'pending' ? 'Pending' : st;
+                          return (
+                            <button
+                              key={st}
+                              type="button"
+                              onClick={() => setSelectedStatus(st)}
+                              className={`p-2.5 rounded-lg text-xs font-bold border transition-all text-center cursor-pointer ${
+                                isSelected
+                                  ? 'bg-blue-50 border-blue-500 text-blue-700 ring-2 ring-blue-500/20 shadow-xs'
+                                  : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                              }`}
+                            >
+                              {label}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {/* Explicit Submit button for stage changes */}
+                      <div className="flex items-center justify-end gap-2 pt-1">
                         <button
-                          key={st}
                           type="button"
-                          onClick={() => handleStatusChange(st)}
-                          className={`p-2.5 rounded-lg text-xs font-bold border transition-all text-center cursor-pointer ${
-                            currentStatus.toLowerCase() === st.toLowerCase()
-                              ? 'bg-blue-50 border-blue-500 text-blue-700 shadow-xs'
-                              : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                          onClick={handleSubmitStatusChange}
+                          disabled={statusUpdating || selectedStatus === currentStatus}
+                          className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold transition-all shadow-xs cursor-pointer ${
+                            selectedStatus !== currentStatus
+                              ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                              : 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200'
                           }`}
                         >
-                          Mark {st}
+                          {statusUpdating ? (
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Check className="w-3.5 h-3.5" />
+                          )}
+                          <span>
+                            Submit Status Change
+                            {selectedStatus !== currentStatus &&
+                              ` to "${selectedStatus === 'waiting_for_review' ? 'Waiting Review' : selectedStatus}"`}
+                          </span>
                         </button>
-                      ))}
+                      </div>
                     </div>
                   </div>
 

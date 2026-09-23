@@ -2,6 +2,8 @@ import path from "path";
 import fs from "fs/promises";
 import * as applicationService from "../services/application.service.js";
 import { appError } from "../utils/errors.js";
+import { generateResumePdf } from "../pdf/resumePdfService.js";
+import { updateApplicationResume } from "../repositories/application.repository.js";
 
 /**
  * Creates application for a specific job and initiates pipeline
@@ -27,28 +29,27 @@ export const createFromJob = async (req, res, next) => {
 
 /**
  * Direct application creation from custom job payload or jobId
+ * Saves application record directly WITHOUT running heavy agent at save time
  */
 export const createApplicationDirect = async (req, res, next) => {
   try {
     const userId = req.user?.userId || req.user?._id;
-    const { jobId, jobTitle, company, location, sourceUrl, status } = req.body || {};
-
-    if (jobId) {
-      const app = await applicationService.createApplicationFromJob(userId, jobId);
-      return res.status(201).json({ success: true, data: app });
-    }
+    const { jobId, jobTitle, company, location, sourceUrl, status, applicationMethod, email } = req.body || {};
 
     const app = await applicationService.createDirectApplicationService(userId, {
+      jobId,
       jobTitle,
       company,
       location,
       sourceUrl,
-      status: status || 'Applied',
+      status: status || 'pending',
+      applicationMethod,
+      email,
     });
 
     return res.status(201).json({
       success: true,
-      message: "Application logged successfully",
+      message: "Application saved successfully",
       data: app,
     });
   } catch (error) {
@@ -57,16 +58,48 @@ export const createApplicationDirect = async (req, res, next) => {
 };
 
 /**
- * Update application status directly
+ * Update application status directly, with optional AI tailoring when requested or when status is waiting_for_review
  */
 export const updateStatusDirect = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { status } = req.body || {};
+    const { status, triggerTailor } = req.body || {};
+    const userId = req.user?.userId || req.user?._id;
+
+    if (triggerTailor || status === 'waiting_for_review') {
+      const app = await applicationService.getApplicationById(id, userId);
+      if (triggerTailor || !app?.resume?.tailoredResumeData) {
+        const tailored = await applicationService.tailorApplicationService(userId, id);
+        return res.status(200).json({
+          success: true,
+          message: "Job read, resume tailored, and outreach drafted. Status set to waiting_for_review",
+          data: tailored,
+        });
+      }
+    }
+
     const updated = await applicationService.updateApplicationStatusDirectService(id, status);
     return res.status(200).json({
       success: true,
       message: "Application status updated successfully",
+      data: updated,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Explicit trigger: reads job, tailors resume, generates ATS PDF, and writes email/pitch
+ */
+export const tailorApplication = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user?.userId || req.user?._id;
+    const updated = await applicationService.tailorApplicationService(userId, id);
+    return res.status(200).json({
+      success: true,
+      message: "Application tailored and email drafted successfully",
       data: updated,
     });
   } catch (error) {
@@ -222,22 +255,56 @@ export const downloadPdf = async (req, res, next) => {
     const userId = req.user?.userId || req.user?._id;
 
     const application = await applicationService.getApplicationById(id, userId);
-    const pdfPath = application.resume?.pdfPath;
+    let pdfPath = application.resume?.pdfPath;
 
-    if (!pdfPath) {
+    let fileExists = false;
+    if (pdfPath) {
+      const resolvedPath = path.isAbsolute(pdfPath)
+        ? pdfPath
+        : path.resolve(process.cwd(), pdfPath);
+      try {
+        await fs.access(resolvedPath);
+        fileExists = true;
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader(
+          "Content-Disposition",
+          `inline; filename="Tailored_Resume_${id}.pdf"`,
+        );
+        return res.sendFile(resolvedPath);
+      } catch {
+        fileExists = false;
+      }
+    }
+
+    // If PDF file does not exist on disk, compile it dynamically from stored resume data
+    if (!fileExists && application.resume?.tailoredResumeData) {
+      try {
+        const generatedPath = await generateResumePdf({
+          resumeData: application.resume.tailoredResumeData,
+          template: application.resume?.template || "ats",
+          userId: application.userId?._id || application.userId,
+        });
+        await updateApplicationResume(id, { pdfPath: generatedPath });
+        const resolvedGenerated = path.isAbsolute(generatedPath)
+          ? generatedPath
+          : path.resolve(process.cwd(), generatedPath);
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader(
+          "Content-Disposition",
+          `inline; filename="Tailored_Resume_${id}.pdf"`,
+        );
+        return res.sendFile(resolvedGenerated);
+      } catch (genErr) {
+        // Log generation failure and fall through
+      }
+    }
+
+    if (!pdfPath && !fileExists) {
       throw new appError(
         "No tailored PDF resume generated for this application yet",
         404,
       );
     }
-
-    const resolvedPath = path.isAbsolute(pdfPath)
-      ? pdfPath
-      : path.resolve(process.cwd(), pdfPath);
-
-    await fs.access(resolvedPath);
-
-    return res.sendFile(resolvedPath);
   } catch (error) {
     next(error);
   }

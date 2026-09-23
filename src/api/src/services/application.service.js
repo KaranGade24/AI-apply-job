@@ -384,31 +384,64 @@ export const updateApplicationResumeService = async (
 };
 
 /**
- * Creates an application record directly (e.g. from Job Search apply button)
+ * Creates an application record directly (e.g. from Job Search apply button or direct save)
+ * Does NOT run the heavy agent pipeline at save time.
  */
 export const createDirectApplicationService = async (userId, appData) => {
   try {
-    const { jobTitle, company, location, sourceUrl, status } = appData;
-    let job = await Job.findOne({ sourceUrl: sourceUrl || `https://example.com/${Date.now()}` });
-    if (!job) {
-      job = await Job.create({
-        title: jobTitle || 'Position',
-        company: company || 'Company',
-        location: location || 'Remote',
-        sourceUrl: sourceUrl || `https://example.com/${Date.now()}`,
-        source: 'Job Search',
-      });
+    const { jobId, jobTitle, company, location, sourceUrl, status, applicationMethod, email } = appData;
+    let targetJobId = jobId;
+
+    if (!targetJobId) {
+      let job = sourceUrl ? await Job.findOne({ sourceUrl }) : null;
+      if (!job) {
+        job = await Job.create({
+          title: jobTitle || 'Position',
+          company: company || 'Company',
+          location: location || 'Remote',
+          sourceUrl: sourceUrl || `https://example.com/${Date.now()}`,
+          source: 'Job Search',
+        });
+      }
+      targetJobId = job._id;
     }
 
     const application = await createApplication({
       userId,
-      jobId: job._id,
-      status: status || 'Applied',
+      jobId: targetJobId,
+      status: status || APPLICATION_STATUS.PENDING,
+      applicationMethod,
+      email,
     });
 
     return application;
   } catch (error) {
     await logError("applicationService.createDirectApplicationService", error.message);
+    throw error;
+  }
+};
+
+/**
+ * Triggers the AI pipeline to read the job, tailor the resume, generate PDF,
+ * and draft outreach email/form responses based on the job's application method,
+ * updating the application status to waiting_for_review.
+ */
+export const tailorApplicationService = async (userId, applicationId) => {
+  try {
+    const app = await findApplicationById(applicationId);
+    if (!app) {
+      throw new appError("Application not found", 404);
+    }
+    const jobId = app.jobId?._id?.toString?.() || app.jobId?.toString?.() || app.jobId;
+    if (!jobId) {
+      throw new appError("No associated job found for this application to tailor for", 400);
+    }
+
+    // Run the jobApplication agent with forceRegenerate to re-tailor and draft
+    const tailored = await createApplicationFromJob(userId, jobId, { forceRegenerate: true });
+    return tailored || (await findApplicationById(applicationId));
+  } catch (error) {
+    await logError("applicationService.tailorApplicationService", error.message);
     throw error;
   }
 };
@@ -454,15 +487,10 @@ export const previewOrGenerateDraftService = async (userId, payload) => {
       forceRegenerate,
     } = payload || {};
 
-    // 1. If jobId is provided, check existing application or run the application tailoring agent
+    // 1. If jobId is provided, check existing application or run the application tailoring agent if explicitly requested
     if (jobId) {
       const existing = await findApplicationByJobAndUser(userId, jobId);
-      if (
-        existing &&
-        (existing.status === APPLICATION_STATUS.WAITING_FOR_REVIEW ||
-          existing.status === APPLICATION_STATUS.APPLIED) &&
-        !forceRegenerate
-      ) {
+      if (existing && !forceRegenerate && !payload?.triggerTailor) {
         return {
           application: existing,
           email: existing.email || {},
@@ -479,31 +507,32 @@ export const previewOrGenerateDraftService = async (userId, payload) => {
         };
       }
 
-      // Execute the job application agent pipeline:
-      // Fetches the job, normalizes method, tailors resume, creates PDF, generates email, and sets to waiting_for_review
-      try {
-        const tailoredApp = await createApplicationFromJob(userId, jobId, { forceRegenerate });
-        if (tailoredApp) {
-          return {
-            application: tailoredApp,
-            email: tailoredApp.email || {},
-            applicationMethod: tailoredApp.applicationMethod || applicationMethod || "email",
-            isExisting: true,
-            status: tailoredApp.status || APPLICATION_STATUS.WAITING_FOR_REVIEW,
-            candidateInfo: {
-              fullName:
-                tailoredApp.resume?.tailoredResumeData?.personalInfo?.fullName || "Candidate",
-              email: tailoredApp.resume?.tailoredResumeData?.personalInfo?.email || "",
-              phone: tailoredApp.resume?.tailoredResumeData?.personalInfo?.phone || "",
-              skills: tailoredApp.resume?.tailoredResumeData?.skills || skills || [],
-            },
-          };
+      // Only execute the job application agent pipeline if forceRegenerate or triggerTailor is explicitly requested
+      if (forceRegenerate || payload?.triggerTailor) {
+        try {
+          const tailoredApp = await createApplicationFromJob(userId, jobId, { forceRegenerate: true });
+          if (tailoredApp) {
+            return {
+              application: tailoredApp,
+              email: tailoredApp.email || {},
+              applicationMethod: tailoredApp.applicationMethod || applicationMethod || "email",
+              isExisting: true,
+              status: tailoredApp.status || APPLICATION_STATUS.WAITING_FOR_REVIEW,
+              candidateInfo: {
+                fullName:
+                  tailoredApp.resume?.tailoredResumeData?.personalInfo?.fullName || "Candidate",
+                email: tailoredApp.resume?.tailoredResumeData?.personalInfo?.email || "",
+                phone: tailoredApp.resume?.tailoredResumeData?.personalInfo?.phone || "",
+                skills: tailoredApp.resume?.tailoredResumeData?.skills || skills || [],
+              },
+            };
+          }
+        } catch (agentErr) {
+          await logError(
+            "applicationService.previewOrGenerateDraftService.agentRun",
+            agentErr.message,
+          );
         }
-      } catch (agentErr) {
-        await logError(
-          "applicationService.previewOrGenerateDraftService.agentRun",
-          agentErr.message,
-        );
       }
     }
 
