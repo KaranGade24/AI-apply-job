@@ -231,7 +231,7 @@
       .experience-item {
         margin-bottom: 8px;
 
-        break-inside: avoid;
+        break-inside: auto;
       }
 
       .experience-item:last-child {
@@ -307,7 +307,7 @@
       .project {
         margin-bottom: 9px;
 
-        break-inside: avoid;
+        break-inside: auto;
       }
 
       .project:last-child {
@@ -476,11 +476,18 @@
           text-decoration: none;
         }
 
-        .section,
-        .experience-item,
-        .project,
-        .education-item {
+        .education-item,
+        .skill-row,
+        .highlights li {
           break-inside: avoid;
+        }
+
+        .section-title,
+        .item-header,
+        .project-header,
+        .item-subtitle,
+        .project-tech {
+          break-after: avoid;
         }
       }
 

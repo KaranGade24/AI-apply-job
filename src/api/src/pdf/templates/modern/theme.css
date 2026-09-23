@@ -154,10 +154,12 @@ body {
 }
 
 /* Projects & Experience */
-.entry-item {
+.entry-item,
+.experience-item,
+.project {
   margin-bottom: var(--margin-entry);
-  break-inside: avoid;
-  page-break-inside: avoid;
+  break-inside: auto;
+  page-break-inside: auto;
 }
 
 .project-header {
