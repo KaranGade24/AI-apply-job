@@ -16,21 +16,16 @@ export const openJobViaReferral = async (
 ) => {
   try {
     await page.goto(categoryUrl, {
-      waitUntil: 'commit',
-      timeout: 5000
-    }).catch(async () => {
-      // Fallback if network is slow
-      await page.goto(categoryUrl, { waitUntil: 'domcontentloaded', timeout: 5000 }).catch(() => {});
+      waitUntil: 'domcontentloaded',
+      timeout: 8000
     });
-    // Wait briefly for main content container
-    await page.waitForSelector('.post, article, .entry-title, body', { timeout: 3000 }).catch(() => {});
   } catch (error) {
     await logError('jobViaReferralSource.openJobViaReferral', error.message);
   }
 };
 
 /**
- * Finds and extracts job URLs from the current listing page
+ * Finds and extracts job URLs from the current listing page in milliseconds
  * @param {import('playwright').Page} page
  * @param {object} searchConfig
  * @returns {Promise<string[]>} List of individual job detail URLs
@@ -38,20 +33,38 @@ export const openJobViaReferral = async (
 export const getJobListingUrls = async (page, searchConfig = {}) => {
   try {
     const limit = searchConfig.maxJobs || SCRAPER_DEFAULTS.MAX_JOBS_PER_RUN;
-    const cardLocators = page.locator(JOB_VIA_REFERRAL_SELECTORS.jobCards);
-    const count = await cardLocators.count();
 
-    const jobUrls = new Set();
-
-    for (let i = 0; i < count && jobUrls.size < limit; i++) {
-      const cardLocator = cardLocators.nth(i);
-      const cardData = await parseJobCard(cardLocator);
-      if (cardData?.url) {
-        jobUrls.add(cardData.url);
+    const urls = await page.evaluate((maxLimit) => {
+      const links = new Set();
+      const elements = document.querySelectorAll(
+        'article h2 a, h2.entry-title a, header.entry-header h2 a, .entry-title a, main article a'
+      );
+      for (const el of elements) {
+        const href = el.href || el.getAttribute('href');
+        if (!href) continue;
+        const normalized = href.trim();
+        if (
+          normalized.includes('/category/') ||
+          normalized.includes('/page/') ||
+          normalized.includes('/tag/') ||
+          normalized.includes('/author/') ||
+          normalized.includes('/privacy-policy') ||
+          normalized.includes('/terms') ||
+          normalized.includes('/about') ||
+          normalized.includes('/contact') ||
+          normalized.endsWith('/#')
+        ) {
+          continue;
+        }
+        if (normalized.startsWith('http')) {
+          links.add(normalized);
+          if (links.size >= maxLimit) break;
+        }
       }
-    }
+      return Array.from(links);
+    }, limit);
 
-    return Array.from(jobUrls);
+    return urls;
   } catch (error) {
     await logError('jobViaReferralSource.getJobListingUrls', error.message);
     return [];

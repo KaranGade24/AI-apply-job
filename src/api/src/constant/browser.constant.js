@@ -20,5 +20,22 @@ export const BROWSER_LAUNCH_ARGS = Object.freeze([
   "--no-first-run",
   "--no-zygote",
   "--disable-gpu",
+  "--disable-background-networking",
+  "--disable-background-timer-throttling",
+  "--disable-backgrounding-occluded-windows",
+  "--disable-breakpad",
+  "--disable-component-update",
+  "--disable-default-apps",
+  "--disable-domain-reliability",
+  "--disable-features=AudioServiceOutOfProcess,IsolateOrigins,site-per-process",
+  "--disable-hang-monitor",
+  "--disable-ipc-flooding-protection",
+  "--disable-notifications",
+  "--disable-popup-blocking",
+  "--disable-renderer-backgrounding",
+  "--disable-sync",
+  "--no-default-browser-check",
+  "--no-pings",
+  "--mute-audio"
 ]);
 

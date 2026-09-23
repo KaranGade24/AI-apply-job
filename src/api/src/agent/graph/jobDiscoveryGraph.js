@@ -98,11 +98,25 @@ const discoverJobsNode = async (state) => {
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
       viewport: { width: 1280, height: 800 },
     });
-    page = await context.newPage();
+    context.setDefaultTimeout(8000);
+    context.setDefaultNavigationTimeout(8000);
 
-    // Block heavy media & trackers to speed up page navigation (do NOT block CSS/JS needed for DOM rendering)
-    await page.route('**/*.{png,jpg,jpeg,gif,svg,webp,mp4,mp3,wav,woff,woff2}', route => route.abort());
-    await page.route(/(?:google-analytics|doubleclick|googlesyndication|facebook|analytics|tracker)/i, route => route.abort());
+    // Context-level interceptor: abort media, fonts, and third-party trackers across ALL pages/tabs
+    await context.route('**/*', (route) => {
+      const type = route.request().resourceType();
+      const url = route.request().url();
+      if (
+        type === 'image' ||
+        type === 'media' ||
+        type === 'font' ||
+        /(?:googleads|adsbygoogle|doubleclick|googletagservices|googlesyndication|ezoic|adnxs|amazon-adsystem|analytics|tracker|facebook\.net|taboola|outbrain|criteo|pubmatic)/i.test(url)
+      ) {
+        return route.abort();
+      }
+      return route.continue();
+    });
+
+    page = await context.newPage();
 
     // Use source adapter to search and scrape jobs
     discovered = await sourceAdapter.searchJobs(page, {
