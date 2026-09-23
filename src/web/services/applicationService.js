@@ -1,7 +1,23 @@
 import { fetchWithAuth } from './api';
 
-export const getApplicationsApi = async () => {
-  return await fetchWithAuth('/applications');
+export const getApplicationsApi = async (params = {}) => {
+  const query = new URLSearchParams(params).toString();
+  return await fetchWithAuth(`/applications${query ? `?${query}` : ''}`);
+};
+
+export const getApplicationDetailsApi = async (id) => {
+  return await fetchWithAuth(`/applications/${id}`);
+};
+
+export const getApplicationByJobIdApi = async (jobId) => {
+  return await fetchWithAuth(`/applications/job/${jobId}`);
+};
+
+export const previewDraftApi = async (payload) => {
+  return await fetchWithAuth('/applications/preview-draft', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
 };
 
 export const createApplicationApi = async (appData) => {
@@ -11,9 +27,36 @@ export const createApplicationApi = async (appData) => {
   });
 };
 
+export const createApplicationFromJobApi = async (jobId) => {
+  return await fetchWithAuth(`/applications/create-from-job/${jobId}`, {
+    method: 'POST',
+  });
+};
+
 export const updateApplicationStatusApi = async (id, status) => {
   return await fetchWithAuth(`/applications/${id}/status`, {
     method: 'PATCH',
     body: JSON.stringify({ status }),
   });
 };
+
+export const reviewEmailDraftApi = async (id, emailData) => {
+  return await fetchWithAuth(`/applications/${id}/review`, {
+    method: 'PUT',
+    body: JSON.stringify(emailData),
+  });
+};
+
+export const approveAndSendApi = async (id) => {
+  return await fetchWithAuth(`/applications/${id}/approve`, {
+    method: 'POST',
+  });
+};
+
+export const rejectApplicationApi = async (id, reason = '') => {
+  return await fetchWithAuth(`/applications/${id}/reject`, {
+    method: 'POST',
+    body: JSON.stringify({ reason }),
+  });
+};
+

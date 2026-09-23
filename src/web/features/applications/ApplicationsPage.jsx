@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { MoreVertical, ExternalLink } from 'lucide-react';
+import { MoreVertical, ExternalLink, Eye } from 'lucide-react';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
+import { ApplicationReviewModal } from './ApplicationReviewModal';
 import { getApplicationsApi, updateApplicationStatusApi } from '../../services/applicationService';
 import { formatDate, getStatusBadgeStyle } from '../../utils/formatters';
 
@@ -9,6 +10,7 @@ export const ApplicationsPage = () => {
   const [applications, setApplications] = useState([]);
   const [filter, setFilter] = useState('All');
   const [loading, setLoading] = useState(false);
+  const [selectedApp, setSelectedApp] = useState(null);
 
   const fetchApplications = async () => {
     setLoading(true);
@@ -128,7 +130,11 @@ export const ApplicationsPage = () => {
                   const appliedDate = app.appliedDate || app.createdAt;
 
                   return (
-                    <tr key={app._id} className="hover:bg-slate-50/80 transition-colors">
+                    <tr
+                      key={app._id}
+                      onClick={() => setSelectedApp(app)}
+                      className="hover:bg-slate-50/80 transition-colors cursor-pointer"
+                    >
                       {/* Job Title */}
                       <td className="py-4 px-6 font-semibold text-slate-900 flex items-center gap-3">
                         <div className={`w-8 h-8 rounded-lg ${getLogoColor(company)} text-white font-bold text-xs flex items-center justify-center shrink-0`}>
@@ -147,7 +153,7 @@ export const ApplicationsPage = () => {
                       <td className="py-4 px-6 text-slate-500 tabular-nums">{formatDate(appliedDate)}</td>
 
                       {/* Status Badge */}
-                      <td className="py-4 px-6">
+                      <td className="py-4 px-6" onClick={(e) => e.stopPropagation()}>
                         <select
                           value={app.status || 'Applied'}
                           onChange={(e) => handleStatusChange(app._id, e.target.value)}
@@ -164,7 +170,14 @@ export const ApplicationsPage = () => {
                       </td>
 
                       {/* Actions */}
-                      <td className="py-4 px-6 text-right space-x-2 whitespace-nowrap">
+                      <td className="py-4 px-6 text-right space-x-2 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedApp(app)}
+                          className="inline-flex items-center gap-1 text-xs font-semibold text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
+                        >
+                          <Eye className="w-3 h-3" /> Details
+                        </button>
                         {sourceUrl && (
                           <a
                             href={sourceUrl}
@@ -172,7 +185,7 @@ export const ApplicationsPage = () => {
                             rel="noreferrer"
                             className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 hover:text-blue-700 bg-blue-50 px-3 py-1.5 rounded-lg transition-colors"
                           >
-                            View <ExternalLink className="w-3 h-3" />
+                            Link <ExternalLink className="w-3 h-3" />
                           </a>
                         )}
                       </td>
@@ -184,6 +197,17 @@ export const ApplicationsPage = () => {
           </table>
         </div>
       </Card>
+
+      {/* Application Review & Detailed Verification Modal */}
+      {selectedApp && (
+        <ApplicationReviewModal
+          isOpen={!!selectedApp}
+          job={selectedApp.jobId || selectedApp}
+          initialApplication={selectedApp}
+          onClose={() => setSelectedApp(null)}
+          onApplicationUpdated={fetchApplications}
+        />
+      )}
     </div>
   );
 };

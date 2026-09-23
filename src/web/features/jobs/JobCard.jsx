@@ -1,8 +1,8 @@
 import React from 'react';
-import { MapPin, Sparkles, Building2 } from 'lucide-react';
+import { MapPin, Sparkles, Building2, Mail, Globe, ExternalLink } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 
-export const JobCard = ({ job, onApply, applyingId }) => {
+export const JobCard = ({ job, onApply, onReview, applyingId }) => {
   const getLogoInitial = (company) => {
     return company ? company.charAt(0).toUpperCase() : 'C';
   };
@@ -15,26 +15,51 @@ export const JobCard = ({ job, onApply, applyingId }) => {
     return 'bg-emerald-700';
   };
 
+  const method = job.applicationMethod || (job.hrEmail ? 'email' : job.applicationUrl ? 'form' : 'direct');
+
   return (
-    <div className="bg-white border border-slate-200 rounded-xl p-5 hover:border-blue-300 hover:shadow-xs transition-all flex flex-col md:flex-row md:items-center justify-between gap-4">
+    <div
+      onClick={() => onReview && onReview(job)}
+      className="bg-white border border-slate-200 rounded-xl p-5 hover:border-blue-400 hover:shadow-xs transition-all flex flex-col md:flex-row md:items-center justify-between gap-4 cursor-pointer group"
+    >
       {/* Left Info */}
       <div className="flex items-start gap-4 min-w-0">
-        <div className={`w-12 h-12 rounded-xl ${getLogoColor(job.company)} text-white font-bold text-lg flex items-center justify-center shrink-0 shadow-xs`}>
+        <div
+          className={`w-12 h-12 rounded-xl ${getLogoColor(
+            job.company
+          )} text-white font-bold text-lg flex items-center justify-center shrink-0 shadow-xs group-hover:scale-105 transition-transform`}
+        >
           {getLogoInitial(job.company)}
         </div>
 
         <div className="space-y-1.5 min-w-0">
           <div>
-            <h3 className="text-base font-bold text-slate-900 leading-snug">{job.title}</h3>
+            <h3 className="text-base font-bold text-slate-900 group-hover:text-blue-600 transition-colors leading-snug">
+              {job.title}
+            </h3>
             <p className="text-xs font-semibold text-slate-600 flex items-center gap-1.5 mt-0.5">
               <Building2 className="w-3.5 h-3.5 text-slate-400" /> {job.company}
             </p>
           </div>
 
-          <div className="flex items-center gap-2 text-xs text-slate-500">
+          <div className="flex items-center gap-2 text-xs text-slate-500 flex-wrap">
             <span className="flex items-center gap-1">
               <MapPin className="w-3.5 h-3.5 text-slate-400" />
-              {job.location || 'Pune, Maharashtra · Remote'}
+              {job.location || 'Remote / Unspecified'}
+            </span>
+            <span aria-hidden="true">·</span>
+            <span className="flex items-center gap-1 capitalize font-medium text-slate-600">
+              {method === 'email' && <Mail className="w-3.5 h-3.5 text-blue-500" />}
+              {(method === 'form' || method === 'googleForm' || method === 'websiteForm') && (
+                <Globe className="w-3.5 h-3.5 text-emerald-500" />
+              )}
+              {method !== 'email' &&
+                method !== 'form' &&
+                method !== 'googleForm' &&
+                method !== 'websiteForm' && (
+                  <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
+                )}
+              {method === 'email' ? 'By Email' : method.includes('Form') ? 'By Form' : 'By Portal'}
             </span>
           </div>
 
@@ -66,18 +91,23 @@ export const JobCard = ({ job, onApply, applyingId }) => {
             <Sparkles className="w-3 h-3 fill-emerald-600" />
             {job.matchScore || job.matchPercentage || 92}% match
           </div>
-          <p className="text-[11px] text-slate-400 mt-1">{job.postedDays || '4 days ago'}</p>
+          <p className="text-[11px] text-slate-400 mt-1">{job.postedDays || 'Recently'}</p>
         </div>
 
-        <Button
-          size="sm"
-          loading={applyingId === job._id}
-          onClick={() => onApply(job)}
-          className="px-5 cursor-pointer"
-        >
-          Apply
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            onClick={(e) => {
+              e.stopPropagation();
+              onReview ? onReview(job) : onApply(job);
+            }}
+            className="px-4 font-semibold text-xs cursor-pointer"
+          >
+            Review & Apply
+          </Button>
+        </div>
       </div>
     </div>
   );
 };
+

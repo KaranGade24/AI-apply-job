@@ -18,6 +18,8 @@ const applicationRouter = express.Router();
  */
 applicationRouter.post("/process-next", authMiddleware, applicationController.processNext);
 applicationRouter.post("/", authMiddleware, applicationController.createApplicationDirect);
+applicationRouter.post("/preview-draft", authMiddleware, applicationController.previewDraft);
+applicationRouter.get("/job/:jobId", authMiddleware, applicationController.getApplicationByJob);
 applicationRouter.patch("/:id/status", authMiddleware, applicationController.updateStatusDirect);
 
 /**

@@ -14,6 +14,7 @@ import { APPLICATION_STATUS, RESUME_PAGE_COUNT, RESUME_PDF_TEMPLATES } from "../
 import { generateResumePdf } from "../pdf/resumePdfService.js";
 import { sendApplicationEmail } from "../integrations/email/emailService.js";
 import { formatAndCleanEmailBody } from "../agent/prompt/applicationEmail.js";
+import { getActiveResumeByUserId } from "../repositories/resume.repository.js";
 import { logError, logJobEvent } from "../utils/logger.js";
 import { appError } from "../utils/errors.js";
 
@@ -409,6 +410,96 @@ export const updateApplicationStatusDirectService = async (id, status) => {
     return await updateApplicationStatus(id, status, { logMessage: `Status manually updated to ${status}` });
   } catch (error) {
     await logError("applicationService.updateApplicationStatusDirectService", error.message);
+    throw error;
+  }
+};
+
+/**
+ * Finds application by user and job ID
+ */
+export const getApplicationByJobAndUserService = async (userId, jobId) => {
+  try {
+    return await findApplicationByJobAndUser(userId, jobId);
+  } catch (error) {
+    await logError("applicationService.getApplicationByJobAndUserService", error.message);
+    throw error;
+  }
+};
+
+/**
+ * Preview or generate draft email and application verification details before applying
+ */
+export const previewOrGenerateDraftService = async (userId, payload) => {
+  try {
+    const { jobId, jobTitle, company, description, requirements, skills, hrEmail, applicationMethod } = payload || {};
+
+    // 1. Check if an application already exists for this job & user
+    if (jobId) {
+      const existing = await findApplicationByJobAndUser(userId, jobId);
+      if (existing) {
+        return {
+          application: existing,
+          email: existing.email || {},
+          applicationMethod: existing.applicationMethod || applicationMethod || 'email',
+          isExisting: true,
+          status: existing.status,
+        };
+      }
+    }
+
+    // 2. Fetch candidate info from active resume
+    const activeResume = await getActiveResumeByUserId(userId).catch(() => null);
+    const parsedData = activeResume?.parsedData || {};
+    const candidateName = parsedData.personalInfo?.fullName || 'Candidate';
+    const candidateEmail = parsedData.personalInfo?.email || '';
+    const candidatePhone = parsedData.personalInfo?.phone || '';
+    const candidateSkills = Array.isArray(parsedData.skills)
+      ? parsedData.skills
+      : (skills || ['React', 'Node.js', 'TypeScript']);
+
+    const targetTitle = jobTitle || 'Software Engineer';
+    const targetCompany = company || 'Hiring Team';
+    const recipient = (hrEmail && hrEmail !== 'unknown' && hrEmail !== 'NOT_SPECIFIED')
+      ? hrEmail
+      : '';
+
+    const defaultSubject = `Application for ${targetTitle} - ${candidateName}`;
+    const defaultBody = formatAndCleanEmailBody(
+      `Dear Hiring Team at ${targetCompany},
+
+I am writing to express my strong enthusiasm for the ${targetTitle} opportunity. With my hands-on background and proven expertise in ${candidateSkills.slice(0, 4).join(', ') || 'modern software engineering'}, I am confident in my ability to deliver immediate value to your development team.
+
+Throughout my experience, I have developed and deployed robust, scalable applications, ensuring high reliability, clean architecture, and optimized performance. I am particularly excited about the work being done at ${targetCompany} and welcome the chance to contribute to your ongoing goals and technical milestones.
+
+My resume is attached for your review. I look forward to the opportunity to discuss how my skill set aligns with your team's objectives in an interview. Thank you for your time and consideration.
+
+Sincerely,
+
+${candidateName}`,
+      candidateName
+    );
+
+    return {
+      application: null,
+      email: {
+        recipient,
+        subject: defaultSubject,
+        body: defaultBody,
+        approved: false,
+      },
+      candidateInfo: {
+        fullName: candidateName,
+        email: candidateEmail,
+        phone: candidatePhone,
+        skills: candidateSkills,
+        resumeId: activeResume?._id || null,
+      },
+      applicationMethod: applicationMethod || 'email',
+      isExisting: false,
+      status: 'pending',
+    };
+  } catch (error) {
+    await logError("applicationService.previewOrGenerateDraftService", error.message);
     throw error;
   }
 };

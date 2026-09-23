@@ -269,3 +269,38 @@ export const updateResume = async (req, res, next) => {
     next(error);
   }
 };
+
+/**
+ * Get existing application by Job ID for current user
+ */
+export const getApplicationByJob = async (req, res, next) => {
+  try {
+    const { jobId } = req.params;
+    const userId = req.user?.userId || req.user?._id;
+
+    const app = await applicationService.getApplicationByJobAndUserService(userId, jobId);
+    return res.status(200).json({
+      success: true,
+      data: app,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Preview draft email and verification payload for a job before applying
+ */
+export const previewDraft = async (req, res, next) => {
+  try {
+    const userId = req.user?.userId || req.user?._id;
+    const result = await applicationService.previewOrGenerateDraftService(userId, req.body || {});
+
+    return res.status(200).json({
+      success: true,
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};

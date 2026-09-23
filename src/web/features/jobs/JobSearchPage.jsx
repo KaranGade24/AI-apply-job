@@ -4,6 +4,7 @@ import { Input } from '../../components/ui/Input';
 import { Select } from '../../components/ui/Select';
 import { Button } from '../../components/ui/Button';
 import { JobCard } from './JobCard';
+import { ApplicationReviewModal } from '../applications/ApplicationReviewModal';
 import { getDiscoveredJobsApi, discoverJobsApi } from '../../services/jobService';
 import { createApplicationApi } from '../../services/applicationService';
 import { SettingsContext } from '../../context/SettingsContext';
@@ -21,6 +22,7 @@ export const JobSearchPage = () => {
   const [loading, setLoading] = useState(false);
   const [searching, setSearching] = useState(false);
   const [applyingId, setApplyingId] = useState(null);
+  const [reviewingJob, setReviewingJob] = useState(null);
   const [toastMessage, setToastMessage] = useState('');
   const [isLocationDropdownOpen, setIsLocationDropdownOpen] = useState(false);
   const [customLocationInput, setCustomLocationInput] = useState('');
@@ -84,25 +86,8 @@ export const JobSearchPage = () => {
     }
   };
 
-  const handleApply = async (job) => {
-    setApplyingId(job._id);
-    try {
-      await createApplicationApi({
-        jobTitle: job.title,
-        company: job.company,
-        location: job.location,
-        sourceUrl: job.sourceUrl || 'https://linkedin.com',
-        status: 'Applied',
-        appliedDate: new Date().toISOString(),
-      });
-      setToastMessage(`Successfully applied to ${job.title} at ${job.company}!`);
-      setTimeout(() => setToastMessage(''), 4000);
-    } catch (err) {
-      setToastMessage(`Application logged for ${job.title}!`);
-      setTimeout(() => setToastMessage(''), 4000);
-    } finally {
-      setApplyingId(null);
-    }
+  const handleApply = (job) => {
+    setReviewingJob(job);
   };
 
   const toggleLocation = (loc) => {
@@ -347,11 +332,22 @@ export const JobSearchPage = () => {
               key={job._id}
               job={job}
               onApply={handleApply}
+              onReview={handleApply}
               applyingId={applyingId}
             />
           ))
         )}
       </div>
+
+      {/* Application Verification & Review Modal */}
+      {reviewingJob && (
+        <ApplicationReviewModal
+          isOpen={!!reviewingJob}
+          job={reviewingJob}
+          onClose={() => setReviewingJob(null)}
+          onApplicationUpdated={fetchJobs}
+        />
+      )}
     </div>
   );
 };
