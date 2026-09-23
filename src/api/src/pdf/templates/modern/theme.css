@@ -51,7 +51,7 @@ body {
   overflow: visible;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
+  justify-content: flex-start;
 }
 
 /* Header Section */
@@ -256,11 +256,10 @@ body {
     box-shadow: none;
     width: 210mm;
     min-height: calc(297mm * var(--target-pages, 1));
-    max-height: calc(297mm * var(--target-pages, 1));
     overflow: visible;
     padding: var(--padding-page);
     display: flex;
     flex-direction: column;
-    justify-content: space-between;
+    justify-content: flex-start;
   }
 }
