@@ -419,6 +419,7 @@ const generatePdfNode = async (state) => {
       resumeData: state.tailoredResume,
       template: "modern",
       userId: state.userId,
+      targetPages: state.targetPageLength || RESUME_PAGE_COUNT,
     });
 
     await updateApplicationResume(state.applicationId, {

@@ -2,7 +2,7 @@ import path from "path";
 import crypto from "crypto";
 import { renderHtmlToPdf } from "./pdfRenderer.js";
 import { resumeRenderer } from "./resumeRenderer.js";
-import { RESUME_PDF_TEMPLATES } from "../constant/application.constant.js";
+import { RESUME_PDF_TEMPLATES, RESUME_PAGE_COUNT } from "../constant/application.constant.js";
 import { logError } from "../utils/logger.js";
 import { appError } from "../utils/errors.js";
 import { findUserById, findUserProfileByUserId } from "../repositories/user.repository.js";
@@ -19,16 +19,16 @@ export const buildResumeHtml = async (resumeData = {}, template = RESUME_PDF_TEM
 };
 
 /**
- * Generates a tailored PDF resume from structured JSON data with dynamic single-page auto-fit scaling.
+ * Generates a tailored PDF resume from structured JSON data with dynamic page auto-fit scaling.
  * @param {object} params
  * @param {object} params.resumeData - Tailored structured resume JSON
  * @param {string} [params.template] - Resume PDF template choice ('modern', 'minimal', 'ats')
  * @param {string} [params.filename] - Custom output filename
  * @param {string} [params.userId] - Optional User ID to fetch fallback user profile details
- * @param {number|string} [params.targetPages] - Target page length (default: 1)
+ * @param {number|string} [params.targetPages] - Target page length (default: RESUME_PAGE_COUNT)
  * @returns {Promise<string>} Output PDF file path
  */
-export const generateResumePdf = async ({ resumeData, template = RESUME_PDF_TEMPLATES.MODERN, filename, userId, targetPages = 1 }) => {
+export const generateResumePdf = async ({ resumeData, template = RESUME_PDF_TEMPLATES.MODERN, filename, userId, targetPages }) => {
   try {
     if (!resumeData || typeof resumeData !== "object") {
       throw new appError("Valid resumeData object is required to generate PDF", 400);
@@ -85,7 +85,7 @@ export const generateResumePdf = async ({ resumeData, template = RESUME_PDF_TEMP
     }
 
     resumeData.personalInfo = personalInfo;
-    resumeData.targetPages = targetPages || resumeData.targetPages || 1;
+    resumeData.targetPages = targetPages || resumeData.targetPages || RESUME_PAGE_COUNT;
 
     const themeName = template === RESUME_PDF_TEMPLATES.MINIMAL ? "minimal" : template === RESUME_PDF_TEMPLATES.ATS ? "ats" : "modern";
     const htmlContent = await resumeRenderer.render(resumeData, themeName);

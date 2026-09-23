@@ -342,6 +342,7 @@ export const updateApplicationResumeService = async (
         resumeData: tailoredResumeData,
         userId,
         template: template || RESUME_PDF_TEMPLATES.MODERN,
+        targetPages: pageLengthParam || RESUME_PAGE_COUNT,
       });
 
       await updateApplicationResume(applicationId, {

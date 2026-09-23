@@ -1,3 +1,5 @@
+import { RESUME_PAGE_COUNT } from "../constant/application.constant.js";
+
 /**
  * Normalizes raw resumeData (from DB or AI tailor graph) into template-friendly format
  * @param {object} resumeData - Raw candidate resume object
@@ -16,7 +18,7 @@ export const prepareResumeData = (resumeData = {}) => {
   const websiteUrl = personalInfo.website || personalInfo.portfolio || personalInfo.websiteUrl || "";
 
   const summary = (resumeData.summary || "").trim();
-  const targetPages = resumeData.targetPages || 1;
+  const targetPages = resumeData.targetPages || RESUME_PAGE_COUNT;
 
   // Process Technical & General Skills
   let rawSkillsList = [];

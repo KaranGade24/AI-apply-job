@@ -43,7 +43,7 @@ body {
 
 .resume {
   width: 210mm;
-  min-height: 297mm;
+  min-height: calc(297mm * var(--target-pages, 1));
   background: #ffffff;
   margin: 0 auto;
   padding: var(--padding-page);
@@ -239,9 +239,9 @@ body {
   .resume {
     box-shadow: none;
     width: 210mm;
-    min-height: 297mm;
-    max-height: 297mm;
-    overflow: hidden;
+    min-height: calc(297mm * var(--target-pages, 1));
+    max-height: calc(297mm * var(--target-pages, 1));
+    overflow: visible;
     padding: var(--padding-page);
     display: flex;
     flex-direction: column;
