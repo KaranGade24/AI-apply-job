@@ -1,7 +1,7 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { validateEmail, validatePassword } from '../../../../shared/validation.js';
-import { createUser, findUserByEmail, findUserByUsername, findUserByEmailOrUsername } from '../repositories/user.repository.js';
+import { createUser, findUserByEmail, findUserByUsername, findUserByEmailOrUsername, findUserById } from '../repositories/user.repository.js';
 import { appError } from '../utils/errors.js';
 import { logLoginEvent, logRegisterEvent } from '../utils/logger.js';
 import { JWT_SECRET } from '../config/env.js';
@@ -138,5 +138,23 @@ export const login = async (identifier, password) => {
       throw error;
     }
     throw new appError(`Login service error: ${error.message}`, 500);
+  }
+};
+
+export const getMe = async (userId) => {
+  try {
+    const user = await findUserById(userId);
+    if (!user) {
+      throw new appError('User not found', 404);
+    }
+    return {
+      _id: user._id,
+      email: user.email,
+      username: user.username,
+      role: user.role,
+    };
+  } catch (error) {
+    if (error.isOperational) throw error;
+    throw new appError(`getMe service error: ${error.message}`, 500);
   }
 };

@@ -1,4 +1,4 @@
-import { register as registerService, login as loginService } from '../services/auth.service.js';
+import { register as registerService, login as loginService, getMe as getMeService } from '../services/auth.service.js';
 import { handleError, appError } from '../utils/errors.js';
 
 export const register = async (req, res, next) => {
@@ -36,6 +36,22 @@ export const login = async (req, res, next) => {
     return res.status(200).json({
       message: 'User logged in successfully',
       data: result
+    });
+  } catch (error) {
+    return handleError(error, res);
+  }
+};
+
+export const getMeHandler = async (req, res, next) => {
+  try {
+    const userId = req.user?.userId || req.user?._id || req.user?.id;
+    if (!userId) {
+      throw new appError('User ID not found in token payload', 401);
+    }
+    const userData = await getMeService(userId);
+    return res.status(200).json({
+      status: 'success',
+      data: userData,
     });
   } catch (error) {
     return handleError(error, res);

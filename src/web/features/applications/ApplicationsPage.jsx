@@ -1,0 +1,178 @@
+import React, { useState, useEffect } from 'react';
+import { MoreVertical, ExternalLink } from 'lucide-react';
+import { Card } from '../../components/ui/Card';
+import { Button } from '../../components/ui/Button';
+import { getApplicationsApi, updateApplicationStatusApi } from '../../services/applicationService';
+import { formatDate, getStatusBadgeStyle } from '../../utils/formatters';
+
+export const ApplicationsPage = () => {
+  const [applications, setApplications] = useState([]);
+  const [filter, setFilter] = useState('All');
+  const [loading, setLoading] = useState(false);
+
+  const fetchApplications = async () => {
+    setLoading(true);
+    try {
+      const res = await getApplicationsApi();
+      if (res.data) {
+        setApplications(res.data);
+      } else {
+        setApplications([]);
+      }
+    } catch (err) {
+      setApplications([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchApplications();
+  }, []);
+
+  const handleStatusChange = async (appId, newStatus) => {
+    try {
+      await updateApplicationStatusApi(appId, newStatus);
+      setApplications((prev) =>
+        prev.map((a) => (a._id === appId ? { ...a, status: newStatus } : a))
+      );
+    } catch (err) {
+      // Fallback local update
+      setApplications((prev) =>
+        prev.map((a) => (a._id === appId ? { ...a, status: newStatus } : a))
+      );
+    }
+  };
+
+  const counts = {
+    All: applications.length,
+    Applied: applications.filter((a) => a.status === 'Applied').length,
+    Interview: applications.filter((a) => a.status === 'Interview').length,
+    Offer: applications.filter((a) => a.status === 'Offer').length,
+    Rejected: applications.filter((a) => a.status === 'Rejected').length,
+  };
+
+  const filteredApps = applications.filter((a) => {
+    if (filter === 'All') return true;
+    return a.status?.toLowerCase() === filter.toLowerCase();
+  });
+
+  const getLogoInitial = (company) => (company ? company.charAt(0).toUpperCase() : 'C');
+  const getLogoColor = (company) => {
+    const code = (company || 'A').charCodeAt(0) % 3;
+    if (code === 0) return 'bg-blue-600';
+    if (code === 1) return 'bg-slate-800';
+    return 'bg-emerald-700';
+  };
+
+  return (
+    <div className="space-y-6 max-w-7xl mx-auto">
+      {/* Header */}
+      <div>
+        <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Application Tracking</h1>
+        <p className="text-sm text-slate-500 mt-0.5">
+          Track your job applications and their status.
+        </p>
+      </div>
+
+      {/* Filter Tabs */}
+      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+        {['All', 'Applied', 'Interview', 'Offer', 'Rejected'].map((tabKey) => (
+          <button
+            key={tabKey}
+            onClick={() => setFilter(tabKey)}
+            className={`px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap cursor-pointer ${
+              filter === tabKey
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
+            }`}
+          >
+            {tabKey} ({counts[tabKey] || 0})
+          </button>
+        ))}
+      </div>
+
+      {/* Applications Table Card */}
+      <Card className="p-0 overflow-hidden border border-slate-200">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm">
+            <thead className="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wider">
+              <tr>
+                <th className="py-3.5 px-6">Job Title</th>
+                <th className="py-3.5 px-6">Company</th>
+                <th className="py-3.5 px-6">Location</th>
+                <th className="py-3.5 px-6">Applied Date</th>
+                <th className="py-3.5 px-6">Status</th>
+                <th className="py-3.5 px-6 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {loading ? (
+                <tr>
+                  <td colSpan={6} className="py-8 text-center text-slate-400 text-xs">
+                    Loading applications...
+                  </td>
+                </tr>
+              ) : filteredApps.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="py-8 text-center text-slate-500 text-xs">
+                    No applications found for selected status.
+                  </td>
+                </tr>
+              ) : (
+                filteredApps.map((app) => (
+                  <tr key={app._id} className="hover:bg-slate-50/80 transition-colors">
+                    {/* Job Title */}
+                    <td className="py-4 px-6 font-semibold text-slate-900 flex items-center gap-3">
+                      <div className={`w-8 h-8 rounded-lg ${getLogoColor(app.company)} text-white font-bold text-xs flex items-center justify-center shrink-0`}>
+                        {getLogoInitial(app.company)}
+                      </div>
+                      <span className="truncate max-w-xs">{app.jobTitle}</span>
+                    </td>
+
+                    {/* Company */}
+                    <td className="py-4 px-6 text-slate-600 font-medium">{app.company}</td>
+
+                    {/* Location */}
+                    <td className="py-4 px-6 text-slate-500">{app.location || 'Remote'}</td>
+
+                    {/* Applied Date */}
+                    <td className="py-4 px-6 text-slate-500 tabular-nums">{formatDate(app.appliedDate)}</td>
+
+                    {/* Status Badge */}
+                    <td className="py-4 px-6">
+                      <select
+                        value={app.status}
+                        onChange={(e) => handleStatusChange(app._id, e.target.value)}
+                        className={`text-xs font-semibold px-2.5 py-1 rounded-md border cursor-pointer ${getStatusBadgeStyle(app.status)}`}
+                      >
+                        <option value="Applied">Applied</option>
+                        <option value="Interview">Interview</option>
+                        <option value="Offer">Offer</option>
+                        <option value="Rejected">Rejected</option>
+                      </select>
+                    </td>
+
+                    {/* Actions */}
+                    <td className="py-4 px-6 text-right space-x-2 whitespace-nowrap">
+                      {app.sourceUrl && (
+                        <a
+                          href={app.sourceUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 hover:text-blue-700 bg-blue-50 px-3 py-1.5 rounded-lg transition-colors"
+                        >
+                          View <ExternalLink className="w-3 h-3" />
+                        </a>
+                      )}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+    </div>
+  );
+};

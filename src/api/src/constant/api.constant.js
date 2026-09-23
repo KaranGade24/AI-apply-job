@@ -1,7 +1,7 @@
 /**
  * General API Constants (Excluding Agent)
  */
-export const DEFAULT_PORT = 3000;
+export const DEFAULT_PORT = process.env.API_PORT || 5000;
 export const JWT_EXPIRES_IN = '24h';
 export const BCRYPT_SALT_ROUNDS = 10;
 

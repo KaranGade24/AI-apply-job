@@ -1,4 +1,5 @@
 import express from 'express';
+import cors from 'cors';
 import swaggerUi from 'swagger-ui-express';
 import swaggerJsdoc from 'swagger-jsdoc';
 import path from 'path';
@@ -10,6 +11,7 @@ import resumeRouter from './src/router/resume.router.js';
 import jobRouter from './src/router/job.router.js';
 import applicationRouter from './src/router/application.router.js';
 import skippedApplicationRouter from './src/router/skippedApplication.router.js';
+import settingRouter from './src/router/setting.router.js';
 import { flexibleJsonParser } from './src/middlewares/customJsonParser.middleware.js';
 import { jsonSyntaxErrorHandler } from './src/middlewares/jsonError.middleware.js';
 import { swaggerOptions } from './src/config/swagger.js';
@@ -20,6 +22,9 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
+
+// Enable CORS for frontend client calls
+app.use(cors({ origin: true, credentials: true }));
 
 // Flexible JSON body parser supporting auto-correction for trailing commas
 app.use(flexibleJsonParser);
@@ -34,9 +39,9 @@ const uploadsRelPath = path.join(__dirname, '../../uploads');
 app.use('/uploads', express.static(uploadsPath));
 app.use('/uploads', express.static(uploadsRelPath));
 
-// Root route - redirect to API documentation
+// Root API Health Check
 app.get('/', (req, res) => {
-  res.redirect('/api-docs');
+  res.status(200).json({ status: 'ok', service: 'AI Apply Job Backend API', docs: '/api-docs' });
 });
 
 // Swagger API Documentation setup
@@ -49,6 +54,7 @@ app.use('/api/resume', resumeRouter);
 app.use('/api/jobs', jobRouter);
 app.use('/api/applications', applicationRouter);
 app.use('/api/skipped-applications', skippedApplicationRouter);
+app.use('/api/settings', settingRouter);
 
 // 404 Handler for undefined API endpoints
 app.use((req, res, next) => {
@@ -58,10 +64,10 @@ app.use((req, res, next) => {
 // Centralized Global Error Handler
 app.use(globalErrorHandler);
 
-const PORT = DEFAULT_PORT || 3000;
+const PORT = process.env.API_PORT || DEFAULT_PORT || 5000;
 
 app.listen(PORT, () => {
-  console.log(`🚀 Server is running on port ${PORT}`);
+  console.log(`🚀 Standalone Backend API Server is running on port ${PORT}`);
   console.log(`📚 Swagger documentation available at: http://localhost:${PORT}/api-docs`);
   
   // Connect to database asynchronously after server start

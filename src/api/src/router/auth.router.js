@@ -1,5 +1,6 @@
 import { Router } from 'express';
-import { register, login } from '../controller/auth.controller.js';
+import { register, login, getMeHandler } from '../controller/auth.controller.js';
+import { authMiddleware } from '../middlewares/auth.middleware.js';
 
 const router = Router();
 
@@ -73,5 +74,21 @@ router.post('/register', register);
  *         description: Internal server error
  */
 router.post('/login', login);
+
+/**
+ * @swagger
+ * /api/auth/me:
+ *   get:
+ *     summary: Get current authenticated user profile
+ *     tags: [Auth]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Current user profile
+ *       401:
+ *         description: Unauthorized
+ */
+router.get('/me', authMiddleware, getMeHandler);
 
 export default router;

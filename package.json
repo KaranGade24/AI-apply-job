@@ -1,9 +1,11 @@
 {
   "type": "module",
   "scripts": {
-    "start": "node src/api/server.js",
-    "dev": "node src/api/server.js",
-    "build": "echo 'Build completed'"
+    "start": "concurrently \"node src/api/server.js\" \"vite\"",
+    "dev": "concurrently \"node src/api/server.js\" \"vite\"",
+    "server": "node src/api/server.js",
+    "client": "vite",
+    "build": "vite build"
   },
   "dependencies": {
     "@google/genai": "^2.23.0",
@@ -11,18 +13,32 @@
     "@langchain/google-genai": "^2.3.2",
     "@langchain/langgraph": "^1.4.15",
     "bcryptjs": "^3.0.3",
+    "clsx": "^2.1.1",
+    "concurrently": "^10.0.5",
+    "cors": "^2.8.6",
     "dotenv": "^18.0.0",
     "express": "^5.2.1",
     "handlebars": "^4.7.9",
     "jsonwebtoken": "^9.0.3",
+    "lucide-react": "^1.47.0",
     "mongoose": "^9.10.1",
     "multer": "^2.4.0",
     "nodemailer": "^10.0.10",
     "pdf-parse": "^2.4.5",
     "playwright": "^1.63.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "react-router-dom": "^7.18.4",
     "swagger-jsdoc": "^6.3.0",
     "swagger-ui-express": "^5.0.1",
+    "tailwind-merge": "^3.7.0",
     "validator": "^13.15.35",
     "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@vitejs/plugin-react": "^6.1.1",
+    "tailwindcss": "^4.3.3",
+    "vite": "^8.3.0"
   }
 }

@@ -61,4 +61,25 @@ export const authMiddleware = (req, res, next) => {
   }
 };
 
+export const optionalAuthMiddleware = (req, res, next) => {
+  try {
+    let token = null;
+    if (req.body && req.body.token) {
+      token = req.body.token;
+    } else if (req.headers.authorization && req.headers.authorization.startsWith("Bearer ")) {
+      token = req.headers.authorization.split(" ")[1];
+    } else if (req.query && req.query.token) {
+      token = req.query.token;
+    }
+
+    if (token) {
+      const decoded = jwt.verify(token, JWT_SECRET);
+      req.user = decoded;
+    }
+  } catch (error) {
+    // ignore token errors for optional auth
+  }
+  next();
+};
+
 export default authMiddleware;
