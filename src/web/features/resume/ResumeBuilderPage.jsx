@@ -24,63 +24,23 @@ export const ResumeBuilderPage = () => {
   });
 
   const [resumeData, setResumeData] = useState({
-    fullName: settings.userSetting?.fullName || user?.username || 'Karan Gade',
-    headline: settings.userSetting?.headline || 'Full Stack Web Developer (MERN) | AI-Integrated Web Applications',
-    email: settings.userSetting?.email || user?.email || 'karan@example.com',
-    phone: settings.userSetting?.phone || '+91 8446726903',
-    location: settings.userSetting?.location || 'Pune, Maharashtra',
-    linkedinUrl: settings.userSetting?.linkedinUrl || 'https://linkedin.com/in/karan-gade',
-    githubUrl: settings.userSetting?.githubUrl || 'https://github.com/KaranGade24',
-    portfolioUrl: settings.userSetting?.portfolioUrl || 'https://portfolio-karan-gade.vercel.app',
-    summary:
-      'Full Stack Developer focused on building scalable, user-centric web applications and intelligent features.',
-    skills: ['JavaScript', 'React.js', 'Node.js', 'Express.js', 'MongoDB', 'REST APIs', 'Git', 'Tailwind CSS'],
-    experience: [
-      {
-        role: 'Full Stack Web Developer Intern',
-        company: 'TechCorp Solutions',
-        period: '2024 - Present',
-        bullets: [
-          'Engineered scalable MERN stack web applications with AI features using Node.js, Express, and React.',
-          'Designed RESTful API endpoints and integrated MongoDB schemas with Mongoose ORM.',
-          'Optimized frontend performance, reducing initial bundle load times by 28% with Vite and Tailwind CSS.'
-        ]
-      }
-    ],
-    education: [
-      {
-        degree: 'Bachelor of Technology (B.Tech) in Computer Engineering',
-        institution: 'Savitribai Phule Pune University',
-        period: '2020 - 2024'
-      }
-    ],
-    projects: [
-      {
-        title: 'AI Auto Job Applicator & Resume Tailorer',
-        description: 'Full-stack AI application that discovers job postings, tailors resumes using LLM APIs, and automates application tracking.',
-        technologies: ['React.js', 'Node.js', 'Express', 'MongoDB', 'Gemini API', 'Tailwind CSS'],
-        link: 'https://github.com/KaranGade24/ai-job-applicator'
-      },
-      {
-        title: 'Real-time Collaborative Task Workspace',
-        description: 'Interactive dashboard with WebSockets, drag-and-drop kanban boards, and role-based access control.',
-        technologies: ['React', 'Node.js', 'Socket.io', 'MongoDB', 'JWT Auth'],
-        link: 'https://portfolio-karan-gade.vercel.app'
-      }
-    ],
-    certifications: [
-      {
-        name: 'Full Stack Development Certification (MERN)',
-        issuer: 'Meta / Coursera',
-        date: '2024'
-      },
-      {
-        name: 'Node.js & MongoDB Developer Certification',
-        issuer: 'HackerRank',
-        date: '2023'
-      }
-    ],
+    fullName: settings.userSetting?.fullName || user?.username || '',
+    headline: settings.userSetting?.headline || '',
+    email: settings.userSetting?.email || user?.email || '',
+    phone: settings.userSetting?.phone || '',
+    location: settings.userSetting?.location || '',
+    linkedinUrl: settings.userSetting?.linkedinUrl || '',
+    githubUrl: settings.userSetting?.githubUrl || '',
+    portfolioUrl: settings.userSetting?.portfolioUrl || '',
+    summary: '',
+    skills: [],
+    experience: [],
+    education: [],
+    projects: [],
+    certifications: [],
   });
+
+  const [hasLoadedResume, setHasLoadedResume] = useState(false);
 
   useEffect(() => {
     if (settings.userSetting || user) {
@@ -104,20 +64,90 @@ export const ResumeBuilderPage = () => {
           const latest = res.data[0];
           if (latest.parsedData && typeof latest.parsedData === 'object') {
             const pData = latest.parsedData;
+            const pInfo = pData.personalInfo || pData.personal || {};
+
+            // Map skills cleanly
+            let mappedSkills = [];
+            if (Array.isArray(pData.skills)) {
+              mappedSkills = pData.skills;
+            } else if (pData.skills && typeof pData.skills === 'object') {
+              mappedSkills = [
+                ...(pData.skills.technicalSkills || []),
+                ...(pData.skills.softSkills || []),
+                ...(pData.skills.languages || []),
+                ...(pData.skills.keySkills || []),
+              ];
+            }
+
+            // Map work experience
+            const rawExp = pData.workExperience || pData.experience || [];
+            const mappedExp = rawExp.map((exp) => ({
+              role: exp.jobTitle || exp.role || exp.title || '',
+              company: exp.company || exp.companyName || '',
+              period: exp.period || exp.dates || exp.duration || [exp.startDate, exp.endDate].filter(Boolean).join(' - ') || '',
+              bullets: Array.isArray(exp.description)
+                ? exp.description
+                : Array.isArray(exp.bullets)
+                ? exp.bullets
+                : typeof exp.description === 'string' && exp.description.trim()
+                ? [exp.description]
+                : [],
+            }));
+
+            // Map education
+            const rawEdu = pData.education || [];
+            const mappedEdu = rawEdu.map((edu) => ({
+              degree: edu.degreeFull || [edu.degree, edu.fieldOfStudy].filter(Boolean).join(' in ') || edu.degree || '',
+              institution: edu.institution || edu.school || edu.university || '',
+              period: edu.graduationYear || edu.period || edu.year || edu.dates || '',
+            }));
+
+            // Map projects
+            const rawProj = pData.projects || [];
+            const mappedProj = rawProj.map((proj) => ({
+              title: proj.title || proj.name || '',
+              description: proj.description || '',
+              technologies: Array.isArray(proj.technologies)
+                ? proj.technologies
+                : typeof proj.technologies === 'string'
+                ? proj.technologies.split(',').map((t) => t.trim())
+                : [],
+              link: proj.link || proj.links?.liveDemo || proj.links?.github || proj.githubUrl || proj.demoUrl || '',
+            }));
+
+            // Map certifications
+            const rawCerts = pData.certifications || [];
+            const mappedCerts = rawCerts.map((cert) => {
+              if (typeof cert === 'string') return { name: cert, issuer: '', date: '' };
+              return {
+                name: cert.name || cert.title || '',
+                issuer: cert.issuer || cert.organization || '',
+                date: cert.date || cert.issueDate || cert.year || '',
+              };
+            });
+
             setResumeData((prev) => ({
               ...prev,
-              ...(pData.personalInfo || pData.personal || {}),
+              fullName: pInfo.fullName || pInfo.name || prev.fullName,
+              headline: pInfo.headline || pInfo.title || prev.headline,
+              email: pInfo.email || prev.email,
+              phone: pInfo.phone || prev.phone,
+              location: pInfo.location || prev.location,
+              linkedinUrl: pInfo.linkedin || pInfo.linkedinUrl || prev.linkedinUrl,
+              githubUrl: pInfo.github || pInfo.githubUrl || prev.githubUrl,
+              portfolioUrl: pInfo.website || pInfo.portfolio || pInfo.portfolioUrl || prev.portfolioUrl,
               summary: pData.summary || pData.professionalSummary || prev.summary,
-              skills: Array.isArray(pData.skills) ? pData.skills : (pData.skills?.keySkills || prev.skills),
-              experience: (pData.experience && pData.experience.length > 0) ? pData.experience : ((pData.workExperience && pData.workExperience.length > 0) ? pData.workExperience : prev.experience),
-              education: (pData.education && pData.education.length > 0) ? pData.education : prev.education,
-              projects: (pData.projects && pData.projects.length > 0) ? pData.projects : prev.projects,
-              certifications: (pData.certifications && pData.certifications.length > 0) ? pData.certifications : prev.certifications,
+              skills: mappedSkills.length > 0 ? mappedSkills : prev.skills,
+              experience: mappedExp,
+              education: mappedEdu,
+              projects: mappedProj,
+              certifications: mappedCerts,
             }));
+            setHasLoadedResume(true);
           }
         }
       } catch (err) {
-        // Fallback
+        // Safe fallback
       }
     };
     loadBackendResume();
