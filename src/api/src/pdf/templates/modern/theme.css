@@ -43,7 +43,6 @@ body {
 
 .resume {
   width: 210mm;
-  /* Use min-height so scrollHeight reflects real content for auto-fit scaling */
   min-height: 297mm;
   background: #ffffff;
   margin: 0 auto;
@@ -52,6 +51,7 @@ body {
   overflow: visible;
   display: flex;
   flex-direction: column;
+  justify-content: space-between;
 }
 
 /* Header Section */
@@ -243,5 +243,8 @@ body {
     max-height: 297mm;
     overflow: hidden;
     padding: var(--padding-page);
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
   }
 }

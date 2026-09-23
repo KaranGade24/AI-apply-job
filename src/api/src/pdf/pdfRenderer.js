@@ -60,34 +60,35 @@ export const renderHtmlToPdf = async (htmlContent, outputPath) => {
 
       const maxAllowedHeight = targetPages * a4HeightPx;
 
-      // Measure content height at scale 1.0 baseline
+      // Measure content height baseline
+      const prevMinHeight = pageEl.style.minHeight;
+      pageEl.style.minHeight = '0px';
+
       document.documentElement.style.setProperty('--scale-factor', '1.0');
-      // Allow a reflow tick
       await new Promise(r => requestAnimationFrame(r));
 
-      let minScale = 0.45;
-      let maxScale = 1.50;
+      let minScale = 0.60;
+      let maxScale = 1.35;
       let bestScale = 1.0;
 
-      // Binary search: 35 iterations gives ~0.002 precision
+      // Binary search: 35 iterations gives ~0.0001 precision
       for (let i = 0; i < 35; i++) {
         const midScale = (minScale + maxScale) / 2;
         document.documentElement.style.setProperty('--scale-factor', midScale.toFixed(4));
 
-        // Measure the actual content height inside the resume container
+        // Measure actual unconstrained content height inside container
         const contentHeight = pageEl.scrollHeight;
 
         if (contentHeight <= maxAllowedHeight) {
-          // Content fits: record this as a valid scale and try scaling UP to fill empty space
           bestScale = midScale;
           minScale = midScale;
         } else {
-          // Content overflows: scale DOWN
           maxScale = midScale;
         }
       }
 
       document.documentElement.style.setProperty('--scale-factor', bestScale.toFixed(4));
+      pageEl.style.minHeight = prevMinHeight;
     });
 
     await page.emulateMedia({

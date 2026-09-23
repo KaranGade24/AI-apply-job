@@ -24,29 +24,31 @@
 
         const maxAllowedHeight = targetPages * a4HeightPx;
 
-        // Reset to baseline
+        // Reset to baseline and clear min-height for unconstrained measurement
+        const prevMinHeight = pageEl.style.minHeight;
+        pageEl.style.minHeight = '0px';
+
         document.documentElement.style.setProperty('--scale-factor', '1.0');
 
-        let minScale = 0.45;
-        let maxScale = 1.50;
+        let minScale = 0.60;
+        let maxScale = 1.35;
         let bestScale = 1.0;
 
-        // Bidirectional binary search: scale DOWN on overflow, scale UP on empty space
+        // Bidirectional binary search
         for (let i = 0; i < 35; i++) {
           const midScale = (minScale + maxScale) / 2;
           document.documentElement.style.setProperty('--scale-factor', midScale.toFixed(4));
 
           if (pageEl.scrollHeight <= maxAllowedHeight) {
-            // Fits — try to scale up more to fill the page
             bestScale = midScale;
             minScale = midScale;
           } else {
-            // Overflows — scale down
             maxScale = midScale;
           }
         }
 
         document.documentElement.style.setProperty('--scale-factor', bestScale.toFixed(4));
+        pageEl.style.minHeight = prevMinHeight;
       }
 
       if (document.readyState === 'loading') {

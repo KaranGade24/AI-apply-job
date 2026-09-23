@@ -13,7 +13,7 @@ CRITICAL HARD RULES:
 3. DO NOT FABRICATE OR INVENT QUALIFICATIONS: Never fabricate years of experience, job titles, companies, tools, degrees, or skills not present in the base resume.
 4. ABSOLUTELY NO PLACEHOLDER / FALLBACK STRINGS: If any piece of information is missing or unavailable, DO NOT write placeholder words like "N/A", "Not Available", "Not Specified", "Unknown", "None", "Not Provided", "TBD". Leave missing string fields as completely empty strings ("") and missing lists as empty arrays ([]).
 5. TAILOR PRESENTATION ONLY: Reorder skills, refine professional summary, emphasize matching experience/projects, and align terminology with the target job posting without altering historical truth.
-6. PAGE LENGTH CONSTRAINT ADHERENCE: Strictly tailor the volume and brevity of bullet points according to the specified target page length.
+6. PAGE LENGTH & VOLUME OPTIMIZATION: Tailor the depth and count of bullet points so the text volume naturally populates the target page length without leaving large empty bottom gaps or spilling over into unwanted overflow pages.
 7. ABSOLUTE COMPLIANCE: Return output matching the requested structured JSON schema cleanly.
 `;
 
@@ -30,21 +30,23 @@ export const buildResumeTailoringPrompt = ({
 
   if (pageStr === "1") {
     pageLengthGuidance = `
-Target Page Length: 1 Page (STRICT SINGLE PAGE CONSTRAINT)
-- Your output MUST fit on exactly 1 page. Be concise and eliminate fluff.
-- Professional Summary: Maximum 2-3 punchy, high-impact sentences.
-- Skills: Include relevant technical skill categories matching the job description.
-- Work Experience / Projects: Select key projects or roles. Provide concise, impact-driven bullet points.
+Target Page Length: 1 Page (STRICT SINGLE PAGE FULL COVERAGE)
+- Tailor the candidate's resume so the output content volume naturally fills a full single A4 page.
+- Professional Summary: Write a compelling 2-3 sentence overview highlighting relevant expertise for this job.
+- Skills: Group skills into technical, tools, soft skills, and domain categories.
+- Work Experience & Projects: Provide 3-4 detailed, action-packed bullet points per key position/project with metrics, technical scope, and outcomes from the candidate's background.
+- Do NOT make bullet points overly brief or sparse; provide rich technical depth so the page is fully and beautifully populated without overflow.
 - Preserve all project Live Demo & GitHub repository links!`;
   } else if (pageStr === "2") {
     pageLengthGuidance = `
-Target Page Length: 2 Pages
-- Provide detailed bullet points for key past roles with quantified achievements, metrics, and technical depth.
-- Include comprehensive skills, projects, certifications, and technical accomplishments.`;
+Target Page Length: 2 Pages (TWO FULL PAGES COVERAGE)
+- Tailor the candidate's resume to provide comprehensive, detailed coverage across 2 full A4 pages.
+- Provide 4-6 detailed, metric-rich bullet points per work experience and project.
+- Include all relevant skills, certifications, and technical accomplishments from the candidate's background.`;
   } else {
     pageLengthGuidance = `
 Target Page Length: ${pageStr} Page(s)
-- Tailor the volume, depth, and bullet points appropriately to fit ${pageStr} page(s).`;
+- Tailor the volume, depth, and bullet points appropriately to fit and fill ${pageStr} page(s).`;
   }
 
   const jobTitle = jobDetails.title || "";
