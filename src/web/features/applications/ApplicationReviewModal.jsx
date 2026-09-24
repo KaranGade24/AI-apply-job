@@ -897,6 +897,14 @@ export const ApplicationReviewModal = ({
                       <p className="text-[11px] text-slate-500 mt-0.5">Customized for this specific job's keywords and requirements.</p>
                     </div>
                     <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleRegenerateDraft}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 text-slate-700 rounded-lg text-[11px] font-bold hover:bg-slate-50 transition-all cursor-pointer"
+                      >
+                        <RefreshCw className="w-3 h-3" />
+                        Re-tailor
+                      </button>
                       {application?.resume?.pdfPath && (
                         <a 
                           href={`/api/applications/${application._id}/pdf?token=${localStorage.getItem('token')}`}
@@ -938,15 +946,25 @@ export const ApplicationReviewModal = ({
                       </h3>
                       <p className="text-[11px] text-slate-500 mt-0.5">Tailored outreach based on the application method.</p>
                     </div>
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
-                      onClick={() => copyToClipboard(application?.email?.body, 'outreach')}
-                      className="text-blue-600 font-bold"
-                    >
-                      {copiedKey === 'outreach' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                      Copy Draft
-                    </Button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleRegenerateDraft}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 text-slate-700 rounded-lg text-[11px] font-bold hover:bg-slate-50 transition-all cursor-pointer"
+                      >
+                        <RefreshCw className="w-3 h-3" />
+                        Re-draft
+                      </button>
+                      <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        onClick={() => copyToClipboard(application?.email?.body, 'outreach')}
+                        className="text-blue-600 font-bold"
+                      >
+                        {copiedKey === 'outreach' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                        Copy Draft
+                      </Button>
+                    </div>
                   </div>
 
                   <div className="p-5 border border-slate-200 rounded-xl bg-white shadow-sm">
