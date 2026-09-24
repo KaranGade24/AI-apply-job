@@ -282,7 +282,7 @@ export const ResumeBuilderPage = () => {
                     </p>
                   </div>
                   <a 
-                    href={`/api/resume/${originalResume._id}/download`}
+                    href={`/api/resume/${originalResume._id}/download?token=${localStorage.getItem('token')}`}
                     target="_blank"
                     rel="noreferrer"
                     className="p-1.5 text-slate-400 hover:text-blue-600 rounded-lg transition-colors cursor-pointer"
