@@ -227,8 +227,9 @@ const getUserResumeNode = async (state) => {
     let sourceResumeId = state.sourceResumeId;
 
     if (!activeResume) {
-      const dbResume = await getActiveResumeByUserId(state.userId).catch(() => null);
-      if (dbResume) {
+      const dbResumeDoc = await getActiveResumeByUserId(state.userId).catch(() => null);
+      if (dbResumeDoc) {
+        const dbResume = dbResumeDoc.toObject ? dbResumeDoc.toObject() : dbResumeDoc;
         activeResume = dbResume.parsedData || dbResume;
         sourceResumeId = dbResume._id ? dbResume._id.toString() : state.sourceResumeId;
       } else {

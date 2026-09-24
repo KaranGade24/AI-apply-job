@@ -1,9 +1,9 @@
 import React, { useState, useContext, useEffect } from 'react';
-import { Save, Download, Sparkles, Check, Globe, Mail, Phone, MapPin, Link2 } from 'lucide-react';
+import { Save, Download, Sparkles, Check, Globe, Mail, Phone, MapPin, Link2, Upload, Trash2, Edit2, FileText, AlertCircle } from 'lucide-react';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { RESUME_TEMPLATES } from '../../constants/config';
-import { generateResumePdfApi, getMyResumesApi, saveResumeDataApi } from '../../services/resumeService';
+import { generateResumePdfApi, getMyResumesApi, saveResumeDataApi, parseResumeApi, deleteResumeApi } from '../../services/resumeService';
 import { ResumePreviewModal } from './ResumePreviewModal';
 import { SettingsContext } from '../../context/SettingsContext';
 import { useAuth } from '../../hooks/useAuth';
@@ -11,6 +11,12 @@ import { useAuth } from '../../hooks/useAuth';
 export const ResumeBuilderPage = () => {
   const { user } = useAuth();
   const { settings } = useContext(SettingsContext);
+
+  const [resumes, setResumes] = useState([]);
+  const [originalResume, setOriginalResume] = useState(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState('');
+  const [uploadSuccess, setUploadSuccess] = useState(false);
 
   const [selectedTemplate, setSelectedTemplate] = useState('ATS Modern');
   const [sections, setSections] = useState({
@@ -60,9 +66,12 @@ export const ResumeBuilderPage = () => {
     const loadBackendResume = async () => {
       try {
         const res = await getMyResumesApi();
-        if (res.data && res.data.length > 0) {
-          const latest = res.data[0];
-          if (latest.parsedData && typeof latest.parsedData === 'object') {
+        if (res.data) {
+          setResumes(res.data);
+          const latest = res.data.find(r => r.type === 'ORIGINAL') || res.data[0];
+          setOriginalResume(res.data.find(r => r.type === 'ORIGINAL'));
+
+          if (latest && latest.parsedData && typeof latest.parsedData === 'object') {
             const pData = latest.parsedData;
             const pInfo = pData.personalInfo || pData.personal || {};
 
@@ -153,6 +162,46 @@ export const ResumeBuilderPage = () => {
     loadBackendResume();
   }, [settings, user]);
 
+  const handleFileUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    // Check file size (5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      setUploadError('File size exceeds 5MB limit.');
+      return;
+    }
+
+    setIsUploading(true);
+    setUploadError('');
+    setUploadSuccess(false);
+
+    try {
+      const formData = new FormData();
+      formData.append('resume', file);
+      
+      await parseResumeApi(formData);
+      setUploadSuccess(true);
+      
+      // Reload resume data
+      window.location.reload();
+    } catch (err) {
+      setUploadError(err.message || 'Failed to upload resume');
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const handleDeleteResume = async (resumeId) => {
+    if (!window.confirm('Are you sure you want to delete this resume? This cannot be undone.')) return;
+    try {
+      await deleteResumeApi(resumeId);
+      window.location.reload();
+    } catch (err) {
+      alert('Failed to delete resume');
+    }
+  };
+
   const [pdfLoading, setPdfLoading] = useState(false);
   const [pdfUrl, setPdfUrl] = useState('');
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
@@ -214,6 +263,71 @@ export const ResumeBuilderPage = () => {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Left Column: Template Selection & Section Toggles (4 cols) */}
         <div className="lg:col-span-4 space-y-6">
+          {/* Resume Management Card */}
+          <Card className="p-5 space-y-4">
+            <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wider">Original Resume</h2>
+            
+            {originalResume ? (
+              <div className="space-y-4">
+                <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-blue-100 text-blue-600 flex items-center justify-center shrink-0">
+                    <FileText className="w-5 h-5" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-bold text-slate-900 truncate">
+                      {originalResume.originalFile || 'Original Resume'}
+                    </p>
+                    <p className="text-[10px] text-slate-500">
+                      Uploaded on {new Date(originalResume.createdAt).toLocaleDateString()}
+                    </p>
+                  </div>
+                  <a 
+                    href={`/api/resume/${originalResume._id}/download`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="p-1.5 text-slate-400 hover:text-blue-600 rounded-lg transition-colors cursor-pointer"
+                    title="Download Original File"
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                  </a>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="flex items-center justify-center gap-2 px-3 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-bold transition-all cursor-pointer shadow-2xs">
+                    <RefreshCw className={`w-3.5 h-3.5 ${isUploading ? 'animate-spin' : ''}`} />
+                    {isUploading ? 'Processing...' : 'Replace'}
+                    <input type="file" className="hidden" accept=".pdf,.doc,.docx" onChange={handleFileUpload} disabled={isUploading} />
+                  </label>
+                  
+                  <button 
+                    onClick={() => handleDeleteResume(originalResume._id)}
+                    className="flex items-center justify-center gap-2 px-3 py-2 bg-white border border-rose-200 hover:bg-rose-50 text-rose-600 rounded-lg text-xs font-bold transition-all cursor-pointer shadow-2xs"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    Delete
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <p className="text-xs text-slate-500 leading-relaxed">
+                  Upload your base resume to let our AI automatically extract your skills, experience, and projects.
+                </p>
+                <label className="flex items-center justify-center gap-2 w-full p-4 bg-blue-50 border-2 border-dashed border-blue-200 hover:border-blue-400 text-blue-700 rounded-xl transition-all cursor-pointer group">
+                  <Upload className={`w-5 h-5 group-hover:scale-110 transition-transform ${isUploading ? 'animate-bounce' : ''}`} />
+                  <span className="text-sm font-bold">{isUploading ? 'Processing with AI...' : 'Upload Resume'}</span>
+                  <input type="file" className="hidden" accept=".pdf,.doc,.docx" onChange={handleFileUpload} disabled={isUploading} />
+                </label>
+              </div>
+            )}
+
+            {uploadError && (
+              <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-[11px] rounded-lg flex items-center gap-2">
+                <AlertCircle className="w-3.5 h-3.5" /> {uploadError}
+              </div>
+            )}
+          </Card>
+
           {/* Choose Template Card */}
           <Card className="p-5 space-y-4">
             <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wider">Choose Template</h2>

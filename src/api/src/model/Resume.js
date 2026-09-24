@@ -8,6 +8,7 @@ export const ResumeType = {
 const resumeSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   originalFile: { type: String, default: null },
+  filePath: { type: String, default: null },
   parsedData: { type: mongoose.Schema.Types.Mixed, default: null },
   version: { type: Number, default: 1 },
   type: { type: String, enum: [ResumeType.ORIGINAL, ResumeType.TAILORED], default: ResumeType.ORIGINAL },

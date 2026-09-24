@@ -1,11 +1,13 @@
 import { Router } from 'express';
 import { authMiddleware } from '../middlewares/auth.middleware.js';
-import { upload, uploadResume, getMyResumes, getSingleResume, saveResumeData, generateResumePdfController } from '../controller/resume.controller.js';
+import { upload, uploadResume, getMyResumes, getSingleResume, saveResumeData, generateResumePdfController, deleteResumeController, downloadOriginalResume } from '../controller/resume.controller.js';
 
 const router = Router();
 
 router.post('/save', authMiddleware, saveResumeData);
 router.post('/generate-pdf', authMiddleware, generateResumePdfController);
+router.delete('/:id', authMiddleware, deleteResumeController);
+router.get('/:id/download', authMiddleware, downloadOriginalResume);
 
 /**
  * @swagger

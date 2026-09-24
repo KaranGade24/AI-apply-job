@@ -46,12 +46,16 @@ export const DashboardPage = () => {
         });
 
         // Dynamic activities from real applications
-        const recentActivities = apps.slice(0, 5).map((app, idx) => ({
-          id: app._id || idx,
-          type: 'applied',
-          text: `Applied to ${app.jobTitle} at ${app.company}`,
-          time: new Date(app.appliedDate || app.createdAt || Date.now()).toLocaleDateString(),
-        }));
+        const recentActivities = apps.slice(0, 5).map((app, idx) => {
+          const title = app.jobTitle || app.jobId?.title || 'Position';
+          const company = app.company || app.jobId?.company || 'Company';
+          return {
+            id: app._id || idx,
+            type: 'applied',
+            text: `Applied to ${title} at ${company}`,
+            time: new Date(app.appliedDate || app.createdAt || Date.now()).toLocaleDateString(),
+          };
+        });
 
         setActivities(recentActivities);
       })

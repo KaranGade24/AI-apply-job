@@ -22,14 +22,26 @@ export const processAndSaveResume = async ({ userId, filePath, originalFilename 
       throw new appError('AI resume parsing yielded no data', 500);
     }
 
-    // 2. Persist to MongoDB
-    const savedResume = await createResume({
-      userId,
-      originalFile: originalFilename || filePath,
-      parsedData,
-      type: ResumeType.ORIGINAL,
-      version: 1
-    });
+    // 2. Persist to MongoDB (Upsert ORIGINAL resume)
+    const { Resume } = await import('../model/Resume.js');
+    let savedResume = await Resume.findOne({ userId, type: ResumeType.ORIGINAL });
+    
+    if (savedResume) {
+      savedResume.originalFile = originalFilename || filePath;
+      savedResume.filePath = filePath;
+      savedResume.parsedData = parsedData;
+      savedResume.version = (savedResume.version || 1) + 1;
+      await savedResume.save();
+    } else {
+      savedResume = await createResume({
+        userId,
+        originalFile: originalFilename || filePath,
+        filePath,
+        parsedData,
+        type: ResumeType.ORIGINAL,
+        version: 1
+      });
+    }
 
     return savedResume;
   } catch (error) {

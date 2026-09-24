@@ -450,6 +450,14 @@ export const ApplicationReviewModal = ({
                 <RefreshCw className="w-3.5 h-3.5 animate-spin text-blue-600" />
                 <span>LangGraph Agent Pipeline in progress</span>
               </div>
+              
+              <Button 
+                variant="outline" 
+                onClick={onClose}
+                className="mt-4 border-slate-200 text-slate-600 hover:bg-slate-100"
+              >
+                Cancel Process
+              </Button>
             </div>
           ) : (
             <>

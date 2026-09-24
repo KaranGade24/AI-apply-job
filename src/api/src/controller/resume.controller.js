@@ -144,9 +144,55 @@ export const generateResumePdfController = async (req, res) => {
   }
 };
 
+/**
+ * Delete Resume Controller
+ */
+export const deleteResumeController = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { Resume } = await import('../model/Resume.js');
+    const result = await Resume.findByIdAndDelete(id);
+    if (!result) {
+      throw new appError('Resume not found', 404);
+    }
+    return res.status(200).json({
+      success: true,
+      message: 'Resume deleted successfully'
+    });
+  } catch (error) {
+    return handleError(error, res);
+  }
+};
+
+/**
+ * Download Original Resume Controller
+ */
+export const downloadOriginalResume = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { Resume } = await import('../model/Resume.js');
+    const resume = await Resume.findById(id);
+    
+    if (!resume || !resume.filePath) {
+      throw new appError('Resume file not found', 404);
+    }
+
+    const fs = await import('fs');
+    if (!fs.existsSync(resume.filePath)) {
+      throw new appError('File missing on server', 404);
+    }
+
+    res.download(resume.filePath, resume.originalFile || 'resume.pdf');
+  } catch (error) {
+    return handleError(error, res);
+  }
+};
+
 export default {
   upload,
   uploadResume,
   getMyResumes,
-  getSingleResume
+  getSingleResume,
+  deleteResumeController,
+  downloadOriginalResume
 };

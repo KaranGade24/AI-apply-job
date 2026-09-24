@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { MoreVertical, ExternalLink, Eye, Sparkles, Check, RefreshCw } from 'lucide-react';
+import { MoreVertical, ExternalLink, Eye, Sparkles, Check, RefreshCw, X } from 'lucide-react';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { ApplicationReviewModal } from './ApplicationReviewModal';
@@ -306,20 +306,33 @@ export const ApplicationsPage = () => {
                         onClick={(e) => e.stopPropagation()}
                       >
                         {/* Dedicated Tailor & Draft Button: reads job, tailors resume, writes mail */}
-                        <button
-                          type="button"
-                          onClick={() => handleTailorAndReview(app)}
-                          disabled={isTailoring}
-                          className="inline-flex items-center gap-1.5 text-xs font-bold text-blue-700 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-3 py-1.5 rounded-lg transition-colors cursor-pointer shadow-2xs"
-                          title="Read job, tailor resume for requirements, and generate draft email/pitch"
-                        >
-                          {isTailoring ? (
-                            <RefreshCw className="w-3 h-3 animate-spin text-blue-600" />
-                          ) : (
-                            <Sparkles className="w-3 h-3 text-blue-600" />
+                        <div className="inline-flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => handleTailorAndReview(app)}
+                            disabled={isTailoring}
+                            className="inline-flex items-center gap-1.5 text-xs font-bold text-blue-700 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-3 py-1.5 rounded-lg transition-colors cursor-pointer shadow-2xs"
+                            title="Read job, tailor resume for requirements, and generate draft email/pitch"
+                          >
+                            {isTailoring ? (
+                              <RefreshCw className="w-3 h-3 animate-spin text-blue-600" />
+                            ) : (
+                              <Sparkles className="w-3 h-3 text-blue-600" />
+                            )}
+                            <span>Tailor & Draft</span>
+                          </button>
+
+                          {isTailoring && (
+                            <button
+                              type="button"
+                              onClick={() => setTailoringId(null)}
+                              className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                              title="Cancel visual state"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
                           )}
-                          <span>Tailor & Draft</span>
-                        </button>
+                        </div>
 
                         <button
                           type="button"

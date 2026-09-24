@@ -35,3 +35,9 @@ export const parseResumeApi = async (formData) => {
   }
   return data;
 };
+
+export const deleteResumeApi = async (resumeId) => {
+  return await fetchWithAuth(`/resume/${resumeId}`, {
+    method: 'DELETE',
+  });
+};

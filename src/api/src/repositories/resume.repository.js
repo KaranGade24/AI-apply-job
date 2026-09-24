@@ -4,11 +4,12 @@ import { appError } from '../utils/errors.js';
 /**
  * Creates and persists a new Resume record in MongoDB
  */
-export const createResume = async ({ userId, originalFile, parsedData, type = ResumeType.ORIGINAL, version = 1, jobId = null }) => {
+export const createResume = async ({ userId, originalFile, filePath = null, parsedData, type = ResumeType.ORIGINAL, version = 1, jobId = null }) => {
   try {
     const newResume = await Resume.create({
       userId,
       originalFile,
+      filePath,
       parsedData,
       type,
       version,
