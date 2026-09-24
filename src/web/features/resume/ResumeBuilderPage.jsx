@@ -1,5 +1,5 @@
 import React, { useState, useContext, useEffect } from 'react';
-import { Save, Download, Sparkles, Check, Globe, Mail, Phone, MapPin, Link2, Upload, Trash2, Edit2, FileText, AlertCircle } from 'lucide-react';
+import { Save, Download, Sparkles, Check, Globe, Mail, Phone, MapPin, Link2, Upload, Trash2, Edit2, FileText, AlertCircle, RefreshCw, ExternalLink } from 'lucide-react';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { RESUME_TEMPLATES } from '../../constants/config';
