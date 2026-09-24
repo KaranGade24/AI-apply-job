@@ -278,6 +278,31 @@ export const ApplicationReviewModal = ({
   };
 
   // Re-tailor and re-generate AI draft on demand
+  const formatAiError = (errorStr) => {
+    if (!errorStr) return '';
+    
+    // Check for common Gemini Rate Limit errors
+    if (errorStr.includes('429') || errorStr.includes('quota') || errorStr.includes('Rate limit')) {
+      // Try to extract the retry delay if present
+      const retryMatch = errorStr.match(/retry in ([\d\.]+s|[\d\.]+ seconds)/i);
+      const retryText = retryMatch ? ` Please retry in ${retryMatch[1]}.` : '';
+      return `AI Rate Limit Exceeded: The AI model is currently busy or you have reached your request quota.${retryText}`;
+    }
+
+    // Check for model not found / service unavailable
+    if (errorStr.includes('503') || errorStr.includes('Service Unavailable')) {
+      return 'AI Service Temporarily Unavailable: The AI model is currently overloaded. Please try again in a few minutes.';
+    }
+
+    // Generic cleanup for structured errors
+    if (errorStr.includes('[GoogleGenerativeAI Error]')) {
+      return 'AI Processing Error: There was an issue generating your content. This usually happens with complex jobs or large resumes.';
+    }
+
+    // Return first sentence or first 100 chars if it's too long
+    return errorStr.length > 150 ? errorStr.substring(0, 150) + '...' : errorStr;
+  };
+
   const handleRegenerateDraft = async () => {
     setLoading(true);
     showToast('AI Agent reading job, tailoring resume & drafting message...');
@@ -473,7 +498,7 @@ export const ApplicationReviewModal = ({
               <div className="space-y-1">
                 <p className="font-bold text-red-950 uppercase tracking-wider text-[10px]">AI Pipeline Error / Rate Limit</p>
                 <p className="text-red-800 leading-relaxed font-medium">
-                  {application.error}
+                  {formatAiError(application.error)}
                 </p>
                 <div className="pt-2 flex items-center gap-3">
                   <button 

@@ -9,12 +9,22 @@ import { AI_PROVIDERS, AI_MODELS } from '../../../constants/config';
 
 export const AiSettingsTab = () => {
   const { settings, updateSettings, loading } = useContext(SettingsContext);
-  const [provider, setProvider] = useState(settings.aiSettings?.provider || 'googleGemini');
-  const [model, setModel] = useState(settings.aiSettings?.model || 'gemini-2.5-flash');
-  const [temperature, setTemperature] = useState(settings.aiSettings?.temperature ?? 0.1);
-  const [apiKey, setApiKey] = useState(settings.aiSettings?.apiKey || '');
+  const [provider, setProvider] = useState('googleGemini');
+  const [model, setModel] = useState('gemini-2.0-flash');
+  const [temperature, setTemperature] = useState(0.1);
+  const [apiKey, setApiKey] = useState('');
   const [showKey, setShowKey] = useState(false);
   const [savedMsg, setSavedMsg] = useState('');
+
+  // Sync local state when settings context loads real data
+  React.useEffect(() => {
+    if (settings?.aiSettings) {
+      setProvider(settings.aiSettings.provider || 'googleGemini');
+      setModel(settings.aiSettings.model || 'gemini-2.0-flash');
+      setTemperature(settings.aiSettings.temperature ?? 0.1);
+      setApiKey(settings.aiSettings.apiKey || '');
+    }
+  }, [settings]);
 
   const handleSave = async () => {
     const updated = {
@@ -70,7 +80,7 @@ export const AiSettingsTab = () => {
               value={provider}
               onChange={(e) => {
                 setProvider(e.target.value);
-                setModel(AI_MODELS[e.target.value]?.[0]?.id || 'gemini-2.5-flash');
+                setModel(AI_MODELS[e.target.value]?.[0]?.id || 'gemini-2.0-flash');
               }}
               options={AI_PROVIDERS}
             />

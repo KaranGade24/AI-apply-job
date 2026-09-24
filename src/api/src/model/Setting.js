@@ -4,7 +4,7 @@ const settingSchema = new mongoose.Schema({
   userId: { type: String, required: true, unique: true, index: true },
   aiSettings: {
     provider: { type: String, default: 'googleGemini' },
-    model: { type: String, default: 'gemini-2.5-flash' },
+    model: { type: String, default: 'gemini-2.0-flash' },
     temperature: { type: Number, default: 0.1 },
     apiKey: { type: String, default: '' },
   },
