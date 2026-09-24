@@ -466,6 +466,28 @@ export const ApplicationReviewModal = ({
 
         {/* Tab Content */}
         <div className="p-6 overflow-y-auto flex-1 space-y-6">
+          {/* Error Banner */}
+          {application?.error && (
+            <div className="p-4 rounded-xl border border-red-200 bg-red-50 flex items-start gap-3 text-xs animate-in fade-in slide-in-from-top-2 duration-300">
+              <AlertCircle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <p className="font-bold text-red-950 uppercase tracking-wider text-[10px]">AI Pipeline Error / Rate Limit</p>
+                <p className="text-red-800 leading-relaxed font-medium">
+                  {application.error}
+                </p>
+                <div className="pt-2 flex items-center gap-3">
+                  <button 
+                    onClick={handleRegenerateDraft}
+                    className="px-3 py-1.5 bg-white border border-red-200 text-red-700 font-bold rounded-lg hover:bg-red-100 transition-colors shadow-sm cursor-pointer"
+                  >
+                    Retry Process
+                  </button>
+                  <p className="text-[10px] text-red-500 italic">This usually happens due to API quotas. Retrying after a few seconds often works.</p>
+                </div>
+              </div>
+            </div>
+          )}
+
           {loading ? (
             <div className="py-14 text-center text-slate-500 flex flex-col items-center justify-center gap-4">
               <div className="relative">

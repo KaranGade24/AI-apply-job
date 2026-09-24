@@ -46,13 +46,19 @@ export const createApplicationFromJob = async (userId, jobId, options = {}) => {
 
     // Pass jobId + userId directly — the graph's initApplicationNode will create or load
     // the application record and execute resume tailoring + email drafting.
-    await runAgent(
-      "jobApplication",
-      { jobId: jobId.toString(), userId },
-      { userId },
-    );
+    try {
+      await runAgent(
+        "jobApplication",
+        { jobId: jobId.toString(), userId },
+        { userId },
+      );
+    } catch (error) {
+      await logError("applicationService.createApplicationFromJob.agentRun", error.message);
+      // We still proceed to fetch the application record as the graph might have partially
+      // completed and stored error information in the document logs/status.
+    }
 
-    // Fetch the application record that was created and transitioned to waiting_for_review.
+    // Fetch the application record that was created or updated during the graph run.
     const updatedApp = await findApplicationByJobAndUser(userId, jobId);
     return updatedApp;
   } catch (error) {
@@ -369,6 +375,9 @@ export const updateApplicationResumeService = async (
     }
 
     // Otherwise, re-trigger AI application graph pipeline with target page count
+    // Reset error state before starting
+    await updateApplicationStatus(applicationId, APPLICATION_STATUS.PROCESSING, { error: null });
+
     await runAgent(
       "jobApplication",
       {
@@ -441,6 +450,9 @@ export const tailorApplicationService = async (userId, applicationId) => {
     }
 
     // Run the jobApplication agent with forceRegenerate to re-tailor and draft
+    // Reset error state before starting
+    await updateApplicationStatus(applicationId, APPLICATION_STATUS.PENDING, { error: null });
+    
     const tailored = await createApplicationFromJob(userId, jobId, { forceRegenerate: true });
     return tailored || (await findApplicationById(applicationId));
   } catch (error) {

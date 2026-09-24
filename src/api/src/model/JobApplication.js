@@ -42,6 +42,10 @@ const jobApplicationSchema = new mongoose.Schema(
       default: APPLICATION_STATUS.PENDING,
       index: true,
     },
+    error: {
+      type: String,
+      default: null,
+    },
     applicationMethod: {
       type: String,
       enum: Object.values(APPLICATION_METHOD),

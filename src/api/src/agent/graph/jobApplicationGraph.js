@@ -73,6 +73,7 @@ const initApplicationNode = async (state) => {
     await logJobEvent("initApplicationNode", "FAILED", error.message);
     if (state.applicationId) {
       await updateApplicationStatus(state.applicationId, APPLICATION_STATUS.FAILED, {
+        error: error.message,
         logMessage: `Init application failed: ${error.message}`,
       });
     }
@@ -288,6 +289,7 @@ const getUserResumeNode = async (state) => {
     await logJobEvent("getUserResumeNode", "FAILED", error.message);
     if (state.applicationId) {
       await updateApplicationStatus(state.applicationId, APPLICATION_STATUS.FAILED, {
+        error: error.message,
         logMessage: `Get user resume failed: ${error.message}`,
       });
     }
@@ -332,6 +334,12 @@ const tailorResumeNode = async (state) => {
       await logError("jobApplicationGraph.tailorResumeNode.llm", llmError.message);
       const targetSkills = state.job?.skills || ["JavaScript", "React", "Node.js", "SQL"];
       const baseResume = state.resume || {};
+      
+      // Ensure skills is an array for iteration
+      const safeBaseSkills = Array.isArray(baseResume.skills) 
+        ? baseResume.skills 
+        : (typeof baseResume.skills === 'string' ? [baseResume.skills] : []);
+
       result = {
         tailoredResume: {
           personalInfo: baseResume.personalInfo || {
@@ -339,16 +347,25 @@ const tailorResumeNode = async (state) => {
             email: "candidate@example.com",
           },
           summary: `Experienced software developer skilled in ${targetSkills.slice(0, 4).join(", ")}. Strong track record building high-performance solutions for ${state.job?.company || "innovative companies"}.`,
-          skills: Array.from(new Set([...(baseResume.skills || []), ...targetSkills])),
+          skills: Array.from(new Set([...safeBaseSkills, ...targetSkills])),
           experience: baseResume.experience || [],
           education: baseResume.education || [],
           projects: baseResume.projects || [],
         },
+        error: llmError.message
       };
     }
 
     const tailored = result.tailoredResume || {};
     const baseResume = state.resume || {};
+    
+    // If there was an error in LLM call, save it to the application document
+    if (result.error && state.applicationId) {
+       await updateApplicationStatus(state.applicationId, state.status || APPLICATION_STATUS.PROCESSING, {
+         error: result.error,
+         logMessage: `AI Error during tailoring: ${result.error}`
+       });
+    }
 
     // Merge & preserve personal links from base resume
     const basePersonal = baseResume.personalInfo || baseResume.personal || {};
@@ -440,6 +457,7 @@ const tailorResumeNode = async (state) => {
     await logJobEvent("tailorResumeNode", "FAILED", error.message);
     if (state.applicationId) {
       await updateApplicationStatus(state.applicationId, APPLICATION_STATUS.FAILED, {
+        error: error.message,
         logMessage: `Resume tailoring failed: ${error.message}`,
       });
     }
@@ -583,10 +601,19 @@ const generateEmailNode = async (state) => {
         recipient: state.job?.hrEmail || "",
         subject: `Application for ${targetTitle} - ${candidateName}`,
         body: `Dear Hiring Team at ${targetCompany},\n\nI am writing to express my strong enthusiasm for the ${targetTitle} opportunity. With my proven experience in modern software engineering and my hands-on background in full-stack web technologies, I am confident in my ability to make an immediate, positive impact on your team.\n\nThroughout my work, I have built reliable, maintainable software and scalable systems. I am very interested in the work being done at ${targetCompany} and welcome the opportunity to contribute to your technical milestones.\n\nMy tailored resume is attached for your review. I look forward to speaking with you in an interview.\n\nSincerely,\n\n${candidateName}`,
+        error: llmError.message
       };
     }
 
     const cleanedBody = formatAndCleanEmailBody(result.body, candidateName);
+
+    // If there was an error in LLM call, save it to the application document
+    if (result.error && state.applicationId) {
+      await updateApplicationStatus(state.applicationId, state.status || APPLICATION_STATUS.PROCESSING, {
+        error: result.error,
+        logMessage: `AI Error during email generation: ${result.error}`
+      });
+    }
 
     const resolvedRecipient =
       state.job?.hrEmail && state.job.hrEmail !== "unknown" && state.job.hrEmail !== "NOT_SPECIFIED"
@@ -629,6 +656,7 @@ const generateEmailNode = async (state) => {
     await logJobEvent("generateEmailNode", "FAILED", error.message);
     if (state.applicationId) {
       await updateApplicationStatus(state.applicationId, APPLICATION_STATUS.FAILED, {
+        error: error.message,
         logMessage: `Email draft generation failed: ${error.message}`,
       });
     }
