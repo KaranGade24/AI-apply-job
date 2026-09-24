@@ -1,8 +1,42 @@
 /**
  * Agent Constants
  */
-export const MODEL_NAME = "gemini-2.5-flash";
+export const MODEL_NAME = "gemini-2.0-flash";
 export const MODEL_TEMPERATURE = 0.1;
+
+/**
+ * Resolves user-specific AI settings from DB and validates against supported features.
+ */
+export const resolveUserAiSettings = async (userId) => {
+  try {
+    const { getUserSettingsService } = await import("../services/setting.service.js");
+    const settings = await getUserSettingsService(userId);
+    
+    const defaults = {
+      model: MODEL_NAME,
+      temperature: MODEL_TEMPERATURE,
+    };
+
+    if (!settings || !settings.aiSettings) {
+      return defaults;
+    }
+
+    const { model, temperature } = settings.aiSettings;
+    
+    // Basic validation for model name - could be expanded to a list of allowed models
+    const activeModel = model && typeof model === 'string' && model.startsWith('gemini-') ? model : defaults.model;
+
+    return {
+      model: activeModel,
+      temperature: typeof temperature === 'number' && temperature >= 0 && temperature <= 1 ? temperature : defaults.temperature,
+    };
+  } catch (error) {
+    return {
+      model: MODEL_NAME,
+      temperature: MODEL_TEMPERATURE,
+    };
+  }
+};
 
 export const MAX_ATTEMPTS = 3;
 export const MAX_TOOL_CALLS = 2;

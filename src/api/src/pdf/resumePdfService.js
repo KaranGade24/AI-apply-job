@@ -2,7 +2,7 @@ import path from "path";
 import crypto from "crypto";
 import { renderHtmlToPdf } from "./pdfRenderer.js";
 import { resumeRenderer } from "./resumeRenderer.js";
-import { RESUME_PDF_TEMPLATES, RESUME_PAGE_COUNT } from "../constant/application.constant.js";
+import { RESUME_PDF_TEMPLATES, RESUME_PAGE_COUNT, resolveUserResumeSettings } from "../constant/application.constant.js";
 import { logError } from "../utils/logger.js";
 import { appError } from "../utils/errors.js";
 import { findUserById, findUserProfileByUserId } from "../repositories/user.repository.js";
@@ -13,8 +13,15 @@ import { findUserById, findUserProfileByUserId } from "../repositories/user.repo
  * @param {string} template
  * @returns {Promise<string>} HTML string
  */
-export const buildResumeHtml = async (resumeData = {}, template = RESUME_PDF_TEMPLATES.MODERN) => {
-  const themeName = template === RESUME_PDF_TEMPLATES.MINIMAL ? "minimal" : template === RESUME_PDF_TEMPLATES.ATS ? "ats" : "modern";
+export const buildResumeHtml = async (resumeData = {}, template, userId) => {
+  let activeTemplate = template;
+  if (!activeTemplate && userId) {
+    const userSettings = await resolveUserResumeSettings(userId);
+    activeTemplate = userSettings.template;
+  }
+  activeTemplate = activeTemplate || RESUME_PDF_TEMPLATES.MODERN;
+  
+  const themeName = activeTemplate === RESUME_PDF_TEMPLATES.MINIMAL ? "minimal" : activeTemplate === RESUME_PDF_TEMPLATES.ATS ? "ats" : "modern";
   return await resumeRenderer.render(resumeData, themeName);
 };
 
@@ -84,10 +91,16 @@ export const generateResumePdf = async ({ resumeData, template = RESUME_PDF_TEMP
       }
     }
 
-    resumeData.personalInfo = personalInfo;
-    resumeData.targetPages = targetPages || resumeData.targetPages || RESUME_PAGE_COUNT;
+    // Resolve user-specific dynamic constants from DB
+    const userSettings = userId ? await resolveUserResumeSettings(userId) : { template: RESUME_PDF_TEMPLATES.MODERN, pageCount: RESUME_PAGE_COUNT };
+    
+    const activeTemplate = template || userSettings.template;
+    const activePageCount = targetPages || resumeData.targetPages || userSettings.pageCount;
 
-    const themeName = template === RESUME_PDF_TEMPLATES.MINIMAL ? "minimal" : template === RESUME_PDF_TEMPLATES.ATS ? "ats" : "modern";
+    resumeData.personalInfo = personalInfo;
+    resumeData.targetPages = activePageCount;
+
+    const themeName = activeTemplate === RESUME_PDF_TEMPLATES.MINIMAL ? "minimal" : activeTemplate === RESUME_PDF_TEMPLATES.ATS ? "ats" : "modern";
     const htmlContent = await resumeRenderer.render(resumeData, themeName);
 
     const fullName = personalInfo.fullName || personalInfo.name || "Candidate Name";

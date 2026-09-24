@@ -15,6 +15,7 @@ import {
   APPLICATION_STATUS,
   APPLICATION_METHOD,
   RESUME_PAGE_COUNT,
+  resolveUserResumeSettings,
 } from "../../constant/application.constant.js";
 import { normalizeApplicationMethod } from "../../repositories/application.repository.js";
 import { findJobById } from "../../repositories/job.repository.js";
@@ -51,6 +52,9 @@ const initApplicationNode = async (state) => {
       }
     }
 
+    // Resolve user-specific dynamic constants from DB
+    const userSettings = await resolveUserResumeSettings(state.userId);
+
     await logJobEvent(
       "initApplicationNode",
       "PENDING",
@@ -61,6 +65,8 @@ const initApplicationNode = async (state) => {
       applicationId: application._id.toString(),
       ...(jobDoc && { job: jobDoc }),
       status: APPLICATION_STATUS.PENDING,
+      targetPageLength: state.targetPageLength || userSettings.pageCount,
+      template: state.template || userSettings.template,
     };
   } catch (error) {
     await logError("jobApplicationGraph.initApplicationNode", error.message);
@@ -122,6 +128,9 @@ const loadExistingApplicationNode = async (state) => {
       `Loaded existing application ${application._id} for job ${jobId} (isRegeneration=${isRegeneration})`,
     );
 
+    // Resolve user-specific dynamic constants from DB
+    const userSettings = await resolveUserResumeSettings(resolvedUserId);
+
     return {
       userId: resolvedUserId,
       jobId,
@@ -130,6 +139,8 @@ const loadExistingApplicationNode = async (state) => {
       isRegeneration,
       sourceResumeId: existingSourceResumeId || state.sourceResumeId,
       status: APPLICATION_STATUS.PENDING,
+      targetPageLength: state.targetPageLength || application.resume?.targetPages || userSettings.pageCount,
+      template: state.template || application.resume?.template || userSettings.template,
     };
   } catch (error) {
     await logError("jobApplicationGraph.loadExistingApplicationNode", error.message);
@@ -302,7 +313,7 @@ const tailorResumeNode = async (state) => {
       `Tailoring resume using AI model for job ${state.jobId}`,
     );
 
-    const model = getGeminiModel();
+    const model = await getGeminiModel(state.userId);
     const structuredLlm = model.withStructuredOutput(tailoredResumeSchema);
 
     const promptText = buildResumeTailoringPrompt({
@@ -460,7 +471,7 @@ const generatePdfNode = async (state) => {
 
     const pdfPath = await generateResumePdf({
       resumeData: state.tailoredResume,
-      template: "modern",
+      template: state.template || "modern",
       userId: state.userId,
       targetPages: state.targetPageLength || RESUME_PAGE_COUNT,
     });
@@ -544,7 +555,7 @@ const generateEmailNode = async (state) => {
       `Generating draft application email for ${state.applicationId}`,
     );
 
-    const model = getGeminiModel();
+    const model = await getGeminiModel(state.userId);
     const structuredLlm = model.withStructuredOutput(applicationEmailSchema);
 
     const candidateName =

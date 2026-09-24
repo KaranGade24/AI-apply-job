@@ -10,15 +10,17 @@ import { RESUME_PAGE_COUNT } from "../../../constant/application.constant.js";
 import { logError } from "../../../utils/logger.js";
 
 export const generateResumeTool = tool(
-  async ({ candidateResume, jobDetails, targetPageLength = RESUME_PAGE_COUNT }) => {
+  async ({ candidateResume, jobDetails, targetPageLength, userId }) => {
     try {
-      const model = getGeminiModel();
+      const model = await getGeminiModel(userId);
       const structuredLlm = model.withStructuredOutput(tailoredResumeSchema);
+      
+      const activePageCount = targetPageLength || RESUME_PAGE_COUNT;
 
       const promptText = buildResumeTailoringPrompt({
         candidateResume,
         jobDetails,
-        targetPageLength,
+        targetPageLength: activePageCount,
       });
 
       const result = await structuredLlm.invoke([
@@ -38,7 +40,8 @@ export const generateResumeTool = tool(
     schema: z.object({
       candidateResume: z.object({}).passthrough().describe("Candidate parsed base resume JSON object"),
       jobDetails: z.object({}).passthrough().describe("Job posting details object"),
-      targetPageLength: z.union([z.string(), z.number()]).optional().default(RESUME_PAGE_COUNT).describe("Target resume page count"),
+      targetPageLength: z.union([z.string(), z.number()]).optional().describe("Target resume page count"),
+      userId: z.string().optional().describe("Optional User ID for fetching specific AI settings"),
     }),
   }
 );

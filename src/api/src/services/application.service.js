@@ -10,7 +10,7 @@ import {
   getUserApplications as repositoryGetUserApplications,
 } from "../repositories/application.repository.js";
 import { Job } from "../model/Job.js";
-import { APPLICATION_STATUS, RESUME_PAGE_COUNT, RESUME_PDF_TEMPLATES } from "../constant/application.constant.js";
+import { APPLICATION_STATUS, RESUME_PAGE_COUNT, RESUME_PDF_TEMPLATES, resolveUserResumeSettings } from "../constant/application.constant.js";
 import { generateResumePdf } from "../pdf/resumePdfService.js";
 import { sendApplicationEmail } from "../integrations/email/emailService.js";
 import { formatAndCleanEmailBody } from "../agent/prompt/applicationEmail.js";
@@ -347,14 +347,17 @@ export const updateApplicationResumeService = async (
 
     const { targetPageLength, pageCount, tailoredResumeData, template, regenerate } = options;
     const pageLengthParam = targetPageLength || pageCount;
+    
+    // Resolve dynamic user constants from DB
+    const userSettings = await resolveUserResumeSettings(userId);
 
     // If custom tailored resume JSON data is provided directly, re-render PDF & update database
     if (tailoredResumeData && !regenerate) {
       const pdfPath = await generateResumePdf({
         resumeData: tailoredResumeData,
         userId,
-        template: template || RESUME_PDF_TEMPLATES.MODERN,
-        targetPages: pageLengthParam || RESUME_PAGE_COUNT,
+        template: template || userSettings.template,
+        targetPages: pageLengthParam || userSettings.pageCount,
       });
 
       await updateApplicationResume(applicationId, {
@@ -371,7 +374,7 @@ export const updateApplicationResumeService = async (
       {
         applicationId,
         userId,
-        targetPageLength: pageLengthParam || RESUME_PAGE_COUNT,
+        targetPageLength: pageLengthParam || userSettings.pageCount,
       },
       { userId }
     );
