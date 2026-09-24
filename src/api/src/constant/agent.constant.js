@@ -1,7 +1,9 @@
 /**
  * Agent Constants
  */
-export const MODEL_NAME = "gemini-2.0-flash";
+
+// export const MODEL_NAME = "gemini-2.0-flash";
+export const MODEL_NAME = "gemini-2.5-flash-lite";
 export const MODEL_TEMPERATURE = 0.1;
 
 /**
@@ -9,9 +11,10 @@ export const MODEL_TEMPERATURE = 0.1;
  */
 export const resolveUserAiSettings = async (userId) => {
   try {
-    const { getUserSettingsService } = await import("../services/setting.service.js");
+    const { getUserSettingsService } =
+      await import("../services/setting.service.js");
     const settings = await getUserSettingsService(userId);
-    
+
     const defaults = {
       model: MODEL_NAME,
       temperature: MODEL_TEMPERATURE,
@@ -22,13 +25,19 @@ export const resolveUserAiSettings = async (userId) => {
     }
 
     const { model, temperature } = settings.aiSettings;
-    
+
     // Basic validation for model name - could be expanded to a list of allowed models
-    const activeModel = model && typeof model === 'string' && model.startsWith('gemini-') ? model : defaults.model;
+    const activeModel =
+      model && typeof model === "string" && model.startsWith("gemini-")
+        ? model
+        : defaults.model;
 
     return {
       model: activeModel,
-      temperature: typeof temperature === 'number' && temperature >= 0 && temperature <= 1 ? temperature : defaults.temperature,
+      temperature:
+        typeof temperature === "number" && temperature >= 0 && temperature <= 1
+          ? temperature
+          : defaults.temperature,
     };
   } catch (error) {
     return {
@@ -54,11 +63,16 @@ export const SCRAPE_LIMIT_CONFIG = Object.freeze({
  * @param {number} targetMaxMatched
  * @returns {number}
  */
-export const calculateScrapeLimit = (targetMaxMatched = SCRAPE_LIMIT_CONFIG.DEFAULT_TARGET_MATCHED) => {
+export const calculateScrapeLimit = (
+  targetMaxMatched = SCRAPE_LIMIT_CONFIG.DEFAULT_TARGET_MATCHED,
+) => {
   const target = targetMaxMatched || SCRAPE_LIMIT_CONFIG.DEFAULT_TARGET_MATCHED;
   return Math.min(
-    Math.max(target * SCRAPE_LIMIT_CONFIG.MULTIPLIER, SCRAPE_LIMIT_CONFIG.MIN_SCRAPE_LIMIT),
-    SCRAPE_LIMIT_CONFIG.MAX_SCRAPE_LIMIT
+    Math.max(
+      target * SCRAPE_LIMIT_CONFIG.MULTIPLIER,
+      SCRAPE_LIMIT_CONFIG.MIN_SCRAPE_LIMIT,
+    ),
+    SCRAPE_LIMIT_CONFIG.MAX_SCRAPE_LIMIT,
   );
 };
 
