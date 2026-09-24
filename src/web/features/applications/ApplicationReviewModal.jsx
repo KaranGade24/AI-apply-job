@@ -403,8 +403,37 @@ export const ApplicationReviewModal = ({
             }`}
           >
             <CheckCircle2 className="w-4 h-4" />
-            Verification & Method
+            Apply Form
           </button>
+          
+          {(application?.resume?.tailoredResumeData || application?.status === 'waiting_for_review') && (
+            <button
+              onClick={() => setActiveTab('resume')}
+              className={`py-3 px-3 text-xs font-bold border-b-2 transition-colors flex items-center gap-1.5 cursor-pointer ${
+                activeTab === 'resume'
+                  ? 'border-blue-600 text-blue-600'
+                  : 'border-transparent text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              <FileText className="w-4 h-4" />
+              Tailored Resume
+            </button>
+          )}
+
+          {(application?.email?.body || application?.status === 'waiting_for_review') && (
+            <button
+              onClick={() => setActiveTab('outreach')}
+              className={`py-3 px-3 text-xs font-bold border-b-2 transition-colors flex items-center gap-1.5 cursor-pointer ${
+                activeTab === 'outreach'
+                  ? 'border-blue-600 text-blue-600'
+                  : 'border-transparent text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              <Mail className="w-4 h-4" />
+              Outreach Draft
+            </button>
+          )}
+
           <button
             onClick={() => setActiveTab('overview')}
             className={`py-3 px-3 text-xs font-bold border-b-2 transition-colors flex items-center gap-1.5 cursor-pointer ${
@@ -454,36 +483,38 @@ export const ApplicationReviewModal = ({
               <Button 
                 variant="outline" 
                 onClick={onClose}
-                className="mt-4 border-slate-200 text-slate-600 hover:bg-slate-100"
+                className="mt-6 border-slate-200 text-slate-600 hover:bg-slate-100 px-6"
               >
                 Cancel Process
               </Button>
             </div>
           ) : (
             <>
-              {/* TAB 1: VERIFICATION & METHOD (The core requirement) */}
+              {/* TAB 1: FORM VERIFICATION */}
               {activeTab === 'review' && (
                 <div className="space-y-6">
                   {/* Status Banner */}
                   {(currentStatus === 'waiting_for_review' || currentStatus === 'pending') && (
-                    <div className="p-3.5 rounded-xl border border-blue-200 bg-blue-50/70 flex items-center justify-between gap-3 text-xs">
-                      <div className="flex items-center gap-2.5">
-                        <Sparkles className="w-4 h-4 text-blue-600 shrink-0" />
-                        <div>
-                          <span className="font-bold text-blue-950">AI Tailoring Complete — Waiting for Review</span>
-                          <p className="text-blue-800 text-[11px] mt-0.5">
-                            Your resume has been tailored and outreach email drafted. Please verify the recipient, subject, and body below before applying.
-                          </p>
+                    <div className="flex flex-col gap-3">
+                      <div className="p-4 rounded-xl border border-blue-200 bg-blue-50/70 flex items-center justify-between gap-3 text-xs shadow-sm">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-lg bg-blue-600 text-white flex items-center justify-center shadow-sm">
+                            <Check className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <p className="font-bold text-slate-900">AI Tailoring Complete — Ready for Review</p>
+                            <p className="text-[11px] text-slate-500">Your resume and outreach are customized for this role.</p>
+                          </div>
                         </div>
+                        <button
+                          type="button"
+                          onClick={handleRegenerateDraft}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-blue-200 hover:bg-blue-100 text-blue-700 font-bold rounded-lg transition-colors cursor-pointer shrink-0 shadow-2xs"
+                        >
+                          <RefreshCw className="w-3 h-3" />
+                          Re-tailor
+                        </button>
                       </div>
-                      <button
-                        type="button"
-                        onClick={handleRegenerateDraft}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-blue-200 hover:bg-blue-100 text-blue-700 font-bold rounded-lg transition-colors cursor-pointer shrink-0 shadow-2xs"
-                      >
-                        <RefreshCw className="w-3 h-3" />
-                        Re-tailor with AI
-                      </button>
                     </div>
                   )}
 
@@ -850,6 +881,86 @@ export const ApplicationReviewModal = ({
               )}
 
               {/* TAB 2: OVERVIEW & COMPANY INFO */}
+              {activeTab === 'resume' && (
+                <div className="space-y-6">
+                  <div className="flex items-center justify-between bg-slate-50 p-4 rounded-xl border border-slate-200 shadow-sm">
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                        <FileText className="w-4 h-4 text-blue-600" /> Tailored ATS Resume
+                      </h3>
+                      <p className="text-[11px] text-slate-500 mt-0.5">Customized for this specific job's keywords and requirements.</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {application?.resume?.pdfPath && (
+                        <a 
+                          href={`/api/applications/${application._id}/pdf?token=${localStorage.getItem('token')}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-[11px] font-bold hover:bg-blue-700 shadow-sm transition-all"
+                        >
+                          <Download className="w-3.5 h-3.5" /> Download PDF
+                        </a>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    {application?.resume?.tailoredResumeData?.summary && (
+                      <div className="p-4 border border-slate-200 rounded-xl bg-white shadow-sm">
+                        <div className="flex items-center justify-between mb-2">
+                          <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Professional Summary</h4>
+                          <Sparkles className="w-3.5 h-3.5 text-emerald-500" />
+                        </div>
+                        <p className="text-xs text-slate-700 leading-relaxed italic border-l-2 border-emerald-100 pl-3">
+                          {application.resume.tailoredResumeData.summary}
+                        </p>
+                      </div>
+                    )}
+                    <div className="text-center py-6">
+                      <p className="text-xs text-slate-400">View or download the full PDF to see all tailored sections.</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {activeTab === 'outreach' && (
+                <div className="space-y-6">
+                   <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                        <Mail className="w-4 h-4 text-blue-600" /> AI Outreach Draft
+                      </h3>
+                      <p className="text-[11px] text-slate-500 mt-0.5">Tailored outreach based on the application method.</p>
+                    </div>
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      onClick={() => copyToClipboard(application?.email?.body, 'outreach')}
+                      className="text-blue-600 font-bold"
+                    >
+                      {copiedKey === 'outreach' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                      Copy Draft
+                    </Button>
+                  </div>
+
+                  <div className="p-5 border border-slate-200 rounded-xl bg-white shadow-sm">
+                     <div className="mb-4 space-y-2 pb-4 border-b border-slate-100">
+                        <div className="flex items-center gap-2 text-xs">
+                          <span className="text-slate-400 w-16">To:</span>
+                          <span className="font-semibold text-slate-700">{application?.email?.recipient || 'Unknown Recruiter'}</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-xs">
+                          <span className="text-slate-400 w-16">Subject:</span>
+                          <span className="font-bold text-slate-900">{application?.email?.subject || `Job Application: ${job.title}`}</span>
+                        </div>
+                     </div>
+                     <div className="text-xs text-slate-700 leading-relaxed whitespace-pre-line font-serif">
+                        {application?.email?.body || 'No draft generated yet.'}
+                     </div>
+                  </div>
+                </div>
+              )}
+
               {activeTab === 'overview' && (
                 <div className="space-y-6">
                   {/* Job Match & Score analysis */}

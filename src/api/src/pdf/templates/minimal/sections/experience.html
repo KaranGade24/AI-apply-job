@@ -1,0 +1,27 @@
+{{#if hasExperience}}
+<section class="resume-section experience-section">
+  <h2>PROFESSIONAL EXPERIENCE</h2>
+  {{#each workExperience}}
+  <article class="entry-item experience-item">
+    <div class="entry-header">
+      <div class="exp-title-row">
+        <h3>{{jobTitle}}{{#if company}} — {{company}}{{/if}}</h3>
+        {{#if dateRange}}<span class="date">{{dateRange}}</span>{{/if}}
+      </div>
+    </div>
+    {{#if location}}<div class="location-sub">{{location}}</div>{{/if}}
+    {{#if description}}<p class="exp-description">{{description}}</p>{{/if}}
+    {{#if highlights.length}}
+    <ul class="highlights">
+      {{#each highlights}}
+      <li>{{this}}</li>
+      {{/each}}
+    </ul>
+    {{/if}}
+    {{#if technologiesText}}
+    <p class="technologies"><strong>Technologies:</strong> {{technologiesText}}</p>
+    {{/if}}
+  </article>
+  {{/each}}
+</section>
+{{/if}}

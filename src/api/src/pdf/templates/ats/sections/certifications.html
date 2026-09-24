@@ -1,0 +1,15 @@
+{{#if hasCertifications}}
+<section class="resume-section certifications-section">
+  <h2>CERTIFICATIONS</h2>
+  <ul class="certifications">
+    {{#each certifications}}
+    <li>
+      <strong>{{name}}</strong>
+      {{#if organization}} - {{organization}}{{/if}}
+      {{#if issueDate}} ({{issueDate}}){{/if}}
+      {{#if url}} - <a href="{{url}}" target="_blank">Verify Credential</a>{{/if}}
+    </li>
+    {{/each}}
+  </ul>
+</section>
+{{/if}}

@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>{{name}} - Resume</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    {{{themeCss}}}
+  </style>
+  <script>
+    (function autoFitToPage() {
+      function adjustScale() {
+        const pageEl = document.querySelector('.resume') || document.querySelector('.page');
+        if (!pageEl) return;
+
+        const targetPages = parseInt(document.body.getAttribute('data-target-pages') || '1', 10);
+
+        // Measure real A4 height in pixels using a probe element (accurate across DPI/zoom)
+        const probe = document.createElement('div');
+        probe.style.cssText = 'position:absolute;visibility:hidden;height:297mm;width:1px;top:0;left:0;';
+        document.body.appendChild(probe);
+        const a4HeightPx = probe.getBoundingClientRect().height;
+        document.body.removeChild(probe);
+
+        // Printable page height taking 12mm top + 12mm bottom page margins into account (273mm of 297mm)
+        const printablePageHeightPx = (273 / 297) * a4HeightPx;
+
+        // Simulate exact page layout to determine required page count
+        const getRequiredPageCount = () => {
+          const blocks = Array.from(pageEl.querySelectorAll(
+            '.resume-header, .header, .summary-text, .summary, .skill-row, .entry-item, .experience-item, .project, .education-item, .certifications, h2, .section-title, .project-description, .highlights'
+          ));
+
+          const leafBlocks = blocks.filter(b => !blocks.some(parent => parent !== b && parent.contains(b)));
+
+          let currentPageHeight = 0;
+          let pageCount = 1;
+
+          for (let i = 0; i < leafBlocks.length; i++) {
+            const el = leafBlocks[i];
+            const rect = el.getBoundingClientRect();
+            if (rect.height <= 0) continue;
+
+            const style = window.getComputedStyle(el);
+            const marginBottom = parseFloat(style.marginBottom || '0');
+            const h = rect.height + marginBottom;
+
+            if (currentPageHeight + h <= printablePageHeightPx) {
+              currentPageHeight += h;
+            } else {
+              pageCount++;
+              currentPageHeight = h;
+            }
+          }
+
+          return pageCount;
+        };
+
+        let minScale = 0.50;
+        let maxScale = 1.30;
+        let bestScale = 1.0;
+
+        // Bidirectional binary search
+        for (let i = 0; i < 35; i++) {
+          const midScale = (minScale + maxScale) / 2;
+          document.documentElement.style.setProperty('--scale-factor', midScale.toFixed(4));
+
+          const requiredPages = getRequiredPageCount();
+
+          if (requiredPages <= targetPages) {
+            bestScale = midScale;
+            minScale = midScale;
+          } else {
+            maxScale = midScale;
+          }
+        }
+
+        document.documentElement.style.setProperty('--scale-factor', bestScale.toFixed(4));
+        pageEl.style.minHeight = prevMinHeight;
+      }
+
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', adjustScale);
+      } else {
+        adjustScale();
+      }
+      window.addEventListener('resize', adjustScale);
+    })();
+  </script>
+</head>
+<body data-target-pages="{{targetPages}}" style="--target-pages: {{targetPages}};">
+  <main class="resume">
+    {{{sections.header}}}
+    {{{sections.summary}}}
+    {{{sections.skills}}}
+    {{{sections.projects}}}
+    {{{sections.experience}}}
+    {{{sections.education}}}
+    {{{sections.certifications}}}
+  </main>
+</body>
+</html>

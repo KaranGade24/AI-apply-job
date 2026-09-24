@@ -24,7 +24,14 @@ export class ResumeRenderer {
       try {
         await fs.access(templatesDir);
       } catch {
+        // Try fallback to root templates folder
         templatesDir = path.resolve(process.cwd(), "templates", themeName);
+        try {
+          await fs.access(templatesDir);
+        } catch {
+          // Final fallback to internal modern theme
+          templatesDir = path.resolve(process.cwd(), "src/api/src/pdf/templates", "modern");
+        }
       }
 
       // Load theme CSS and layout template

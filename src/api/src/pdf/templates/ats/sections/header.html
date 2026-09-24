@@ -1,0 +1,26 @@
+<header class="resume-header">
+  <h1 class="name">{{name}}</h1>
+  {{#if headline}}
+  <div class="headline">{{headline}}</div>
+  {{/if}}
+  <div class="contact-info">
+    {{#if email}}
+    <span class="contact-item"><a href="mailto:{{email}}">{{email}}</a></span>
+    {{/if}}
+    {{#if phone}}
+    <span class="contact-item"><a href="tel:{{phone}}">{{phone}}</a></span>
+    {{/if}}
+    {{#if linkedinUrl}}
+    <span class="contact-item"><a href="{{linkedinUrl}}" target="_blank">linkedin.com/in/karan-gade</a></span>
+    {{/if}}
+    {{#if githubUrl}}
+    <span class="contact-item"><a href="{{githubUrl}}" target="_blank">github.com/KaranGade24</a></span>
+    {{/if}}
+    {{#if websiteUrl}}
+    <span class="contact-item"><a href="{{websiteUrl}}" target="_blank">portfolio-karan-gade.vercel.app</a></span>
+    {{/if}}
+    {{#if location}}
+    <span class="contact-item">{{location}}</span>
+    {{/if}}
+  </div>
+</header>

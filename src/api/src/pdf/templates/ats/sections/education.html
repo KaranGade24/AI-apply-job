@@ -1,0 +1,18 @@
+{{#if hasEducation}}
+<section class="resume-section education-section">
+  <h2>EDUCATION</h2>
+  {{#each education}}
+  <article class="entry-item education-item">
+    <div class="education-degree">
+      <strong>{{degreeFull}}</strong>
+    </div>
+    {{#if institution}}
+    <div class="institution">{{institution}}</div>
+    {{/if}}
+    {{#if cgpa}}
+    <div class="cgpa"><strong>CGPA: </strong>{{cgpa}}</div>
+    {{/if}}
+  </article>
+  {{/each}}
+</section>
+{{/if}}
