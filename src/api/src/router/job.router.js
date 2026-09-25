@@ -1,6 +1,10 @@
-import express from 'express';
-import { discoverJobsController, getSavedJobsController } from '../controller/job.controller.js';
-import { authMiddleware } from '../middlewares/auth.middleware.js';
+import express from "express";
+import {
+  deleteJobController,
+  discoverJobsController,
+  getSavedJobsController,
+} from "../controller/job.controller.js";
+import { authMiddleware } from "../middlewares/auth.middleware.js";
 
 const jobRouter = express.Router();
 
@@ -99,9 +103,9 @@ const jobRouter = express.Router();
  *       401:
  *         description: Unauthorized
  */
-jobRouter.post('/discover', authMiddleware, discoverJobsController);
-jobRouter.get('/discovered', authMiddleware, getSavedJobsController);
-jobRouter.get('/', authMiddleware, getSavedJobsController);
-jobRouter.delete('/:id', authMiddleware, deleteJobController);
+jobRouter.post("/discover", authMiddleware, discoverJobsController);
+jobRouter.get("/discovered", authMiddleware, getSavedJobsController);
+jobRouter.get("/", authMiddleware, getSavedJobsController);
+jobRouter.delete("/:id", authMiddleware, deleteJobController);
 
 export default jobRouter;
