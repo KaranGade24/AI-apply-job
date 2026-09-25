@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { MoreVertical, ExternalLink, Eye, Sparkles, Check, RefreshCw, X } from 'lucide-react';
+import { MoreVertical, ExternalLink, Eye, Sparkles, Check, RefreshCw, X, Trash2 } from 'lucide-react';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { ApplicationReviewModal } from './ApplicationReviewModal';

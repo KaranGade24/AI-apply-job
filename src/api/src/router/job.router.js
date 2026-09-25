@@ -85,6 +85,13 @@ const jobRouter = express.Router();
  *         description: Unauthorized or missing JWT token
  *       500:
  *         description: Internal server error
+ */
+jobRouter.post("/discover", authMiddleware, discoverJobsController);
+jobRouter.get("/discovered", authMiddleware, getSavedJobsController);
+jobRouter.get("/", authMiddleware, getSavedJobsController);
+
+/**
+ * @swagger
  * /api/jobs/{id}:
  *   delete:
  *     summary: Delete a specific job posting
@@ -103,9 +110,6 @@ const jobRouter = express.Router();
  *       401:
  *         description: Unauthorized
  */
-jobRouter.post("/discover", authMiddleware, discoverJobsController);
-jobRouter.get("/discovered", authMiddleware, getSavedJobsController);
-jobRouter.get("/", authMiddleware, getSavedJobsController);
 jobRouter.delete("/:id", authMiddleware, deleteJobController);
 
 export default jobRouter;

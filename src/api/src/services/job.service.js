@@ -23,8 +23,8 @@ import { logError, logJobEvent } from '../utils/logger.js';
 export const discoverJobsService = async ({
   userId,
   sources = ['jobViaReferral'],
-  keywords = ['MERN Developer', 'Node.js Developer'],
-  locations = ['Pune', 'Remote'],
+  keywords = [],
+  locations = [],
   experience = { min: 0, max: 2 },
   workMode = ['remote', 'hybrid', 'workFromOffice'],
   employmentType = ['fullTime'],

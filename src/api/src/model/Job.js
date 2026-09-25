@@ -17,9 +17,9 @@ export const WorkMode = Object.freeze({
 
 const jobSchema = new mongoose.Schema({
   title: { type: String, required: true, trim: true },
-  company: { type: String, default: 'Company Not Specified', trim: true },
-  location: { type: String, default: 'Remote / Unspecified', trim: true },
-  experienceRequired: { type: String, default: 'Not Specified', trim: true },
+  company: { type: String, default: "", trim: true },
+  location: { type: String, default: "", trim: true },
+  experienceRequired: { type: String, default: "", trim: true },
   description: { type: String, default: '' },
   requirements: [{ type: String }],
   responsibilities: [{ type: String }],

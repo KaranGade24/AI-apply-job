@@ -88,6 +88,12 @@ applicationRouter.get("/", authMiddleware, applicationController.getApplications
  *         description: Detailed job application record
  *       404:
  *         description: Application not found
+ */
+applicationRouter.get("/:id", authMiddleware, applicationController.getApplication);
+
+/**
+ * @swagger
+ * /api/applications/{id}:
  *   delete:
  *     summary: Delete a job application record
  *     description: Only allowed if the application is not approved or applied.
@@ -108,7 +114,6 @@ applicationRouter.get("/", authMiddleware, applicationController.getApplications
  *       401:
  *         description: Unauthorized
  */
-applicationRouter.get("/:id", authMiddleware, applicationController.getApplication);
 applicationRouter.delete("/:id", authMiddleware, applicationController.deleteApplication);
 
 /**
