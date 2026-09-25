@@ -28,9 +28,10 @@ export const DashboardPage = () => {
   });
 
   const [activities, setActivities] = useState([]);
+  const [tailoredResumes, setTailoredResumes] = useState([]);
 
   useEffect(() => {
-    Promise.all([getApplicationsApi(), getDiscoveredJobsApi()])
+    Promise.all([getApplicationsApi({ limit: 100 }), getDiscoveredJobsApi()])
       .then(([appsRes, jobsRes]) => {
         const apps = appsRes.data || [];
         const jobs = jobsRes.data || [];
@@ -58,11 +59,28 @@ export const DashboardPage = () => {
         });
 
         setActivities(recentActivities);
+
+        // Filter for tailored resumes
+        const tailored = apps
+          .filter(app => app.resume?.tailoredResumeData || app.resume?.pdfPath)
+          .map(app => ({
+            id: app._id,
+            company: app.company || app.jobId?.company || 'Company',
+            jobTitle: app.jobTitle || app.jobId?.title || 'Position',
+            date: new Date(app.updatedAt || app.createdAt).toLocaleDateString(),
+          }));
+        setTailoredResumes(tailored);
       })
       .catch(() => {
         // Safe fallback
       });
   }, []);
+
+  const handleViewResume = (appId) => {
+    const token = localStorage.getItem('token');
+    const url = `/api/applications/${appId}/pdf${token ? `?token=${token}` : ''}`;
+    window.open(url, '_blank');
+  };
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
@@ -83,7 +101,7 @@ export const DashboardPage = () => {
           <div className="space-y-1">
             <p className="text-xs font-medium text-slate-500">Total Jobs Found</p>
             <p className="text-2xl font-extrabold text-slate-900 tabular-nums">{stats.totalJobs}</p>
-            <p className="text-xs font-semibold text-blue-600">+12 this week</p>
+            <p className="text-xs font-semibold text-blue-600">Active Discovery</p>
           </div>
           <div className="w-11 h-11 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600 shrink-0">
             <Search className="w-5 h-5" />
@@ -95,7 +113,7 @@ export const DashboardPage = () => {
           <div className="space-y-1">
             <p className="text-xs font-medium text-slate-500">Applications Sent</p>
             <p className="text-2xl font-extrabold text-slate-900 tabular-nums">{stats.applicationsSent}</p>
-            <p className="text-xs font-semibold text-emerald-600">+5 this week</p>
+            <p className="text-xs font-semibold text-emerald-600">Tracked</p>
           </div>
           <div className="w-11 h-11 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600 shrink-0">
             <Send className="w-5 h-5" />
@@ -107,7 +125,7 @@ export const DashboardPage = () => {
           <div className="space-y-1">
             <p className="text-xs font-medium text-slate-500">Interviews Scheduled</p>
             <p className="text-2xl font-extrabold text-slate-900 tabular-nums">{stats.interviewsScheduled}</p>
-            <p className="text-xs font-semibold text-purple-600">+2 this week</p>
+            <p className="text-xs font-semibold text-purple-600">Upcoming</p>
           </div>
           <div className="w-11 h-11 rounded-xl bg-purple-50 border border-purple-100 flex items-center justify-center text-purple-600 shrink-0">
             <CalendarCheck className="w-5 h-5" />
@@ -119,13 +137,71 @@ export const DashboardPage = () => {
           <div className="space-y-1">
             <p className="text-xs font-medium text-slate-500">Success Rate</p>
             <p className="text-2xl font-extrabold text-slate-900 tabular-nums">{stats.successRate}</p>
-            <p className="text-xs font-semibold text-amber-600">+2.1% this week</p>
+            <p className="text-xs font-semibold text-amber-600">Conversion</p>
           </div>
           <div className="w-11 h-11 rounded-xl bg-amber-50 border border-amber-100 flex items-center justify-center text-amber-600 shrink-0">
             <Award className="w-5 h-5" />
           </div>
         </Card>
       </div>
+
+      {/* Tailored Resumes Section */}
+      <Card className="p-6">
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600">
+              <FileCheck className="w-4 h-4" />
+            </div>
+            <h2 className="text-base font-bold text-slate-900">Tailored Resumes</h2>
+          </div>
+          <p className="text-xs text-slate-500">{tailoredResumes.length} resumes created</p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {tailoredResumes.length === 0 ? (
+            <div className="col-span-full text-center py-10 border-2 border-dashed border-slate-100 rounded-xl">
+              <p className="text-sm text-slate-400">No tailored resumes generated yet.</p>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className="mt-3 text-xs"
+                onClick={() => navigate('/jobs')}
+              >
+                Find a Job to Tailor
+              </Button>
+            </div>
+          ) : (
+            tailoredResumes.map((res) => (
+              <div 
+                key={res.id} 
+                className="flex flex-col p-4 rounded-xl border border-slate-100 bg-slate-50/30 hover:border-blue-200 hover:bg-white transition-all group"
+              >
+                <div className="flex-1 min-w-0">
+                  <h3 className="text-sm font-bold text-slate-900 truncate group-hover:text-blue-600 transition-colors">
+                    {res.company}
+                  </h3>
+                  <p className="text-xs text-slate-500 truncate mt-0.5">
+                    {res.jobTitle}
+                  </p>
+                </div>
+                <div className="flex items-center justify-between mt-4">
+                  <span className="text-[10px] font-medium text-slate-400 uppercase tracking-wider">
+                    {res.date}
+                  </span>
+                  <Button 
+                    size="sm" 
+                    variant="ghost" 
+                    className="h-8 px-3 text-xs font-bold text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                    onClick={() => handleViewResume(res.id)}
+                  >
+                    View Resume
+                  </Button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </Card>
 
       {/* Lower Section (2 columns) */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

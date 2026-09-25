@@ -139,6 +139,20 @@ export const findJobById = async (jobId) => {
 
 export const getJobById = findJobById;
 
+/**
+ * Deletes a job document by ID
+ * @param {string} jobId
+ * @returns {Promise<object|null>}
+ */
+export const deleteJobById = async (jobId) => {
+  try {
+    return await Job.findByIdAndDelete(jobId);
+  } catch (error) {
+    await logError('jobRepository.deleteJobById', error.message);
+    return null;
+  }
+};
+
 export default {
   upsertJob,
   saveBulkJobs,
@@ -147,5 +161,6 @@ export default {
   updateJobMatchStatus,
   getJobs,
   findJobById,
-  getJobById
+  getJobById,
+  deleteJobById
 };

@@ -5,7 +5,7 @@ import { Select } from '../../components/ui/Select';
 import { Button } from '../../components/ui/Button';
 import { JobCard } from './JobCard';
 import { ApplicationReviewModal } from '../applications/ApplicationReviewModal';
-import { getDiscoveredJobsApi, discoverJobsApi } from '../../services/jobService';
+import { getDiscoveredJobsApi, discoverJobsApi, deleteJobApi } from '../../services/jobService';
 import { createApplicationApi } from '../../services/applicationService';
 import { SettingsContext } from '../../context/SettingsContext';
 
@@ -27,17 +27,10 @@ export const JobSearchPage = () => {
   const [isLocationDropdownOpen, setIsLocationDropdownOpen] = useState(false);
   const [customLocationInput, setCustomLocationInput] = useState('');
 
-  // Hydrate initial defaults from Job Settings
-  useEffect(() => {
-    if (settings.jobSetting) {
-      if (settings.jobSetting.keywords && settings.jobSetting.keywords.length > 0) {
-        setKeyword((prev) => prev || settings.jobSetting.keywords.join(', '));
-      }
-      if (settings.jobSetting.locations && settings.jobSetting.locations.length > 0) {
-        setSelectedLocations((prev) => (prev.length === 0 ? settings.jobSetting.locations : prev));
-      }
-    }
-  }, [settings.jobSetting]);
+  const showToast = (msg) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(''), 3000);
+  };
 
   const fetchJobs = async () => {
     setLoading(true);
@@ -52,6 +45,17 @@ export const JobSearchPage = () => {
       setJobs([]);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleDeleteJob = async (jobId) => {
+    try {
+      await deleteJobApi(jobId);
+      setJobs(jobs.filter((j) => j._id !== jobId));
+      showToast('Job removed from search results');
+    } catch (err) {
+      console.error('Delete job error:', err);
+      showToast('Failed to delete job');
     }
   };
 
@@ -74,8 +78,10 @@ export const JobSearchPage = () => {
       };
 
       const res = await discoverJobsApi(searchConfig);
-      if (res.discoveredJobs && res.discoveredJobs.length > 0) {
-        setJobs(res.discoveredJobs);
+      if (res.data?.jobs && res.data.jobs.length > 0) {
+        setJobs(res.data.jobs);
+      } else if (res.jobs && res.jobs.length > 0) {
+        setJobs(res.jobs);
       } else {
         fetchJobs();
       }
@@ -333,6 +339,7 @@ export const JobSearchPage = () => {
               job={job}
               onApply={handleApply}
               onReview={handleApply}
+              onDelete={handleDeleteJob}
               applyingId={applyingId}
             />
           ))

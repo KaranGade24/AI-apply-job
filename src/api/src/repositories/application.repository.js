@@ -306,3 +306,17 @@ export const getUserApplications = async (userId, { status, page = 1, limit = 10
     throw error;
   }
 };
+
+/**
+ * Deletes a job application by ID
+ * @param {string} id
+ * @returns {Promise<object|null>}
+ */
+export const deleteApplication = async (id) => {
+  try {
+    return await JobApplication.findByIdAndDelete(id);
+  } catch (error) {
+    await logError("application.repository.deleteApplication", error.message);
+    throw error;
+  }
+};

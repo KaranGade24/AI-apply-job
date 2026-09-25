@@ -8,6 +8,7 @@ import {
   updateApplicationEmail,
   updateApplicationResume,
   getUserApplications as repositoryGetUserApplications,
+  deleteApplication,
 } from "../repositories/application.repository.js";
 import { Job } from "../model/Job.js";
 import { APPLICATION_STATUS, RESUME_PAGE_COUNT, RESUME_TEMPLATES, resolveUserResumeSettings } from "../constant/application.constant.js";
@@ -326,6 +327,42 @@ export const editApplicationEmail = async (
  * @param {object} filter
  * @returns {Promise<object>}
  */
+/**
+ * Deletes a job application
+ * @param {string} applicationId
+ * @param {string} userId
+ */
+export const deleteApplicationService = async (applicationId, userId) => {
+  try {
+    const application = await findApplicationById(applicationId);
+    if (!application) {
+      throw new appError("Application not found", 404);
+    }
+
+    if (
+      application.userId._id.toString() !== userId &&
+      application.userId.toString() !== userId
+    ) {
+      throw new appError("Unauthorized access to job application", 403);
+    }
+
+    // Restriction: Cannot delete if application is approved or already further in the funnel
+    const isApproved = application.status === APPLICATION_STATUS.APPROVED;
+    if (isApproved || isApplicationLocked(application.status)) {
+      throw new appError(
+        `Cannot delete application that has been ${isApproved ? "approved" : "processed"} (Status: ${application.status})`,
+        400
+      );
+    }
+
+    return await deleteApplication(applicationId);
+  } catch (error) {
+    if (error.isOperational) throw error;
+    await logError("applicationService.deleteApplicationService", error.message);
+    throw new appError(`Failed to delete application: ${error.message}`, 500);
+  }
+};
+
 export const getUserApplications = async (userId, filter) => {
   return await repositoryGetUserApplications(userId, filter);
 };

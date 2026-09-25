@@ -1,8 +1,10 @@
-import React from 'react';
-import { MapPin, Sparkles, Building2, Mail, Globe, ExternalLink } from 'lucide-react';
+import React, { useState } from 'react';
+import { MapPin, Sparkles, Building2, Mail, Globe, ExternalLink, Trash2, Loader2 } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 
-export const JobCard = ({ job, onApply, onReview, applyingId }) => {
+export const JobCard = ({ job, onApply, onReview, onDelete, applyingId }) => {
+  const [isDeleting, setIsDeleting] = useState(false);
+
   const getLogoInitial = (company) => {
     return company ? company.charAt(0).toUpperCase() : 'C';
   };
@@ -15,13 +17,39 @@ export const JobCard = ({ job, onApply, onReview, applyingId }) => {
     return 'bg-emerald-700';
   };
 
+  const handleDelete = async (e) => {
+    e.stopPropagation();
+    if (!window.confirm('Are you sure you want to delete this job?')) return;
+    
+    setIsDeleting(true);
+    try {
+      if (onDelete) {
+        await onDelete(job._id);
+      }
+    } catch (err) {
+      console.error('Delete job failed:', err);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   const method = job.applicationMethod || (job.hrEmail ? 'email' : job.applicationUrl ? 'form' : 'direct');
 
   return (
     <div
       onClick={() => onReview && onReview(job)}
-      className="bg-white border border-slate-200 rounded-xl p-5 hover:border-blue-400 hover:shadow-xs transition-all flex flex-col md:flex-row md:items-center justify-between gap-4 cursor-pointer group"
+      className="bg-white border border-slate-200 rounded-xl p-5 hover:border-blue-400 hover:shadow-xs transition-all flex flex-col md:flex-row md:items-center justify-between gap-4 cursor-pointer group relative"
     >
+      {/* Delete button (absolute top-right) */}
+      <button
+        onClick={handleDelete}
+        disabled={isDeleting}
+        className="absolute top-4 right-4 p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all z-10 opacity-0 group-hover:opacity-100 cursor-pointer"
+        title="Delete job"
+      >
+        {isDeleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+      </button>
+
       {/* Left Info */}
       <div className="flex items-start gap-4 min-w-0">
         <div
@@ -33,7 +61,7 @@ export const JobCard = ({ job, onApply, onReview, applyingId }) => {
         </div>
 
         <div className="space-y-1.5 min-w-0">
-          <div>
+          <div className="pr-8"> {/* Padding for delete button */}
             <h3 className="text-base font-bold text-slate-900 group-hover:text-blue-600 transition-colors leading-snug">
               {job.title}
             </h3>

@@ -407,3 +407,22 @@ export const previewDraft = async (req, res, next) => {
     next(error);
   }
 };
+
+/**
+ * Delete a job application
+ */
+export const deleteApplication = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user?.userId;
+
+    await applicationService.deleteApplicationService(id, userId);
+
+    return res.status(200).json({
+      success: true,
+      message: "Application deleted successfully",
+    });
+  } catch (error) {
+    next(error);
+  }
+};

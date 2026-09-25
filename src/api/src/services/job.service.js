@@ -1,120 +1,11 @@
 import { findOriginalResumeByUserId } from '../repositories/resume.repository.js';
-import { getJobs, getJobBySourceUrl, saveBulkJobs } from '../repositories/job.repository.js';
+import { getJobs, getJobBySourceUrl, deleteJobById } from '../repositories/job.repository.js';
+import { JobApplication } from '../model/JobApplication.js';
+import { SkippedApplication } from '../model/SkippedApplication.js';
 import { runJobDiscoveryWorkflow } from '../agent/graph/jobDiscoveryGraph.js';
 import { MatchStatus, WorkMode } from '../model/Job.js';
 import { appError } from '../utils/errors.js';
 import { logError, logJobEvent } from '../utils/logger.js';
-
-const SEED_JOBS = [
-  {
-    title: 'Full Stack Developer (MERN)',
-    company: 'TechCorp Solutions',
-    location: 'Pune, Maharashtra · Hybrid',
-    experienceRequired: '0-2 years',
-    description: 'Looking for a passionate MERN stack developer to build scalable web applications and REST APIs.',
-    requirements: ['Experience with React.js, Node.js, Express, MongoDB', 'Good understanding of JavaScript and RESTful APIs'],
-    skills: ['React', 'Node.js', 'MongoDB', 'Express', 'JavaScript', 'Tailwind CSS'],
-    applicationUrl: 'https://techcorp.example.com/careers/mern-developer',
-    hrEmail: 'hr@techcorp.example.com',
-    sourceUrl: 'https://techcorp.example.com/careers/mern-developer',
-    source: 'Company Portal',
-    workMode: WorkMode.HYBRID,
-    employmentType: 'fullTime',
-    matchStatus: MatchStatus.MATCHED,
-    matchScore: 95,
-    matchReason: 'High skill alignment with React, Node.js, Express, and MongoDB.'
-  },
-  {
-    title: 'Senior Frontend Developer',
-    company: 'InnovateLabs Technologies',
-    location: 'Bengaluru, Karnataka · Remote',
-    experienceRequired: '1-3 years',
-    description: 'Build modern user interfaces with React, Vite, and Tailwind CSS.',
-    requirements: ['Strong React.js and modern JavaScript skills', 'State management with Redux/Zustand'],
-    skills: ['React', 'TypeScript', 'Tailwind CSS', 'Vite', 'Redux'],
-    applicationUrl: 'https://innovatelabs.example.com/careers/frontend-dev',
-    hrEmail: 'careers@innovatelabs.example.com',
-    sourceUrl: 'https://innovatelabs.example.com/careers/frontend-dev',
-    source: 'LinkedIn',
-    workMode: WorkMode.REMOTE,
-    employmentType: 'fullTime',
-    matchStatus: MatchStatus.MATCHED,
-    matchScore: 92,
-    matchReason: 'Excellent React and frontend architecture matching.'
-  },
-  {
-    title: 'Backend Node.js Engineer',
-    company: 'GlobalSoft Systems',
-    location: 'Hyderabad, Telangana · Remote',
-    experienceRequired: '1-2 years',
-    description: 'Design and deploy scalable microservices and database schemas.',
-    requirements: ['Node.js, Express, MongoDB, and SQL databases', 'JWT auth and API security best practices'],
-    skills: ['Node.js', 'Express.js', 'MongoDB', 'PostgreSQL', 'REST API', 'Docker'],
-    applicationUrl: 'https://globalsoft.example.com/careers/backend-node',
-    hrEmail: 'jobs@globalsoft.example.com',
-    sourceUrl: 'https://globalsoft.example.com/careers/backend-node',
-    source: 'Naukri',
-    workMode: WorkMode.REMOTE,
-    employmentType: 'fullTime',
-    matchStatus: MatchStatus.MATCHED,
-    matchScore: 88,
-    matchReason: 'Strong backend service and database query match.'
-  },
-  {
-    title: 'React & Next.js Developer',
-    company: 'WebSolutions Inc',
-    location: 'Remote',
-    experienceRequired: '0-1 years',
-    description: 'Create responsive, high-performance web interfaces with Next.js.',
-    requirements: ['React, Next.js, CSS/Tailwind', 'RESTful API integration'],
-    skills: ['React', 'Next.js', 'Tailwind CSS', 'JavaScript'],
-    applicationUrl: 'https://websolutions.example.com/careers/react-next',
-    hrEmail: 'hiring@websolutions.example.com',
-    sourceUrl: 'https://websolutions.example.com/careers/react-next',
-    source: 'LinkedIn',
-    workMode: WorkMode.REMOTE,
-    employmentType: 'fullTime',
-    matchStatus: MatchStatus.MATCHED,
-    matchScore: 94,
-    matchReason: 'Matches candidate frontend skills and UI preferences.'
-  },
-  {
-    title: 'Full Stack AI Engineer',
-    company: 'NextGen AI Labs',
-    location: 'Mumbai, Maharashtra · Hybrid',
-    experienceRequired: '1-3 years',
-    description: 'Integrate LLMs, Gemini API, and React frontends into production platforms.',
-    requirements: ['Full stack MERN proficiency', 'Generative AI API integration'],
-    skills: ['React', 'Node.js', 'Gemini API', 'MERN Stack', 'Python'],
-    applicationUrl: 'https://nextgenai.example.com/careers/ai-engineer',
-    hrEmail: 'ai-careers@nextgenai.example.com',
-    sourceUrl: 'https://nextgenai.example.com/careers/ai-engineer',
-    source: 'Company Portal',
-    workMode: WorkMode.HYBRID,
-    employmentType: 'fullTime',
-    matchStatus: MatchStatus.MATCHED,
-    matchScore: 96,
-    matchReason: 'Outstanding match for AI-integrated full stack web applications.'
-  },
-  {
-    title: 'DevOps & Cloud Engineer',
-    company: 'CloudScale Networks',
-    location: 'Remote',
-    experienceRequired: '1-2 years',
-    description: 'Manage CI/CD pipelines, Docker containers, and cloud deployment.',
-    requirements: ['Docker, Linux, AWS, Node.js deployment'],
-    skills: ['Docker', 'AWS', 'Linux', 'Node.js', 'CI/CD'],
-    applicationUrl: 'https://cloudscale.example.com/careers/devops',
-    hrEmail: 'ops@cloudscale.example.com',
-    sourceUrl: 'https://cloudscale.example.com/careers/devops',
-    source: 'Naukri',
-    workMode: WorkMode.REMOTE,
-    employmentType: 'fullTime',
-    matchStatus: MatchStatus.MATCHED,
-    matchScore: 82,
-    matchReason: 'Good alignment with backend deployment and server setup.'
-  }
-];
 
 /**
  * Service to orchestrate Job Discovery, filtering, and candidate resume matching
@@ -182,11 +73,21 @@ export const discoverJobsService = async ({
 
     await logJobEvent('discoverJobsService', 'SUCCESS', `Discovered ${workflowResult.totalJobsDiscovered || 0} jobs, matched ${workflowResult.matchedJobs?.length || 0}`);
 
+    let jobs = workflowResult.matchedJobs || [];
+    if (userId && jobs.length > 0) {
+      const [appliedJobIds, skippedJobIds] = await Promise.all([
+        JobApplication.find({ userId }).distinct('jobId'),
+        SkippedApplication.find({ userId }).distinct('jobId')
+      ]);
+      const excludedIds = new Set([...appliedJobIds.map(id => id.toString()), ...skippedJobIds.map(id => id.toString())]);
+      jobs = jobs.filter(job => !excludedIds.has(job._id.toString()));
+    }
+
     return {
       totalDiscovered: workflowResult.totalJobsDiscovered || 0,
-      matchedCount: (workflowResult.matchedJobs || []).length,
+      matchedCount: jobs.length,
       hasCandidateResume: Boolean(candidateResumeText),
-      jobs: workflowResult.matchedJobs || []
+      jobs: jobs
     };
   } catch (error) {
     if (error.isOperational) {
@@ -200,13 +101,25 @@ export const discoverJobsService = async ({
 /**
  * Service to retrieve saved jobs from MongoDB
  */
-export const getSavedJobsService = async (filter = {}, limit = 50) => {
+export const getSavedJobsService = async (filter = {}, limit = 50, userId = null) => {
   try {
-    let jobs = await getJobs(filter, limit);
-    if (!jobs || jobs.length === 0) {
-      await saveBulkJobs(SEED_JOBS);
-      jobs = await getJobs(filter, limit);
+    let finalFilter = { ...filter };
+
+    if (userId) {
+      // Fetch IDs of jobs that the user has already applied to or skipped
+      const [appliedJobIds, skippedJobIds] = await Promise.all([
+        JobApplication.find({ userId }).distinct('jobId'),
+        SkippedApplication.find({ userId }).distinct('jobId')
+      ]);
+
+      const excludedIds = [...new Set([...appliedJobIds, ...skippedJobIds])].filter(id => id != null);
+      
+      if (excludedIds.length > 0) {
+        finalFilter._id = { $nin: excludedIds };
+      }
     }
+
+    let jobs = await getJobs(finalFilter, limit);
     return jobs;
   } catch (error) {
     if (error.isOperational) throw error;
@@ -214,7 +127,25 @@ export const getSavedJobsService = async (filter = {}, limit = 50) => {
   }
 };
 
+/**
+ * Service to delete a job
+ * @param {string} jobId
+ */
+export const deleteJobService = async (jobId) => {
+  try {
+    const job = await deleteJobById(jobId);
+    if (!job) {
+      throw new appError('Job not found', 404);
+    }
+    return job;
+  } catch (error) {
+    if (error.isOperational) throw error;
+    throw new appError(`Failed to delete job: ${error.message}`, 500);
+  }
+};
+
 export default {
   discoverJobsService,
-  getSavedJobsService
+  getSavedJobsService,
+  deleteJobService
 };

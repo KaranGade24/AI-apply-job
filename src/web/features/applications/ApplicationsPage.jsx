@@ -7,6 +7,7 @@ import {
   getApplicationsApi,
   updateApplicationStatusApi,
   tailorApplicationApi,
+  deleteApplicationApi,
 } from '../../services/applicationService';
 import { formatDate, getStatusBadgeStyle } from '../../utils/formatters';
 
@@ -18,6 +19,7 @@ export const ApplicationsPage = () => {
   const [pendingStatuses, setPendingStatuses] = useState({});
   const [updatingId, setUpdatingId] = useState(null);
   const [tailoringId, setTailoringId] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
   const [toastMessage, setToastMessage] = useState('');
 
   const showToast = (msg) => {
@@ -98,6 +100,30 @@ export const ApplicationsPage = () => {
       showToast('Opened application review details.');
     } finally {
       setTailoringId(null);
+    }
+  };
+
+  const handleDeleteApplication = async (appId, status) => {
+    // Restriction check
+    const isApproved = status === 'Approved' || status === 'approved';
+    const isLocked = ['applied', 'sent', 'interview', 'offer', 'rejected'].includes(status?.toLowerCase());
+    
+    if (isApproved || isLocked) {
+      showToast(`Cannot delete an application that is already ${isApproved ? 'approved' : 'processed'}.`);
+      return;
+    }
+
+    if (!window.confirm('Are you sure you want to delete this application?')) return;
+
+    setDeletingId(appId);
+    try {
+      await deleteApplicationApi(appId);
+      setApplications(applications.filter((a) => a._id !== appId));
+      showToast('Application deleted successfully');
+    } catch (err) {
+      showToast('Failed to delete application: ' + (err.message || 'Error'));
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -343,6 +369,24 @@ export const ApplicationsPage = () => {
                           className="inline-flex items-center gap-1 text-xs font-semibold text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg transition-colors cursor-pointer shadow-2xs"
                         >
                           <Eye className="w-3 h-3" /> Details
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteApplication(app._id, app.status)}
+                          disabled={deletingId === app._id || isLocked || app.status === 'Approved'}
+                          className={`p-1.5 rounded-lg transition-all shadow-2xs cursor-pointer ${
+                            isLocked || app.status === 'Approved'
+                              ? 'text-slate-300 bg-slate-50 cursor-not-allowed'
+                              : 'text-slate-400 hover:text-rose-600 hover:bg-rose-50 bg-white border border-slate-200'
+                          }`}
+                          title={isLocked || app.status === 'Approved' ? "Cannot delete approved/applied application" : "Delete application"}
+                        >
+                          {deletingId === app._id ? (
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Trash2 className="w-3.5 h-3.5" />
+                          )}
                         </button>
 
                         {sourceUrl && (

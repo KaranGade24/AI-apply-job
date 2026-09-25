@@ -66,3 +66,9 @@ export const rejectApplicationApi = async (id, reason = '') => {
   });
 };
 
+export const deleteApplicationApi = async (id) => {
+  return await fetchWithAuth(`/applications/${id}`, {
+    method: 'DELETE',
+  });
+};
+

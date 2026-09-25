@@ -26,7 +26,7 @@ export const createResume = async ({ userId, originalFile, filePath = null, pars
  */
 export const findResumesByUserId = async (userId) => {
   try {
-    return await Resume.find({ userId }).sort({ createdAt: -1 });
+    return await Resume.find({ userId }).populate('jobId', 'company title').sort({ createdAt: -1 });
   } catch (error) {
     throw new appError(`Database error fetching user resumes: ${error.message}`, 500);
   }

@@ -15,3 +15,9 @@ export const getDiscoveredJobsApi = async (params = {}) => {
 export const getSkippedJobsApi = async () => {
   return await fetchWithAuth('/skipped-applications');
 };
+
+export const deleteJobApi = async (jobId) => {
+  return await fetchWithAuth(`/jobs/${jobId}`, {
+    method: 'DELETE',
+  });
+};
