@@ -1,64 +1,57 @@
-import { discoverJobs, openJobDetails, getJobListingUrls } from '../jobViaReferral/jobViaReferralSource.js';
-import { parseJobCard, parseJobDetails } from '../jobViaReferral/jobViaReferralParser.js';
+import { naukriConfig } from './naukri/naukriConfig.js';
+import { NaukriSource } from './naukri/naukriSource.js';
+import { jobViaReferralConfig } from './jobViaReferral/jobViaReferralConfig.js';
+import { discoverJobs as jobViaReferralDiscover, openJobDetails as jobViaReferralGetDetails, getJobListingUrls as jobViaReferralGetListingUrls } from '../jobViaReferral/jobViaReferralSource.js';
 import { logError } from '../../utils/logger.js';
 
 /**
- * JobViaReferral Source Configuration Adapter
+ * Registry of available job source integrations
  */
-export const jobViaReferralConfig = Object.freeze({
-  name: 'jobViaReferral',
+const sourceRegistry = {
+  naukri: {
+    config: naukriConfig,
+    Source: NaukriSource,
+    searchJobs: (page, searchConfig) => new NaukriSource({ page }).discoverJobs(searchConfig),
+  },
 
-  capabilities: Object.freeze({
-    keywords: true,
-    locations: true,
-    experience: true,
-    workMode: true,
-    employmentType: false,
-    postedWithin: true,
-    salary: false
-  }),
-
-  searchJobs: discoverJobs,
-  getJobDetails: openJobDetails,
-  getJobListingUrls,
-  parseJobCard,
-  parseJobDetails
-});
-
-/**
- * Registry of available job sources
- */
-const jobSources = {
-  jobViaReferral: jobViaReferralConfig
+  jobViaReferral: {
+    config: jobViaReferralConfig,
+    searchJobs: (page, searchConfig) => jobViaReferralDiscover(page, searchConfig),
+  },
 };
 
 /**
- * Retrieves a job source configuration adapter by name
+ * Retrieves a registered job source adapter by name
  * @param {string} sourceName
- * @returns {object} Source adapter object
+ * @param {object} dependencies - Optional dependencies like { page }
+ * @returns {object} Source adapter object with config, instance, and searchJobs
  */
-export const getJobSource = (sourceName = 'jobViaReferral') => {
-  const source = jobSources[sourceName];
-  if (!source) {
-    throw new Error(`Job source '${sourceName}' is not registered in sourceManager.`);
-  }
-  return source;
-};
+export const getJobSource = (sourceName = 'jobViaReferral', dependencies = {}) => {
+  const source = sourceRegistry[sourceName];
 
+  if (!source) {
+    throw new Error(`Unsupported job source: '${sourceName}'`);
+  }
+
+  return {
+    config: source.config,
+    instance: source.Source ? new source.Source(dependencies) : null,
+    searchJobs: (page, searchConfig) => source.searchJobs(page, searchConfig),
+  };
+};
 
 /**
  * Lists all registered job sources and their capability flags
  * @returns {Array<object>}
  */
-export const listAvailableSources = () => {
-  return Object.keys(jobSources).map(key => ({
-    name: jobSources[key].name,
-    capabilities: jobSources[key].capabilities
+export const listJobSources = () => {
+  return Object.keys(sourceRegistry).map((key) => ({
+    name: key,
+    config: sourceRegistry[key].config,
   }));
 };
 
 export default {
   getJobSource,
-  listAvailableSources,
-  jobSources
+  listJobSources,
 };

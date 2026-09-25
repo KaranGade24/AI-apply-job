@@ -3,7 +3,8 @@
  */
 
 export const JOB_SOURCES = Object.freeze({
-  JOB_VIA_REFERRAL: 'jobViaReferral'
+  JOB_VIA_REFERRAL: 'jobViaReferral',
+  NAUKRI: 'naukri'
 });
 
 export const SCRAPER_DEFAULTS = Object.freeze({
