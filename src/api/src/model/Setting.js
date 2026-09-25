@@ -37,7 +37,7 @@ const settingSchema = new mongoose.Schema(
     },
     applicationSetting: {
       autoApplyEnabled: { type: Boolean, default: false },
-      maxDailyApplications: { type: Number, default: 20 },
+      maxDailyApplications: { type: Number, default: 10 },
       notifyOnStatusChange: { type: Boolean, default: true },
       preferredEmail: { type: String },
     },
