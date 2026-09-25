@@ -188,6 +188,16 @@ const discoverJobsNode = async (state) => {
           throw sourceError;
         }
         await logError(`discoverJobsNode.${sourceName}`, sourceError.message);
+
+        // If Naukri authentication failed or session expired, record error explicitly for user feedback
+        if (
+          sourceError.message?.includes("AUTHENTICATION_REQUIRED") ||
+          sourceError.message?.includes("SESSION_INVALID") ||
+          sourceError.message?.includes("SESSION_EXPIRED") ||
+          sourceError.message?.includes("Naukri authentication required")
+        ) {
+          throw new Error(sourceError.message);
+        }
       }
     }
 

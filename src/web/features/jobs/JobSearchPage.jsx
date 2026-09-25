@@ -159,6 +159,16 @@ export const JobSearchPage = () => {
       if (err.name === 'AbortError') {
         console.log('Search operation canceled by user.');
       } else {
+        const errorMsg = err.message || 'Job discovery failed.';
+        showToast(errorMsg);
+        if (
+          errorMsg.includes('AUTHENTICATION_REQUIRED') ||
+          errorMsg.includes('SESSION_INVALID') ||
+          errorMsg.includes('SESSION_EXPIRED') ||
+          errorMsg.includes('Naukri authentication')
+        ) {
+          setIsNaukriModalOpen(true);
+        }
         fetchJobs();
       }
     } finally {
