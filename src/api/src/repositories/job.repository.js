@@ -55,15 +55,61 @@ export const saveBulkJobs = async (jobsList = []) => {
 export const getExistingSourceUrls = async (urls = []) => {
   try {
     if (!urls || urls.length === 0) return new Set();
+
+    const variantsSet = new Set();
+    urls.forEach((u) => {
+      if (!u || typeof u !== 'string') return;
+      const clean = u.trim();
+      variantsSet.add(clean);
+      
+      const noSlash = clean.replace(/\/$/, '');
+      variantsSet.add(noSlash);
+      variantsSet.add(`${noSlash}/`);
+
+      try {
+        const decoded = decodeURIComponent(clean);
+        variantsSet.add(decoded);
+        variantsSet.add(decoded.replace(/\/$/, ''));
+        variantsSet.add(`${decoded.replace(/\/$/, '')}/`);
+      } catch (e) {}
+    });
+
+    const variantArray = Array.from(variantsSet);
+
     const [existingJobs, existingSkipped] = await Promise.all([
-      Job.find({ sourceUrl: { $in: urls } }, { sourceUrl: 1 }).lean(),
-      SkippedApplication.find({ sourceUrl: { $in: urls } }, { sourceUrl: 1 }).lean(),
+      Job.find({ sourceUrl: { $in: variantArray } }, { sourceUrl: 1 }).lean(),
+      SkippedApplication.find({ sourceUrl: { $in: variantArray } }, { sourceUrl: 1 }).lean(),
     ]);
 
-    const set = new Set();
-    existingJobs.forEach((j) => j.sourceUrl && set.add(j.sourceUrl));
-    existingSkipped.forEach((s) => s.sourceUrl && set.add(s.sourceUrl));
-    return set;
+    const resultSet = new Set();
+    const addAllVariants = (rawUrl) => {
+      if (!rawUrl) return;
+      const clean = rawUrl.trim();
+      const lower = clean.toLowerCase();
+      const noSlash = clean.replace(/\/$/, '');
+      const lowerNoSlash = lower.replace(/\/$/, '');
+
+      resultSet.add(clean);
+      resultSet.add(lower);
+      resultSet.add(noSlash);
+      resultSet.add(lowerNoSlash);
+      resultSet.add(`${noSlash}/`);
+      resultSet.add(`${lowerNoSlash}/`);
+
+      try {
+        const decoded = decodeURIComponent(clean);
+        const decodedLower = decoded.toLowerCase();
+        resultSet.add(decoded);
+        resultSet.add(decodedLower);
+        resultSet.add(decoded.replace(/\/$/, ''));
+        resultSet.add(decodedLower.replace(/\/$/, ''));
+      } catch (e) {}
+    };
+
+    existingJobs.forEach((j) => addAllVariants(j.sourceUrl));
+    existingSkipped.forEach((s) => addAllVariants(s.sourceUrl));
+
+    return resultSet;
   } catch (error) {
     await logError('jobRepository.getExistingSourceUrls', error.message);
     return new Set();

@@ -184,7 +184,10 @@ export const discoverJobs = async (page, searchConfig = {}) => {
 
         // Query DB for existing jobs or skipped jobs
         const existingUrlsSet = await getExistingSourceUrls(listingUrls);
-        const unscrapedUrls = listingUrls.filter((url) => !existingUrlsSet.has(url));
+        const unscrapedUrls = listingUrls.filter((url) => {
+          const norm = url.trim().toLowerCase().replace(/\/$/, '');
+          return !existingUrlsSet.has(url) && !existingUrlsSet.has(norm);
+        });
 
         const skippedInBatch = listingUrls.length - unscrapedUrls.length;
         if (skippedInBatch > 0) {
@@ -196,7 +199,9 @@ export const discoverJobs = async (page, searchConfig = {}) => {
         }
 
         for (const url of unscrapedUrls) {
-          if (!newTargetUrls.includes(url) && newTargetUrls.length < maxJobs) {
+          const norm = url.trim().toLowerCase().replace(/\/$/, '');
+          const isAlreadyInTargets = newTargetUrls.some((u) => u.trim().toLowerCase().replace(/\/$/, '') === norm);
+          if (!isAlreadyInTargets && newTargetUrls.length < maxJobs) {
             newTargetUrls.push(url);
           }
         }

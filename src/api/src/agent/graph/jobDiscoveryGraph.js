@@ -440,12 +440,14 @@ const checkEnoughJobsEdge = async (state) => {
   const targetMax = state.config?.maxJobs || 10;
   const currentAttempt = state.attemptCount || 1;
   const maxAttempts = MAX_DISCOVERY_ATTEMPTS || 3;
+  const rawJobsCount = (state.rawJobs || []).length;
 
-  if (matchedOnly.length >= targetMax || currentAttempt > maxAttempts) {
+  // Stop if target matched limit reached, max attempts exceeded, or if no raw jobs were found in the run
+  if (matchedOnly.length >= targetMax || currentAttempt > maxAttempts || rawJobsCount === 0) {
     await logJobEvent(
       "checkEnoughJobsEdge",
       "COMPLETE",
-      `Job discovery finished after ${currentAttempt - 1} attempt(s). Total matched: ${matchedOnly.length}/${targetMax}`,
+      `Job discovery finished after ${currentAttempt - 1} attempt(s). Total matched: ${matchedOnly.length}/${targetMax}, Raw jobs in run: ${rawJobsCount}`,
     );
     return END;
   }
@@ -549,7 +551,7 @@ export const runJobDiscoveryWorkflow = async (searchConfig = {}) => {
     };
 
     const targetMax = searchConfig.maxJobs || 10;
-    const finalState = await jobDiscoveryGraph.invoke(initialState);
+    const finalState = await jobDiscoveryGraph.invoke(initialState, { recursionLimit: 50 });
     const matchedOnly = (finalState.matchedJobs || []).filter(
       (j) => j.matchStatus === "MATCHED",
     );
