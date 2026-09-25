@@ -3,7 +3,8 @@ import { JOB_VIA_REFERRAL_SELECTORS } from './jobViaReferralSelectors.js';
 import { SCRAPER_DEFAULTS } from '../../constant/job.constant.js';
 import { JOB_VIA_REFERRAL_CATEGORIES } from '../../constant/jobViaReferral.constant.js';
 import { logError, logJobEvent } from '../../utils/logger.js';
-import { getExistingSourceUrls } from '../../repositories/job.repository.js';
+import { getExistingSourceUrls, getExistingContentFingerprints } from '../../repositories/job.repository.js';
+import { logSkippedJobService } from '../../services/skippedApplication.service.js';
 import { resolveJobSearchUrlsWithAI } from '../../agent/tools/jobUrlResolver.tool.js';
 
 /**
@@ -242,6 +243,7 @@ export const discoverJobs = async (page, searchConfig = {}) => {
 
     const context = page.context();
     const discoveredJobs = [];
+    const existingFingerprints = await getExistingContentFingerprints();
 
     // 3. Scrape detail pages for the identified unscraped URLs
     for (let i = 0; i < newTargetUrls.length; i++) {
@@ -259,12 +261,33 @@ export const discoverJobs = async (page, searchConfig = {}) => {
         });
         const jobData = await parseJobDetails(detailPage, jobUrl);
         if (jobData && jobData.title) {
-          discoveredJobs.push(jobData);
-          await logJobEvent(
-            'discoverJobs',
-            'PROGRESS',
-            `[${discoveredJobs.length}/${newTargetUrls.length}] Scraped new job: ${jobData.title} @ ${jobData.company}`
-          );
+          const cleanTitle = jobData.title.toLowerCase().replace(/[^a-z0-9]/g, '');
+          const cleanCompany = (jobData.company || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+          const fp = `${cleanTitle}::${cleanCompany}`;
+
+          if (existingFingerprints.has(fp)) {
+            await logJobEvent(
+              'discoverJobs',
+              'PROGRESS',
+              `Skipped duplicate content posting: "${jobData.title}" @ "${jobData.company}"`
+            );
+            if (searchConfig.userId) {
+              await logSkippedJobService({
+                userId: searchConfig.userId,
+                job: jobData,
+                skipReason: 'ALREADY_EXISTS',
+                skipDetails: `Duplicate posting content already exists in DB: ${jobData.title} @ ${jobData.company}`
+              }).catch(() => {});
+            }
+          } else {
+            existingFingerprints.add(fp);
+            discoveredJobs.push(jobData);
+            await logJobEvent(
+              'discoverJobs',
+              'PROGRESS',
+              `[${discoveredJobs.length}/${newTargetUrls.length}] Scraped new unique job: ${jobData.title} @ ${jobData.company}`
+            );
+          }
         }
       } catch (itemError) {
         await logError('jobViaReferralSource.discoverJobs.item', itemError.message);

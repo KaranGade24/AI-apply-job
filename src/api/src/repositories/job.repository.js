@@ -117,6 +117,45 @@ export const getExistingSourceUrls = async (urls = []) => {
 };
 
 /**
+ * Retrieves set of normalized content fingerprints (title + company) existing in MongoDB
+ * @returns {Promise<Set<string>>}
+ */
+export const getExistingContentFingerprints = async () => {
+  try {
+    const [existingJobs, existingSkipped] = await Promise.all([
+      Job.find({}, { title: 1, company: 1 }).lean(),
+      SkippedApplication.find({}, { jobTitle: 1, company: 1 }).lean(),
+    ]);
+
+    const fingerprints = new Set();
+    const generateFingerprint = (title, company) => {
+      if (!title) return null;
+      const cleanTitle = title.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const cleanCompany = (company || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (cleanTitle) {
+        return `${cleanTitle}::${cleanCompany}`;
+      }
+      return null;
+    };
+
+    existingJobs.forEach((j) => {
+      const fp = generateFingerprint(j.title, j.company);
+      if (fp) fingerprints.add(fp);
+    });
+
+    existingSkipped.forEach((s) => {
+      const fp = generateFingerprint(s.jobTitle, s.company);
+      if (fp) fingerprints.add(fp);
+    });
+
+    return fingerprints;
+  } catch (error) {
+    await logError('jobRepository.getExistingContentFingerprints', error.message);
+    return new Set();
+  }
+};
+
+/**
  * Finds job by source URL
  * @param {string} sourceUrl
  * @returns {Promise<object|null>}
