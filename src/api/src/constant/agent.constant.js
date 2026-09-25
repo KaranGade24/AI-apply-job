@@ -77,15 +77,46 @@ export const SCRAPE_LIMIT_CONFIG = Object.freeze({
 });
 
 /**
+ * Resolves user-specific Job Search settings from DB.
+ */
+export const resolveUserJobSearchSettings = async (userId) => {
+  try {
+    const { getUserSettingsService } = await import("../services/setting.service.js");
+    const settings = await getUserSettingsService(userId);
+    
+    const defaults = {
+      maxJobsToSearch: SCRAPE_LIMIT_CONFIG.MAX_SCRAPE_LIMIT,
+    };
+
+    if (!settings || !settings.jobSetting) {
+      return defaults;
+    }
+
+    const { maxJobsToSearch } = settings.jobSetting;
+
+    return {
+      maxJobsToSearch: typeof maxJobsToSearch === 'number' && maxJobsToSearch > 0 ? maxJobsToSearch : defaults.maxJobsToSearch,
+    };
+  } catch (error) {
+    return {
+      maxJobsToSearch: SCRAPE_LIMIT_CONFIG.MAX_SCRAPE_LIMIT,
+    };
+  }
+};
+
+/**
  * Calculates the scrape limit based on requested target matched jobs
  * @param {number} targetMaxMatched
+ * @param {number} userMaxLimit - Optional user defined max limit from settings
  * @returns {number}
  */
-export const calculateScrapeLimit = (targetMaxMatched = SCRAPE_LIMIT_CONFIG.DEFAULT_TARGET_MATCHED) => {
+export const calculateScrapeLimit = (targetMaxMatched = SCRAPE_LIMIT_CONFIG.DEFAULT_TARGET_MATCHED, userMaxLimit) => {
   const target = targetMaxMatched || SCRAPE_LIMIT_CONFIG.DEFAULT_TARGET_MATCHED;
+  const maxLimit = userMaxLimit || SCRAPE_LIMIT_CONFIG.MAX_SCRAPE_LIMIT;
+  
   return Math.min(
     Math.max(target * SCRAPE_LIMIT_CONFIG.MULTIPLIER, SCRAPE_LIMIT_CONFIG.MIN_SCRAPE_LIMIT),
-    SCRAPE_LIMIT_CONFIG.MAX_SCRAPE_LIMIT
+    maxLimit
   );
 };
 

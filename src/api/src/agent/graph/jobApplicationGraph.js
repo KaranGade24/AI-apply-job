@@ -507,6 +507,7 @@ const generatePdfNode = async (state) => {
         state.applicationId,
         APPLICATION_STATUS.WAITING_FOR_REVIEW,
         {
+          error: null,
           logMessage:
             "Tailored PDF regenerated successfully. Returning to human review.",
         },
@@ -631,6 +632,7 @@ const generateEmailNode = async (state) => {
       state.applicationId,
       APPLICATION_STATUS.WAITING_FOR_REVIEW,
       {
+        error: null,
         logMessage:
           "Application draft created. Paused at human review checkpoint.",
       },

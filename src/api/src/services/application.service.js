@@ -588,6 +588,15 @@ export const previewOrGenerateDraftService = async (userId, payload) => {
     // 1. If jobId is provided, check existing application or run the application tailoring agent if explicitly requested
     if (jobId) {
       const existing = await findApplicationByJobAndUser(userId, jobId);
+      
+      // If force regenerating, clear previous error state in DB first
+      if (existing && (forceRegenerate || payload?.triggerTailor)) {
+        if (isApplicationLocked(existing.status)) {
+          throw new appError(`Cannot regenerate tailoring for an application that is already '${existing.status}'.`, 400);
+        }
+        await updateApplicationStatus(existing._id, existing.status, { error: null });
+      }
+
       if (existing && !forceRegenerate && !payload?.triggerTailor) {
         return {
           application: existing,
@@ -606,6 +615,7 @@ export const previewOrGenerateDraftService = async (userId, payload) => {
       }
 
       // If existing is locked, prevent regeneration
+      // (Error clearing handled above for consistency)
       if (existing && (forceRegenerate || payload?.triggerTailor) && isApplicationLocked(existing.status)) {
         throw new appError(`Cannot regenerate tailoring for an application that is already '${existing.status}'.`, 400);
       }

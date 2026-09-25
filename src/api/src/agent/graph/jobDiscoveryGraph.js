@@ -12,7 +12,7 @@ import { createBrowser } from "../../browser/browserConfig.js";
 import { upsertJob, getExistingSourceUrls } from "../../repositories/job.repository.js";
 import { Resume } from "../../model/Resume.js";
 import { logError, logResumeEvent, logJobEvent } from "../../utils/logger.js";
-import { calculateScrapeLimit } from "../../constant/agent.constant.js";
+import { calculateScrapeLimit, resolveUserJobSearchSettings } from "../../constant/agent.constant.js";
 import { logSkippedJobService } from "../../services/skippedApplication.service.js";
 
 export { searchConfigSchema };
@@ -28,6 +28,12 @@ const validateConfigNode = async (state) => {
       "SUCCESS",
       `Config validated for keywords: ${validatedConfig.keywords.join(", ")}`,
     );
+
+    // Resolve user-specific job search settings
+    let userJobSearchSettings = { maxJobsToSearch: 20 };
+    if (validatedConfig.userId) {
+      userJobSearchSettings = await resolveUserJobSearchSettings(validatedConfig.userId);
+    }
 
     // Try loading candidate's active resume from DB if userId is provided
     let resumeText = state.candidateResumeText || "";
@@ -58,6 +64,7 @@ const validateConfigNode = async (state) => {
     return {
       config: validatedConfig,
       candidateResumeText: resumeText,
+      maxJobsToSearch: userJobSearchSettings.maxJobsToSearch,
       errors: [],
     };
   } catch (error) {
@@ -82,7 +89,7 @@ const discoverJobsNode = async (state) => {
     const sourceName =
       config.sources[state.currentSourceIndex || 0] || "jobViaReferral";
     const targetMaxMatched = config.maxJobs || 5;
-    const scrapeLimit = calculateScrapeLimit(targetMaxMatched);
+    const scrapeLimit = calculateScrapeLimit(targetMaxMatched, state.maxJobsToSearch);
 
     await logJobEvent(
       "discoverJobsNode",
@@ -429,6 +436,7 @@ const graphBuilder = new StateGraph({
     skippedJobs: { value: (x, y) => y ?? x, default: () => [] },
     currentSourceIndex: { value: (x, y) => y ?? x, default: () => 0 },
     candidateResumeText: { value: (x, y) => y ?? x, default: () => "" },
+    maxJobsToSearch: { value: (x, y) => y ?? x, default: () => 20 },
     errors: { value: (x, y) => (x || []).concat(y || []), default: () => [] },
   },
 });

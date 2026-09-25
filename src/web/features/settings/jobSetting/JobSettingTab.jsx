@@ -15,6 +15,7 @@ export const JobSettingTab = () => {
   );
   const [minExp, setMinExp] = useState(settings.jobSetting?.minExp ?? 0);
   const [maxExp, setMaxExp] = useState(settings.jobSetting?.maxExp ?? 2);
+  const [maxJobsToSearch, setMaxJobsToSearch] = useState(settings.jobSetting?.maxJobsToSearch ?? 20);
   const [preferredMethods, setPreferredMethods] = useState(
     settings.jobSetting?.preferredApplicationMethods || ['email', 'googleForm', 'phone', 'unknown']
   );
@@ -26,6 +27,7 @@ export const JobSettingTab = () => {
       setLocations((settings.jobSetting.locations || []).join(', '));
       setMinExp(settings.jobSetting.minExp ?? 0);
       setMaxExp(settings.jobSetting.maxExp ?? 2);
+      setMaxJobsToSearch(settings.jobSetting.maxJobsToSearch ?? 20);
       if (settings.jobSetting.preferredApplicationMethods) {
         setPreferredMethods(settings.jobSetting.preferredApplicationMethods);
       }
@@ -49,6 +51,7 @@ export const JobSettingTab = () => {
         locations: locations.split(',').map((l) => l.trim()).filter(Boolean),
         minExp: Number(minExp),
         maxExp: Number(maxExp),
+        maxJobsToSearch: Number(maxJobsToSearch),
         preferredApplicationMethods: preferredMethods,
       },
     };
@@ -110,6 +113,15 @@ export const JobSettingTab = () => {
               onChange={(e) => setMaxExp(e.target.value)}
             />
           </div>
+
+          <Input
+            label="Max Jobs to Search (Scrape Limit)"
+            type="number"
+            value={maxJobsToSearch}
+            onChange={(e) => setMaxJobsToSearch(e.target.value)}
+            placeholder="20"
+            helperText="Limits the number of jobs the AI will scan per source to manage performance and quota."
+          />
         </Card>
 
         {/* Preferred Application Methods */}

@@ -307,6 +307,10 @@ export const ApplicationReviewModal = ({
 
   const handleRegenerateDraft = async () => {
     setLoading(true);
+    // Clear any existing error state locally so it doesn't show during loading
+    if (application) {
+      setApplication(prev => ({ ...prev, error: null }));
+    }
     showToast('AI Agent reading job, tailoring resume & drafting message...');
     try {
       const draftRes = await previewDraftApi({
