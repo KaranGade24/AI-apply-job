@@ -18,50 +18,49 @@ export const verifyPageIsAuthenticated = async (page) => {
 
     const currentUrl = page.url();
 
-    // Check for security challenges / OTP / CAPTCHA
-    const hasChallenge = await page.evaluate((challengeSels) => {
-      return challengeSels.some((sel) => Boolean(document.querySelector(sel)));
-    }, naukriSelectors.auth.challengeIndicators).catch(() => false);
+    // 1. Check for login / registration URL
+    if (currentUrl.includes('/nlogin/') || currentUrl.includes('/registration/')) {
+      return { isAuthenticated: false, isChallenge: false, statusReason: 'LOGIN_PAGE_REDIRECT' };
+    }
 
-    if (hasChallenge) {
+    // 2. Check for security challenges / OTP / CAPTCHA using Playwright locators
+    const challengeCount = await page.locator('iframe[src*="captcha"], .captcha-container, #otp-container').count().catch(() => 0);
+    if (challengeCount > 0) {
       return { isAuthenticated: false, isChallenge: true, statusReason: 'VERIFICATION_REQUIRED' };
     }
 
-    // Check for explicit unauthenticated / login elements (e.g. "Continue with Google" button or username field)
-    const hasUnauthenticatedIndicator = await page.evaluate((unauthSels) => {
-      for (const sel of unauthSels) {
-        if (sel.includes('text=')) {
-          const text = sel.replace('text=', '').replace(/"/g, '');
-          if (document.body && document.body.innerText.includes(text)) return true;
-        } else {
-          const el = document.querySelector(sel);
-          if (el && el.offsetParent !== null) return true; // Visible element
-        }
-      }
-      return false;
-    }, naukriSelectors.auth.unauthenticatedIndicators).catch(() => false);
+    // 3. Check for unauthenticated indicators (Google login, Login button, username field)
+    const unauthCheck = await page.evaluate(() => {
+      const bodyText = document.body ? document.body.innerText : '';
 
-    if (hasUnauthenticatedIndicator) {
-      return { isAuthenticated: false, isChallenge: false, statusReason: 'UNAUTHENTICATED' };
+      // Check for "Continue with Google" or Login buttons in DOM
+      const hasGoogleLoginBtn = bodyText.includes('Continue with Google') || Boolean(document.querySelector('button[value="google"], .google-login-btn'));
+      const hasLoginHeaderBtn = Boolean(
+        document.querySelector('a[href*="/nlogin/login"], .nI-gnd-header__login-btn, #login_Layer, #usernameField')
+      );
+
+      return hasGoogleLoginBtn || hasLoginHeaderBtn;
+    }).catch(() => false);
+
+    if (unauthCheck) {
+      return { isAuthenticated: false, isChallenge: false, statusReason: 'UNAUTHENTICATED_LOGIN_BUTTONS_PRESENT' };
     }
 
-    // Check for explicit authenticated indicators (e.g. Profile drawer, My Naukri header, profile link)
-    const hasAuthenticatedIndicator = await page.evaluate((authSels) => {
+    // 4. Check for positive authenticated indicators
+    const authCheck = await page.evaluate((authSels) => {
       for (const sel of authSels) {
-        const el = document.querySelector(sel);
-        if (el) return true;
+        if (document.querySelector(sel)) return true;
       }
       return false;
     }, naukriSelectors.auth.authenticatedIndicators).catch(() => false);
 
-    // Also check if URL contains user homepage/profile path
     const isAuthUrl = currentUrl.includes('/mnjuser/homepage') || currentUrl.includes('/mnjuser/profile');
 
-    if (hasAuthenticatedIndicator || isAuthUrl) {
+    if (authCheck || isAuthUrl) {
       return { isAuthenticated: true, isChallenge: false, statusReason: 'AUTHENTICATED' };
     }
 
-    return { isAuthenticated: false, isChallenge: false, statusReason: 'UNKNOWN_STATE' };
+    return { isAuthenticated: false, isChallenge: false, statusReason: 'NO_AUTHENTICATION_INDICATOR_FOUND' };
   } catch (error) {
     await logError('naukriSessionService.verifyPageIsAuthenticated', error.message);
     return { isAuthenticated: false, isChallenge: false, statusReason: 'ERROR' };

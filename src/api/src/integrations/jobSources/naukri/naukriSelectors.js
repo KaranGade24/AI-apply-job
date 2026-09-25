@@ -9,7 +9,7 @@ export const naukriSelectors = Object.freeze({
     usernameInput: '#usernameField, input[placeholder*="Username"], input[placeholder*="Email"]',
     passwordInput: '#passwordField, input[placeholder*="Password"]',
     submitButton: 'button[type="submit"].btn-primary, button.loginButton',
-    googleLoginBtn: 'button[value="google"], button:has-text("Continue with Google"), .google-login-btn',
+    googleLoginBtn: 'button[value="google"], .google-login-btn',
     
     // Authenticated state indicators
     authenticatedIndicators: [
@@ -20,7 +20,8 @@ export const naukriSelectors = Object.freeze({
       'a[href*="logout"]',
       '.nI-gnd-profile',
       'a[href*="/mnjuser/homepage"]',
-      '.profile-summary'
+      '.profile-summary',
+      '.user-name',
     ],
     
     // Unauthenticated / Login state indicators
@@ -28,9 +29,8 @@ export const naukriSelectors = Object.freeze({
       'a[href*="/nlogin/login"]',
       '.nI-gnd-header__login-btn',
       '#login_Layer',
-      'button:has-text("Continue with Google")',
       '.login-btn',
-      '#usernameField'
+      '#usernameField',
     ],
 
     // Security challenge indicators
@@ -38,10 +38,7 @@ export const naukriSelectors = Object.freeze({
       'iframe[src*="captcha"]',
       '.captcha-container',
       '#otp-container',
-      'text="Enter OTP"',
-      'text="Security Verification"',
-      'text="Verification Code"'
-    ]
+    ],
   },
 
   search: {
