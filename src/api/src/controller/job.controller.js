@@ -9,6 +9,14 @@ import { handleError } from "../utils/errors.js";
  * Controller to handle POST /api/jobs/discover
  */
 export const discoverJobsController = async (req, res) => {
+  const abortController = new AbortController();
+
+  req.on('close', () => {
+    if (!res.headersSent) {
+      abortController.abort();
+    }
+  });
+
   try {
     const userId = req.user?.userId;
 
@@ -37,14 +45,26 @@ export const discoverJobsController = async (req, res) => {
         preferredApplicationMethods || preferredMethods,
       postedWithin,
       maxJobs,
+      abortSignal: abortController.signal,
     });
 
-    return res.status(200).json({
-      success: true,
-      message: "Job discovery and resume matching completed successfully",
-      data: result,
-    });
+    if (!res.headersSent) {
+      return res.status(200).json({
+        success: true,
+        message: "Job discovery and resume matching completed successfully",
+        data: result,
+      });
+    }
   } catch (error) {
+    if (abortController.signal.aborted || error.message?.includes('ABORTED')) {
+      if (!res.headersSent) {
+        return res.status(499).json({
+          success: false,
+          message: "Job discovery process cancelled by user",
+        });
+      }
+      return;
+    }
     return handleError(error, res);
   }
 };

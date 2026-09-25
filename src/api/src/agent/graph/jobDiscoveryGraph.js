@@ -135,6 +135,7 @@ const discoverJobsNode = async (state) => {
       workMode: config.workMode,
       experience: config.experience,
       attemptCount: currentAttempt,
+      abortSignal: config.abortSignal,
     });
 
     await logJobEvent(
@@ -288,6 +289,11 @@ const matchWithResumeNode = async (state) => {
 
     const matchedResults = [];
     for (const job of jobsToMatch) {
+      if (state.config?.abortSignal?.aborted) {
+        await logJobEvent("matchWithResumeNode", "CANCELLED", "LLM matching aborted by user");
+        throw new Error("JOB_DISCOVERY_ABORTED");
+      }
+
       try {
         const prompt = buildJobMatchPrompt(candidateText, job);
 

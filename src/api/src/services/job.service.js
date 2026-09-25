@@ -24,21 +24,21 @@ export const discoverJobsService = async ({
   userId,
   sources = ['jobViaReferral'],
   keywords = [],
-  searchMode = 'byQuery',
   locations = [],
   experience = { min: 0, max: 2 },
   workMode = ['remote', 'hybrid', 'workFromOffice'],
   employmentType = ['fullTime'],
   preferredApplicationMethods = ['email', 'googleForm', 'websiteForm', 'phone', 'unknown'],
   postedWithin = '24h',
-  maxJobs = 10
+  maxJobs = 10,
+  abortSignal = null
 }) => {
   try {
     if (!userId) {
       throw new appError('User ID is required for job discovery', 400);
     }
 
-    await logJobEvent('discoverJobsService', 'START', `Initiating job discovery for User: ${userId} (Search Mode: ${searchMode})`);
+    await logJobEvent('discoverJobsService', 'START', `Initiating job discovery for User: ${userId}`);
 
     // 1. Fetch user's original candidate resume from MongoDB
     const originalResume = await findOriginalResumeByUserId(userId);
@@ -55,7 +55,6 @@ export const discoverJobsService = async ({
       userId,
       sources,
       keywords,
-      searchMode,
       locations,
       experience,
       workMode,
@@ -63,7 +62,8 @@ export const discoverJobsService = async ({
       preferredApplicationMethods,
       postedWithin,
       maxJobs,
-      candidateResumeText
+      candidateResumeText,
+      abortSignal
     };
 
     // 3. Execute Job Discovery Workflow Graph

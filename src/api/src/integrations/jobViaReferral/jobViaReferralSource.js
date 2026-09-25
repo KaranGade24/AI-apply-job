@@ -157,6 +157,11 @@ export const discoverJobs = async (page, searchConfig = {}) => {
 
     // 2. Process query/category URLs sequentially one by one
     for (let qIndex = 0; qIndex < resolvedUrls.length; qIndex++) {
+      if (searchConfig.abortSignal?.aborted) {
+        await logJobEvent('discoverJobs', 'CANCELLED', 'Job discovery process aborted by user.');
+        throw new Error('JOB_DISCOVERY_ABORTED');
+      }
+
       const targetObj = resolvedUrls[qIndex];
       const baseUrl = targetObj.url;
 
@@ -170,6 +175,10 @@ export const discoverJobs = async (page, searchConfig = {}) => {
       const MAX_PAGES_PER_URL = 5;
 
       while (newTargetUrls.length < maxJobs && pageNum <= MAX_PAGES_PER_URL) {
+        if (searchConfig.abortSignal?.aborted) {
+          throw new Error('JOB_DISCOVERY_ABORTED');
+        }
+
         const currentListingUrl = formatListingPageUrl(baseUrl, pageNum);
 
         await logJobEvent(
@@ -236,6 +245,11 @@ export const discoverJobs = async (page, searchConfig = {}) => {
 
     // 3. Scrape detail pages for the identified unscraped URLs
     for (let i = 0; i < newTargetUrls.length; i++) {
+      if (searchConfig.abortSignal?.aborted) {
+        await logJobEvent('discoverJobs', 'CANCELLED', 'Scraping aborted by user during detail page processing.');
+        throw new Error('JOB_DISCOVERY_ABORTED');
+      }
+
       const jobUrl = newTargetUrls[i];
       let detailPage = null;
       try {
