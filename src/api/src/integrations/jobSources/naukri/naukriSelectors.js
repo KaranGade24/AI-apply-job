@@ -3,6 +3,47 @@
  * Modularized for easy maintenance if Naukri updates its frontend class names.
  */
 export const naukriSelectors = Object.freeze({
+  auth: {
+    loginPageUrl: 'https://www.naukri.com/nlogin/login',
+    homePageUrl: 'https://www.naukri.com/mnjuser/homepage',
+    usernameInput: '#usernameField, input[placeholder*="Username"], input[placeholder*="Email"]',
+    passwordInput: '#passwordField, input[placeholder*="Password"]',
+    submitButton: 'button[type="submit"].btn-primary, button.loginButton',
+    googleLoginBtn: 'button[value="google"], button:has-text("Continue with Google"), .google-login-btn',
+    
+    // Authenticated state indicators
+    authenticatedIndicators: [
+      '.nI-gnd-drawer',
+      '.nI-gnd-header__icon',
+      'a[href*="/mnjuser/profile"]',
+      '.my-naukri',
+      'a[href*="logout"]',
+      '.nI-gnd-profile',
+      'a[href*="/mnjuser/homepage"]',
+      '.profile-summary'
+    ],
+    
+    // Unauthenticated / Login state indicators
+    unauthenticatedIndicators: [
+      'a[href*="/nlogin/login"]',
+      '.nI-gnd-header__login-btn',
+      '#login_Layer',
+      'button:has-text("Continue with Google")',
+      '.login-btn',
+      '#usernameField'
+    ],
+
+    // Security challenge indicators
+    challengeIndicators: [
+      'iframe[src*="captcha"]',
+      '.captcha-container',
+      '#otp-container',
+      'text="Enter OTP"',
+      'text="Security Verification"',
+      'text="Verification Code"'
+    ]
+  },
+
   search: {
     keywordInput: 'input.sugInp, input[placeholder*="Search"], .keywordSugg input',
     locationInput: 'input[placeholder*="location"], input[placeholder*="Location"]',

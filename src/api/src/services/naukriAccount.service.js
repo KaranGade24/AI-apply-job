@@ -3,6 +3,9 @@ import { BrowserSession } from '../model/BrowserSession.js';
 import { encryptData, decryptData } from '../utils/crypto.utils.js';
 import { appError } from '../utils/errors.js';
 import { logError, logJobEvent } from '../utils/logger.js';
+import { performNaukriLogin } from '../integrations/jobSources/naukri/naukriAuthService.js';
+import { getEncryptedSessionState } from '../integrations/jobSources/naukri/naukriSessionService.js';
+import { createBrowser } from '../browser/browserConfig.js';
 
 /**
  * Retrieves the status of a user's connected Naukri account
@@ -41,7 +44,7 @@ export const getNaukriAccountStatus = async (userId) => {
 };
 
 /**
- * Connects or updates a Naukri account with credentials or session storage
+ * Performs Playwright Naukri login, verifies authenticated indicators, and saves encrypted session
  * @param {object} params
  */
 export const connectNaukriAccount = async ({
@@ -51,6 +54,10 @@ export const connectNaukriAccount = async ({
   password = '',
   storageStateJson = null,
 }) => {
+  let browser = null;
+  let context = null;
+  let page = null;
+
   try {
     if (!userId) {
       throw new appError('User ID is required', 400);
@@ -58,100 +65,91 @@ export const connectNaukriAccount = async ({
 
     await logJobEvent('naukriAccountService.connect', 'START', `Connecting Naukri account via ${loginMethod} for user ${userId}`);
 
-    const encUsername = username ? encryptData(username) : null;
-    const encPassword = password ? encryptData(password) : null;
+    // If direct storageStateJson is provided from browser extension / manual flow
+    if (storageStateJson && storageStateJson.cookies) {
+      const encryptedState = encryptData(storageStateJson);
 
-    const account = await JobSourceAccount.findOneAndUpdate(
-      { userId, source: 'naukri' },
-      {
-        $set: {
-          loginMethod,
-          accountIdentifier: username || 'Google Account',
-          credentials: {
-            username: encUsername,
-            password: encPassword,
-          },
-          status: 'connected',
-          lastValidatedAt: new Date(),
-          lastUsedAt: new Date(),
-        },
-      },
-      { upsert: true, returnDocument: 'after' }
-    );
-
-    // Save browser session if storageStateJson is provided or default mockup session state
-    const sessionState = storageStateJson || {
-      cookies: [
+      await JobSourceAccount.findOneAndUpdate(
+        { userId, source: 'naukri' },
         {
-          name: 'naukri_user_session',
-          value: 'authenticated_token_' + Date.now(),
-          domain: '.naukri.com',
-          path: '/',
-          httpOnly: true,
-          secure: true,
+          $set: {
+            loginMethod,
+            accountIdentifier: username || (loginMethod === 'google' ? 'Google Account' : 'Naukri User'),
+            status: 'connected',
+            lastValidatedAt: new Date(),
+            lastUsedAt: new Date(),
+          },
         },
-      ],
-      origins: [],
-    };
+        { upsert: true }
+      );
 
-    const encryptedState = encryptData(sessionState);
-
-    await BrowserSession.findOneAndUpdate(
-      { userId, source: 'naukri' },
-      {
-        $set: {
-          encryptedStorageState: encryptedState,
-          status: 'active',
-          expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
-          lastUsedAt: new Date(),
+      await BrowserSession.findOneAndUpdate(
+        { userId, source: 'naukri' },
+        {
+          $set: {
+            encryptedStorageState: encryptedState,
+            status: 'active',
+            expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+            lastUsedAt: new Date(),
+          },
         },
-      },
-      { upsert: true, returnDocument: 'after' }
-    );
+        { upsert: true }
+      );
+
+      return {
+        success: true,
+        message: 'Naukri account connected and session saved successfully',
+        status: 'connected',
+      };
+    }
+
+    // Launch Playwright to perform actual automated/interactive login & verification
+    browser = await createBrowser();
+    context = await browser.newContext({
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      viewport: { width: 1280, height: 800 },
+    });
+
+    page = await context.newPage();
+
+    const authResult = await performNaukriLogin({
+      userId,
+      loginMethod,
+      username,
+      password,
+      page,
+    });
+
+    if (!authResult.success) {
+      return {
+        success: false,
+        status: authResult.status,
+        message: authResult.message,
+      };
+    }
 
     await logJobEvent('naukriAccountService.connect', 'SUCCESS', `Successfully connected Naukri account for user ${userId}`);
 
     return {
       success: true,
-      message: 'Naukri account connected successfully',
+      message: 'Naukri account connected and verified successfully',
       status: 'connected',
     };
   } catch (error) {
     await logError('naukriAccountService.connectNaukriAccount', error.message);
     throw new appError(`Failed to connect Naukri account: ${error.message}`, 500);
+  } finally {
+    if (page) await page.close().catch(() => {});
+    if (context) await context.close().catch(() => {});
+    if (browser) await browser.close().catch(() => {});
   }
 };
 
 /**
- * Retrieves and decrypts the active Naukri Playwright storageState for a user
- * @param {string} userId
- * @returns {Promise<object|null>} Decrypted Playwright storageState object
+ * Retrieves and decrypts active Naukri session for user
  */
 export const getNaukriDecryptedSession = async (userId) => {
-  try {
-    if (!userId) return null;
-
-    const session = await BrowserSession.findOne({
-      userId,
-      source: 'naukri',
-      status: 'active',
-    });
-
-    if (!session || !session.encryptedStorageState) {
-      return null;
-    }
-
-    const decryptedState = decryptData(session.encryptedStorageState, true);
-    if (decryptedState) {
-      await BrowserSession.updateOne({ _id: session._id }, { $set: { lastUsedAt: new Date() } });
-      await JobSourceAccount.updateOne({ userId, source: 'naukri' }, { $set: { lastUsedAt: new Date() } });
-    }
-
-    return decryptedState;
-  } catch (error) {
-    await logError('naukriAccountService.getNaukriDecryptedSession', error.message);
-    return null;
-  }
+  return await getEncryptedSessionState(userId);
 };
 
 /**

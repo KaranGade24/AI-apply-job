@@ -15,6 +15,7 @@ import { logError, logResumeEvent, logJobEvent } from "../../utils/logger.js";
 import { calculateScrapeLimit, resolveUserJobSearchSettings, MAX_DISCOVERY_ATTEMPTS } from "../../constant/agent.constant.js";
 import { logSkippedJobService } from "../../services/skippedApplication.service.js";
 import { getNaukriDecryptedSession } from "../../services/naukriAccount.service.js";
+import { loadAndVerifySessionContext } from "../../integrations/jobSources/naukri/naukriSessionService.js";
 
 export { searchConfigSchema };
 
@@ -133,37 +134,25 @@ const discoverJobsNode = async (state) => {
           `[Attempt ${currentAttempt}/${MAX_DISCOVERY_ATTEMPTS}] Scraping source: ${sourceName} (scrape limit: ${scrapeLimit})`,
         );
 
-        // Load decrypted session for Naukri (mandatory authentication)
-        let sessionState = null;
+        let sourceContext = null;
+        let sourcePage = null;
+
         if (sourceName === 'naukri') {
-          if (config.userId) {
-            sessionState = await getNaukriDecryptedSession(config.userId).catch(() => null);
+          if (!config.userId) {
+            throw new Error("Naukri authentication required. User ID is missing.");
           }
-
-          if (!sessionState) {
-            await logJobEvent(
-              "discoverJobsNode",
-              "WARNING",
-              `Naukri search requires mandatory user account connection. User ${config.userId || 'unknown'} has no active session.`
-            );
-            throw new Error("Naukri authentication required. Please connect your Naukri account before searching on Naukri.");
-          }
+          const verifiedSession = await loadAndVerifySessionContext(browser, config.userId);
+          sourceContext = verifiedSession.context;
+          sourcePage = verifiedSession.page;
+        } else {
+          sourceContext = await browser.newContext({
+            userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            viewport: { width: 1280, height: 800 },
+          });
+          sourceContext.setDefaultTimeout(10000);
+          sourceContext.setDefaultNavigationTimeout(10000);
+          sourcePage = await sourceContext.newPage();
         }
-
-        const contextOptions = {
-          userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-          viewport: { width: 1280, height: 800 },
-        };
-
-        if (sessionState && sessionState.cookies) {
-          contextOptions.storageState = sessionState;
-        }
-
-        const sourceContext = await browser.newContext(contextOptions);
-        sourceContext.setDefaultTimeout(10000);
-        sourceContext.setDefaultNavigationTimeout(10000);
-
-        const sourcePage = await sourceContext.newPage();
 
         const sourceAdapter = getJobSource(sourceName);
         const discovered = await sourceAdapter.searchJobs(sourcePage, {
