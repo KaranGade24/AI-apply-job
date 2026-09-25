@@ -22,7 +22,7 @@ export const searchConfigSchema = z.preprocess(
     return input;
   },
   z.object({
-    sources: z.array(z.string()).default(["jobViaReferral"]),
+    sources: z.array(z.string()).min(1).default(["jobViaReferral", "naukri"]),
     keywords: z.array(z.string()).default(["MERN Developer", "Node.js Developer", "Backend Developer"]),
     locations: z.array(z.string()).default(["Pune", "Remote"]),
     experience: z.object({

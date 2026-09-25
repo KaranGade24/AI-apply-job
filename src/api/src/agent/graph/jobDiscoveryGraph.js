@@ -82,23 +82,17 @@ const discoverJobsNode = async (state) => {
   let browser = null;
   let context = null;
   let page = null;
-  let discovered = [];
+  const allDiscovered = [];
 
   try {
     const config = state.config;
-    const sourceName =
-      config.sources[state.currentSourceIndex || 0] || "jobViaReferral";
+    const sourcesToScrape = (config.sources && config.sources.length > 0)
+      ? config.sources
+      : ["jobViaReferral", "naukri"];
+
     const targetMaxMatched = config.maxJobs || 5;
     const scrapeLimit = calculateScrapeLimit(targetMaxMatched, state.maxJobsToSearch);
     const currentAttempt = state.attemptCount || 1;
-
-    await logJobEvent(
-      "discoverJobsNode",
-      "START",
-      `[Attempt ${currentAttempt}/${MAX_DISCOVERY_ATTEMPTS}] Scraping source: ${sourceName} (scrape limit: ${scrapeLimit})`,
-    );
-
-    const sourceAdapter = getJobSource(sourceName);
 
     browser = await createBrowser();
     context = await browser.newContext({
@@ -126,31 +120,59 @@ const discoverJobsNode = async (state) => {
 
     page = await context.newPage();
 
-    // Use source adapter to search and scrape jobs
-    discovered = await sourceAdapter.searchJobs(page, {
-      maxJobs: scrapeLimit,
-      categoryUrl: config.categoryUrl,
-      keywords: config.keywords,
-      locations: config.locations,
-      workMode: config.workMode,
-      experience: config.experience,
-      attemptCount: currentAttempt,
-      abortSignal: config.abortSignal,
-    });
+    for (const sourceName of sourcesToScrape) {
+      if (config.abortSignal?.aborted) {
+        throw new Error("JOB_DISCOVERY_ABORTED");
+      }
 
-    await logJobEvent(
-      "discoverJobsNode",
-      "SUCCESS",
-      `Discovered ${discovered?.length || 0} jobs from ${sourceName}`,
-    );
+      try {
+        await logJobEvent(
+          "discoverJobsNode",
+          "START",
+          `[Attempt ${currentAttempt}/${MAX_DISCOVERY_ATTEMPTS}] Scraping source: ${sourceName} (scrape limit: ${scrapeLimit})`,
+        );
+
+        const sourceAdapter = getJobSource(sourceName);
+        const discovered = await sourceAdapter.searchJobs(page, {
+          maxJobs: scrapeLimit,
+          categoryUrl: config.categoryUrl,
+          keywords: config.keywords,
+          locations: config.locations,
+          workMode: config.workMode,
+          experience: config.experience,
+          attemptCount: currentAttempt,
+          abortSignal: config.abortSignal,
+        });
+
+        if (discovered && discovered.length > 0) {
+          allDiscovered.push(...discovered);
+          await logJobEvent(
+            "discoverJobsNode",
+            "SUCCESS",
+            `Discovered ${discovered.length} jobs from ${sourceName}`,
+          );
+        } else {
+          await logJobEvent(
+            "discoverJobsNode",
+            "INFO",
+            `No new jobs found from ${sourceName}`,
+          );
+        }
+      } catch (sourceError) {
+        if (sourceError.message?.includes("ABORTED")) {
+          throw sourceError;
+        }
+        await logError(`discoverJobsNode.${sourceName}`, sourceError.message);
+      }
+    }
 
     return {
-      rawJobs: discovered || [],
+      rawJobs: allDiscovered,
     };
   } catch (error) {
     await logError("jobDiscoveryGraph.discoverJobsNode", error.message);
     return {
-      rawJobs: [],
+      rawJobs: allDiscovered,
       errors: [...(state.errors || []), error.message],
     };
   } finally {
