@@ -30,6 +30,7 @@ const settingSchema = new mongoose.Schema(
         default: ["remote", "hybrid", "workFromOffice"],
       },
       employmentType: { type: [String], default: ["fullTime"] },
+      maxJobsToSearch: { type: Number, default: 20 },
       preferredApplicationMethods: {
         type: [String],
         default: ["email", "googleForm", "websiteForm", "phone", "unknown"],

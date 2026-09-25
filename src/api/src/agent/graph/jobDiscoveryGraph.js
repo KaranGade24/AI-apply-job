@@ -280,57 +280,59 @@ const matchWithResumeNode = async (state) => {
       `Evaluating candidate resume match against ${jobsToMatch.length} jobs via Gemini LLM`,
     );
 
-    const matchedResults = await Promise.all(
-      jobsToMatch.map(async (job) => {
-        try {
-          const prompt = buildJobMatchPrompt(candidateText, job);
+    const matchedResults = [];
+    for (const job of jobsToMatch) {
+      try {
+        const prompt = buildJobMatchPrompt(candidateText, job);
 
-          const response = await geminiModel.invoke([
-            new SystemMessage(
-              "You output strictly valid JSON without markdown formatting or code fences.",
-            ),
-            new HumanMessage(prompt),
-          ]);
+        const response = await geminiModel.invoke([
+          new SystemMessage(
+            "You output strictly valid JSON without markdown formatting or code fences.",
+          ),
+          new HumanMessage(prompt),
+        ]);
 
-          const rawContent = response.content
-            .toString()
-            .replace(/```json|```/g, "")
-            .trim();
-          const parsedMatch = JSON.parse(rawContent);
+        const rawContent = response.content
+          .toString()
+          .replace(/```json|```/g, "")
+          .trim();
+        const parsedMatch = JSON.parse(rawContent);
 
-          const isMatch = parsedMatch.isMatch && parsedMatch.matchScore >= 50;
+        const isMatch = parsedMatch.isMatch && parsedMatch.matchScore >= 50;
 
-          if (!isMatch) {
-            skippedJobs.push({
-              userId: state.config?.userId,
-              job,
-              skipReason: 'SKILL_MISMATCH',
-              skipDetails: parsedMatch.matchReason || `LLM Match score ${parsedMatch.matchScore || 0}% below threshold`,
-            });
-          }
-
-          return {
-            ...job,
-            matchStatus: isMatch ? "MATCHED" : "NOT_MATCHED",
-            matchScore: parsedMatch.matchScore || 0,
-            matchReason: parsedMatch.matchReason || "",
-            matchedSkills: parsedMatch.matchedSkills || [],
-            missingSkills: parsedMatch.missingSkills || [],
-          };
-        } catch (llmError) {
-          await logError(
-            "jobDiscoveryGraph.matchWithResumeNode.item",
-            llmError.message,
-          );
-          return {
-            ...job,
-            matchStatus: "MATCHED",
-            matchScore: job.deterministicScore || 70,
-            matchReason: "Matched based on keyword criteria",
-          };
+        if (!isMatch) {
+          skippedJobs.push({
+            userId: state.config?.userId,
+            job,
+            skipReason: 'SKILL_MISMATCH',
+            skipDetails: parsedMatch.matchReason || `LLM Match score ${parsedMatch.matchScore || 0}% below threshold`,
+          });
         }
-      })
-    );
+
+        matchedResults.push({
+          ...job,
+          matchStatus: isMatch ? "MATCHED" : "NOT_MATCHED",
+          matchScore: parsedMatch.matchScore || 0,
+          matchReason: parsedMatch.matchReason || "",
+          matchedSkills: parsedMatch.matchedSkills || [],
+          missingSkills: parsedMatch.missingSkills || [],
+        });
+
+        // Small delay to avoid rate limits (RPM)
+        await new Promise(resolve => setTimeout(resolve, 500));
+      } catch (llmError) {
+        await logError(
+          "jobDiscoveryGraph.matchWithResumeNode.item",
+          llmError.message,
+        );
+        matchedResults.push({
+          ...job,
+          matchStatus: "MATCHED",
+          matchScore: job.deterministicScore || 70,
+          matchReason: "Matched based on keyword criteria",
+        });
+      }
+    }
 
     await logJobEvent(
       "matchWithResumeNode",

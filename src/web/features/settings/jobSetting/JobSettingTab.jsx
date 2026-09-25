@@ -26,7 +26,7 @@ export const JobSettingTab = () => {
       setKeywords((settings.jobSetting.keywords || []).join(', '));
       setLocations((settings.jobSetting.locations || []).join(', '));
       setMinExp(settings.jobSetting.minExp ?? 0);
-      setMaxExp(settings.jobSetting.maxExp ?? 2);
+      setMaxExp(settings.jobSetting.maxExp ?? 10);
       setMaxJobsToSearch(settings.jobSetting.maxJobsToSearch ?? 20);
       if (settings.jobSetting.preferredApplicationMethods) {
         setPreferredMethods(settings.jobSetting.preferredApplicationMethods);

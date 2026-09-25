@@ -1,7 +1,7 @@
 /**
  * Agent Constants
  */
-export const MODEL_NAME = "gemini-2.0-flash";
+export const MODEL_NAME = "gemini-1.5-flash";
 export const MODEL_TEMPERATURE = 0.1;
 
 export const AI_PROVIDERS = [
@@ -15,7 +15,6 @@ export const AI_MODELS = {
     { id: "gemini-2.0-flash", name: "Gemini 2.0 Flash" },
     { id: "gemini-1.5-flash", name: "Gemini 1.5 Flash" },
     { id: "gemini-1.5-pro", name: "Gemini 1.5 Pro" },
-    { id: "gemini-2.5-flash-lite", name: "gemini-2.5-flash-lite" },
   ],
   openai: [
     { id: "gpt-4o", name: "GPT-4o" },
@@ -70,10 +69,10 @@ export const MAX_TOOL_CALLS = 2;
 export const LLM_TIMEOUT_MS = 60000; // 60 seconds timeout for AI structured extraction
 
 export const SCRAPE_LIMIT_CONFIG = Object.freeze({
-  DEFAULT_TARGET_MATCHED: 5,
-  MULTIPLIER: 10,
-  MIN_SCRAPE_LIMIT: 40,
-  MAX_SCRAPE_LIMIT: 50,
+  DEFAULT_TARGET_MATCHED: 10,
+  MULTIPLIER: 5,
+  MIN_SCRAPE_LIMIT: 10,
+  MAX_SCRAPE_LIMIT: 100,
 });
 
 /**

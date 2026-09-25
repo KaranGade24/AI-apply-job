@@ -31,6 +31,7 @@ export const SettingsProvider = ({ children }) => {
       locations: [],
       minExp: 0,
       maxExp: 10,
+      maxJobsToSearch: 20,
       workMode: ['remote', 'hybrid', 'workFromOffice'],
       employmentType: ['fullTime'],
       preferredApplicationMethods: ['email', 'googleForm', 'websiteForm', 'phone', 'unknown'],

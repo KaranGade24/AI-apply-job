@@ -16,6 +16,9 @@ export const JobSearchPage = () => {
 
   const [keyword, setKeyword] = useState('');
   const [selectedLocations, setSelectedLocations] = useState([]);
+  const [minExp, setMinExp] = useState(0);
+  const [maxExp, setMaxExp] = useState(2);
+  const [scrapeLimit, setScrapeLimit] = useState(20);
   const [jobType, setJobType] = useState('All Types');
   const [activeTab, setActiveTab] = useState('all');
   const [jobs, setJobs] = useState([]);
@@ -63,6 +66,20 @@ export const JobSearchPage = () => {
     fetchJobs();
   }, []);
 
+  useEffect(() => {
+    if (settings.jobSetting) {
+      if (!keyword && settings.jobSetting.keywords?.length > 0) {
+        setKeyword(settings.jobSetting.keywords.join(', '));
+      }
+      if (selectedLocations.length === 0 && settings.jobSetting.locations?.length > 0) {
+        setSelectedLocations(settings.jobSetting.locations);
+      }
+      setMinExp(settings.jobSetting.minExp ?? 0);
+      setMaxExp(settings.jobSetting.maxExp ?? 2);
+      setScrapeLimit(settings.jobSetting.maxJobsToSearch ?? 20);
+    }
+  }, [settings.jobSetting]);
+
   const handleSearch = async () => {
     setSearching(true);
     try {
@@ -74,7 +91,8 @@ export const JobSearchPage = () => {
         keywords: parsedKeywords,
         locations: selectedLocations.length > 0 ? selectedLocations : (settings.jobSetting?.locations || []),
         sources: settings.jobSetting?.defaultSources || ['jobViaReferral', 'naukri', 'linkedin'],
-        maxJobs: 20,
+        experience: { min: Number(minExp), max: Number(maxExp) },
+        maxJobs: Number(scrapeLimit),
       };
 
       const res = await discoverJobsApi(searchConfig);
@@ -275,6 +293,37 @@ export const JobSearchPage = () => {
           <Button loading={searching} onClick={handleSearch} className="w-full md:w-auto px-6 cursor-pointer">
             Search
           </Button>
+        </div>
+
+        {/* Advanced Filters: Exp and Scrape Limit */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1 border-t border-slate-100 mt-2 pt-3">
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider whitespace-nowrap">Min Exp:</span>
+            <input 
+              type="number" 
+              value={minExp} 
+              onChange={(e) => setMinExp(e.target.value)}
+              className="w-full bg-slate-50 border border-slate-200 rounded-md px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider whitespace-nowrap">Max Exp:</span>
+            <input 
+              type="number" 
+              value={maxExp} 
+              onChange={(e) => setMaxExp(e.target.value)}
+              className="w-full bg-slate-50 border border-slate-200 rounded-md px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider whitespace-nowrap">Scrape Limit:</span>
+            <input 
+              type="number" 
+              value={scrapeLimit} 
+              onChange={(e) => setScrapeLimit(e.target.value)}
+              className="w-full bg-slate-50 border border-slate-200 rounded-md px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          </div>
         </div>
 
         {/* Selected Locations Pills Bar */}
