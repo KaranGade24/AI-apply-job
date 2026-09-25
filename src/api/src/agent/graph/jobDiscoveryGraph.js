@@ -14,6 +14,7 @@ import { Resume } from "../../model/Resume.js";
 import { logError, logResumeEvent, logJobEvent } from "../../utils/logger.js";
 import { calculateScrapeLimit, resolveUserJobSearchSettings, MAX_DISCOVERY_ATTEMPTS } from "../../constant/agent.constant.js";
 import { logSkippedJobService } from "../../services/skippedApplication.service.js";
+import { getNaukriDecryptedSession } from "../../services/naukriAccount.service.js";
 
 export { searchConfigSchema };
 
@@ -132,8 +133,29 @@ const discoverJobsNode = async (state) => {
           `[Attempt ${currentAttempt}/${MAX_DISCOVERY_ATTEMPTS}] Scraping source: ${sourceName} (scrape limit: ${scrapeLimit})`,
         );
 
+        // Load decrypted session for Naukri if available
+        let sessionState = null;
+        if (sourceName === 'naukri' && config.userId) {
+          sessionState = await getNaukriDecryptedSession(config.userId).catch(() => null);
+        }
+
+        const contextOptions = {
+          userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          viewport: { width: 1280, height: 800 },
+        };
+
+        if (sessionState && sessionState.cookies) {
+          contextOptions.storageState = sessionState;
+        }
+
+        const sourceContext = await browser.newContext(contextOptions);
+        sourceContext.setDefaultTimeout(10000);
+        sourceContext.setDefaultNavigationTimeout(10000);
+
+        const sourcePage = await sourceContext.newPage();
+
         const sourceAdapter = getJobSource(sourceName);
-        const discovered = await sourceAdapter.searchJobs(page, {
+        const discovered = await sourceAdapter.searchJobs(sourcePage, {
           maxJobs: scrapeLimit,
           categoryUrl: config.categoryUrl,
           keywords: config.keywords,
@@ -142,7 +164,10 @@ const discoverJobsNode = async (state) => {
           experience: config.experience,
           attemptCount: currentAttempt,
           abortSignal: config.abortSignal,
+          userId: config.userId,
         });
+
+        await sourceContext.close().catch(() => {});
 
         if (discovered && discovered.length > 0) {
           allDiscovered.push(...discovered);

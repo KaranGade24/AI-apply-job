@@ -8,6 +8,7 @@ import { ApplicationReviewModal } from '../applications/ApplicationReviewModal';
 import { getDiscoveredJobsApi, discoverJobsApi, deleteJobApi } from '../../services/jobService';
 import { createApplicationApi } from '../../services/applicationService';
 import { SettingsContext } from '../../context/SettingsContext';
+import { NaukriConnectModal } from './NaukriConnectModal';
 
 const AVAILABLE_LOCATIONS = ['Pune', 'Bengaluru', 'Hyderabad', 'Mumbai', 'Remote', 'Delhi NCR', 'Chennai'];
 const AVAILABLE_SOURCES = [
@@ -35,6 +36,7 @@ export const JobSearchPage = () => {
   const [isLocationDropdownOpen, setIsLocationDropdownOpen] = useState(false);
   const [isSourceDropdownOpen, setIsSourceDropdownOpen] = useState(false);
   const [customLocationInput, setCustomLocationInput] = useState('');
+  const [isNaukriModalOpen, setIsNaukriModalOpen] = useState(false);
 
   const abortControllerRef = useRef(null);
 
@@ -251,20 +253,36 @@ export const JobSearchPage = () => {
       )}
 
       {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Job Search</h1>
-        <p className="text-sm text-slate-500 mt-0.5">
-          Find your next opportunity with AI-powered job matching.
-        </p>
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Job Search</h1>
+          <p className="text-sm text-slate-500 mt-0.5">
+            Find your next opportunity with AI-powered job matching.
+          </p>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setIsNaukriModalOpen(true)}
+          className="inline-flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-slate-900 to-indigo-950 text-white hover:from-slate-800 hover:to-indigo-900 rounded-xl text-xs font-bold shadow-sm transition-all cursor-pointer"
+        >
+          <Briefcase className="w-4 h-4 text-indigo-400" />
+          <span>Connect Naukri Account</span>
+        </button>
       </div>
 
+      <NaukriConnectModal
+        isOpen={isNaukriModalOpen}
+        onClose={() => setIsNaukriModalOpen(false)}
+      />
+
       {/* Search Bar Container */}
-      <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-xs space-y-3">
-        <div className="flex flex-col md:flex-row items-center gap-3">
+      <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-4">
+        <div className="flex flex-col lg:flex-row items-stretch lg:items-center gap-3.5">
           {/* Keyword Search Input */}
-          <div className="flex-1 w-full">
+          <div className="flex-1 w-full min-w-[280px]">
             <Input
-              placeholder="Job title, skills, company (e.g. MERN, Node.js)..."
+              placeholder="Job title, skills, company (e.g. MERN Developer, Node.js)..."
               value={keyword}
               onChange={(e) => setKeyword(e.target.value)}
               icon={<Search className="w-4 h-4 text-slate-400" />}
@@ -272,14 +290,14 @@ export const JobSearchPage = () => {
           </div>
 
           {/* Multi-Location Selection Dropdown trigger */}
-          <div className="relative w-full md:w-72">
+          <div className="relative w-full lg:w-64 shrink-0">
             <button
               type="button"
               onClick={() => setIsLocationDropdownOpen(!isLocationDropdownOpen)}
-              className="w-full flex items-center justify-between gap-2 px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-100 transition-colors"
+              className="w-full flex items-center justify-between gap-2 px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
             >
-              <span className="flex items-center gap-1.5 truncate">
-                <MapPin className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+              <span className="flex items-center gap-2 truncate">
+                <MapPin className="w-4 h-4 text-blue-600 shrink-0" />
                 {selectedLocations.length === 0
                   ? 'All Locations'
                   : `${selectedLocations.length} Location${selectedLocations.length > 1 ? 's' : ''} Selected`}
