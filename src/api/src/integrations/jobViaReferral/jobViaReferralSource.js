@@ -105,7 +105,7 @@ export const discoverJobs = async (page, searchConfig = {}) => {
 
     const newTargetUrls = [];
     let pageNum = 1;
-    const MAX_PAGES_TO_SCAN = 3;
+    const MAX_PAGES_TO_SCAN = 10;
 
     // Scan listing pages until we find unscraped target URLs
     while (newTargetUrls.length < maxJobs && pageNum <= MAX_PAGES_TO_SCAN) {

@@ -65,6 +65,7 @@ export const resolveUserAiSettings = async (userId) => {
 };
 
 export const MAX_ATTEMPTS = 3;
+export const MAX_DISCOVERY_ATTEMPTS = 3;
 export const MAX_TOOL_CALLS = 2;
 export const LLM_TIMEOUT_MS = 60000; // 60 seconds timeout for AI structured extraction
 

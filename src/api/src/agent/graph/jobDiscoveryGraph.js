@@ -12,7 +12,7 @@ import { createBrowser } from "../../browser/browserConfig.js";
 import { upsertJob, getExistingSourceUrls } from "../../repositories/job.repository.js";
 import { Resume } from "../../model/Resume.js";
 import { logError, logResumeEvent, logJobEvent } from "../../utils/logger.js";
-import { calculateScrapeLimit, resolveUserJobSearchSettings } from "../../constant/agent.constant.js";
+import { calculateScrapeLimit, resolveUserJobSearchSettings, MAX_DISCOVERY_ATTEMPTS } from "../../constant/agent.constant.js";
 import { logSkippedJobService } from "../../services/skippedApplication.service.js";
 
 export { searchConfigSchema };
@@ -90,11 +90,12 @@ const discoverJobsNode = async (state) => {
       config.sources[state.currentSourceIndex || 0] || "jobViaReferral";
     const targetMaxMatched = config.maxJobs || 5;
     const scrapeLimit = calculateScrapeLimit(targetMaxMatched, state.maxJobsToSearch);
+    const currentAttempt = state.attemptCount || 1;
 
     await logJobEvent(
       "discoverJobsNode",
       "START",
-      `Scraping source: ${sourceName} (scrape limit: ${scrapeLimit})`,
+      `[Attempt ${currentAttempt}/${MAX_DISCOVERY_ATTEMPTS}] Scraping source: ${sourceName} (scrape limit: ${scrapeLimit})`,
     );
 
     const sourceAdapter = getJobSource(sourceName);
@@ -411,18 +412,45 @@ const storeSkippedJobsNode = async (state) => {
       `Persisted ${storedCount}/${seenUrls.size} new unique skipped jobs with reasons into MongoDB`,
     );
 
-    return { storedSkippedCount: storedCount };
+    return {
+      storedSkippedCount: storedCount,
+      attemptCount: (state.attemptCount || 1) + 1,
+    };
   } catch (error) {
     await logError("jobDiscoveryGraph.storeSkippedJobsNode", error.message);
-    return { storedSkippedCount: 0 };
+    return {
+      storedSkippedCount: 0,
+      attemptCount: (state.attemptCount || 1) + 1,
+    };
   }
 };
 
 /**
- * Conditional Edge Router: Terminates workflow upon completion of discovery and persistence
+ * Conditional Edge Router: Evaluates whether enough matched jobs were found or max attempts reached
  */
-const checkEnoughJobsEdge = () => {
-  return END;
+const checkEnoughJobsEdge = async (state) => {
+  const matchedOnly = (state.matchedJobs || []).filter(
+    (j) => j.matchStatus === "MATCHED",
+  );
+  const targetMax = state.config?.maxJobs || 10;
+  const currentAttempt = state.attemptCount || 1;
+  const maxAttempts = MAX_DISCOVERY_ATTEMPTS || 3;
+
+  if (matchedOnly.length >= targetMax || currentAttempt > maxAttempts) {
+    await logJobEvent(
+      "checkEnoughJobsEdge",
+      "COMPLETE",
+      `Job discovery finished after ${currentAttempt - 1} attempt(s). Total matched: ${matchedOnly.length}/${targetMax}`,
+    );
+    return END;
+  }
+
+  await logJobEvent(
+    "checkEnoughJobsEdge",
+    "RETRY",
+    `Attempt ${currentAttempt - 1} yielded ${matchedOnly.length}/${targetMax} matched jobs. Triggering attempt ${currentAttempt}/${maxAttempts}...`,
+  );
+  return "discoverJobs";
 };
 
 /**
@@ -432,11 +460,48 @@ const graphBuilder = new StateGraph({
   channels: {
     config: { value: (x, y) => y ?? x, default: () => null },
     rawJobs: { value: (x, y) => y ?? x, default: () => [] },
-    normalizedJobs: { value: (x, y) => y ?? x, default: () => [] },
+    normalizedJobs: {
+      value: (x, y) => {
+        if (!x) return y || [];
+        if (!y) return x || [];
+        const map = new Map();
+        [...x, ...y].forEach((j) => {
+          const key = j.sourceUrl || j.title;
+          if (key && !map.has(key)) map.set(key, j);
+        });
+        return Array.from(map.values());
+      },
+      default: () => [],
+    },
     filteredJobs: { value: (x, y) => y ?? x, default: () => [] },
-    matchedJobs: { value: (x, y) => y ?? x, default: () => [] },
-    skippedJobs: { value: (x, y) => y ?? x, default: () => [] },
+    matchedJobs: {
+      value: (x, y) => {
+        if (!x) return y || [];
+        if (!y) return x || [];
+        const map = new Map();
+        [...x, ...y].forEach((j) => {
+          const key = j._id?.toString() || j.sourceUrl;
+          if (key && !map.has(key)) map.set(key, j);
+        });
+        return Array.from(map.values());
+      },
+      default: () => [],
+    },
+    skippedJobs: {
+      value: (x, y) => {
+        if (!x) return y || [];
+        if (!y) return x || [];
+        const map = new Map();
+        [...x, ...y].forEach((item) => {
+          const key = item.job?.sourceUrl || item.sourceUrl || Math.random().toString();
+          if (key && !map.has(key)) map.set(key, item);
+        });
+        return Array.from(map.values());
+      },
+      default: () => [],
+    },
     currentSourceIndex: { value: (x, y) => y ?? x, default: () => 0 },
+    attemptCount: { value: (x, y) => y ?? x, default: () => 1 },
     candidateResumeText: { value: (x, y) => y ?? x, default: () => "" },
     maxJobsToSearch: { value: (x, y) => y ?? x, default: () => 20 },
     errors: { value: (x, y) => (x || []).concat(y || []), default: () => [] },
