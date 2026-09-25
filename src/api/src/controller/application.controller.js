@@ -11,7 +11,7 @@ import { updateApplicationResume } from "../repositories/application.repository.
 export const createFromJob = async (req, res, next) => {
   try {
     const { jobId } = req.params;
-    const userId = req.user?.userId || req.user?._id;
+    const userId = req.user?.userId;
 
     const application = await applicationService.createApplicationFromJob(
       userId,
@@ -33,19 +33,31 @@ export const createFromJob = async (req, res, next) => {
  */
 export const createApplicationDirect = async (req, res, next) => {
   try {
-    const userId = req.user?.userId || req.user?._id;
-    const { jobId, jobTitle, company, location, sourceUrl, status, applicationMethod, email } = req.body || {};
-
-    const app = await applicationService.createDirectApplicationService(userId, {
+    const userId = req.user?.userId;
+    const {
       jobId,
       jobTitle,
       company,
       location,
       sourceUrl,
-      status: status || 'pending',
+      status,
       applicationMethod,
       email,
-    });
+    } = req.body || {};
+
+    const app = await applicationService.createDirectApplicationService(
+      userId,
+      {
+        jobId,
+        jobTitle,
+        company,
+        location,
+        sourceUrl,
+        status: status || "pending",
+        applicationMethod,
+        email,
+      },
+    );
 
     return res.status(201).json({
       success: true,
@@ -64,21 +76,26 @@ export const updateStatusDirect = async (req, res, next) => {
   try {
     const { id } = req.params;
     const { status, triggerTailor } = req.body || {};
-    const userId = req.user?.userId || req.user?._id;
+    const userId = req.user?.userId;
 
-    if (triggerTailor || status === 'waiting_for_review') {
+    if (triggerTailor || status === "waiting_for_review") {
       const app = await applicationService.getApplicationById(id, userId);
       if (triggerTailor || !app?.resume?.tailoredResumeData) {
-        const tailored = await applicationService.tailorApplicationService(userId, id);
+        const tailored = await applicationService.tailorApplicationService(
+          userId,
+          id,
+        );
         return res.status(200).json({
           success: true,
-          message: "Job read, resume tailored, and outreach drafted. Status set to waiting_for_review",
+          message:
+            "Job read, resume tailored, and outreach drafted. Status set to waiting_for_review",
           data: tailored,
         });
       }
     }
 
-    const updated = await applicationService.updateApplicationStatusDirectService(id, status);
+    const updated =
+      await applicationService.updateApplicationStatusDirectService(id, status);
     return res.status(200).json({
       success: true,
       message: "Application status updated successfully",
@@ -95,8 +112,11 @@ export const updateStatusDirect = async (req, res, next) => {
 export const tailorApplication = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const userId = req.user?.userId || req.user?._id;
-    const updated = await applicationService.tailorApplicationService(userId, id);
+    const userId = req.user?.userId;
+    const updated = await applicationService.tailorApplicationService(
+      userId,
+      id,
+    );
     return res.status(200).json({
       success: true,
       message: "Application tailored and email drafted successfully",
@@ -112,7 +132,7 @@ export const tailorApplication = async (req, res, next) => {
  */
 export const processNext = async (req, res, next) => {
   try {
-    const userId = req.user?.userId || req.user?._id;
+    const userId = req.user?.userId;
     const application =
       await applicationService.processNextPendingApplication(userId);
 
@@ -139,7 +159,7 @@ export const processNext = async (req, res, next) => {
  */
 export const getApplications = async (req, res, next) => {
   try {
-    const userId = req.user?.userId || req.user?._id;
+    const userId = req.user?.userId;
     const { status, page, limit } = req.query || {};
 
     const result = await applicationService.getUserApplications(userId, {
@@ -163,7 +183,7 @@ export const getApplications = async (req, res, next) => {
 export const getApplication = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const userId = req.user?.userId || req.user?._id;
+    const userId = req.user?.userId;
 
     const application = await applicationService.getApplicationById(id, userId);
     return res.status(200).json({
@@ -181,7 +201,7 @@ export const getApplication = async (req, res, next) => {
 export const approve = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const userId = req.user?.userId || req.user?._id;
+    const userId = req.user?.userId;
 
     const updated = await applicationService.approveAndSendApplication(
       id,
@@ -204,7 +224,7 @@ export const reject = async (req, res, next) => {
   try {
     const { id } = req.params;
     const { reason } = req.body || {};
-    const userId = req.user?.userId || req.user?._id;
+    const userId = req.user?.userId;
 
     const updated = await applicationService.rejectApplication(
       id,
@@ -228,7 +248,7 @@ export const editEmail = async (req, res, next) => {
   try {
     const { id } = req.params;
     const { recipient, subject, body } = req.body || {};
-    const userId = req.user?.userId || req.user?._id;
+    const userId = req.user?.userId;
 
     const updated = await applicationService.editApplicationEmail(id, userId, {
       recipient,
@@ -252,7 +272,7 @@ export const editEmail = async (req, res, next) => {
 export const downloadPdf = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const userId = req.user?.userId || req.user?._id;
+    const userId = req.user?.userId;
 
     const application = await applicationService.getApplicationById(id, userId);
     let pdfPath = application.resume?.pdfPath;
@@ -316,16 +336,26 @@ export const downloadPdf = async (req, res, next) => {
 export const updateResume = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { targetPageLength, pageCount, tailoredResumeData, template, regenerate } = req.body || {};
-    const userId = req.user?.userId || req.user?._id;
-
-    const updated = await applicationService.updateApplicationResumeService(id, userId, {
+    const {
       targetPageLength,
       pageCount,
       tailoredResumeData,
       template,
       regenerate,
-    });
+    } = req.body || {};
+    const userId = req.user?.userId;
+
+    const updated = await applicationService.updateApplicationResumeService(
+      id,
+      userId,
+      {
+        targetPageLength,
+        pageCount,
+        tailoredResumeData,
+        template,
+        regenerate,
+      },
+    );
 
     return res.status(200).json({
       success: true,
@@ -343,9 +373,12 @@ export const updateResume = async (req, res, next) => {
 export const getApplicationByJob = async (req, res, next) => {
   try {
     const { jobId } = req.params;
-    const userId = req.user?.userId || req.user?._id;
+    const userId = req.user?.userId;
 
-    const app = await applicationService.getApplicationByJobAndUserService(userId, jobId);
+    const app = await applicationService.getApplicationByJobAndUserService(
+      userId,
+      jobId,
+    );
     return res.status(200).json({
       success: true,
       data: app,
@@ -360,8 +393,11 @@ export const getApplicationByJob = async (req, res, next) => {
  */
 export const previewDraft = async (req, res, next) => {
   try {
-    const userId = req.user?.userId || req.user?._id;
-    const result = await applicationService.previewOrGenerateDraftService(userId, req.body || {});
+    const userId = req.user?.userId;
+    const result = await applicationService.previewOrGenerateDraftService(
+      userId,
+      req.body || {},
+    );
 
     return res.status(200).json({
       success: true,

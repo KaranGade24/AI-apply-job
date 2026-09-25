@@ -9,7 +9,7 @@ import { handleError } from "../utils/errors.js";
  */
 export const discoverJobsController = async (req, res) => {
   try {
-    const userId = req.user?.userId || req.user?._id;
+    const userId = req.user?.userId;
 
     const {
       sources,
@@ -32,7 +32,8 @@ export const discoverJobsController = async (req, res) => {
       experience,
       workMode,
       employmentType,
-      preferredApplicationMethods: preferredApplicationMethods || preferredMethods,
+      preferredApplicationMethods:
+        preferredApplicationMethods || preferredMethods,
       postedWithin,
       maxJobs,
     });

@@ -1,9 +1,13 @@
-import fs from 'fs';
-import { processAndSaveResume, getUserResumes, getResumeById } from '../services/resume.service.js';
-import { handleError, appError } from '../utils/errors.js';
-import { logError } from '../utils/logger.js';
-import { upload } from '../config/multer.config.js';
-import { MAX_FILE_SIZE_BYTES } from '../constant/api.constant.js';
+import fs from "fs";
+import {
+  processAndSaveResume,
+  getUserResumes,
+  getResumeById,
+} from "../services/resume.service.js";
+import { handleError, appError } from "../utils/errors.js";
+import { logError } from "../utils/logger.js";
+import { upload } from "../config/multer.config.js";
+import { MAX_FILE_SIZE_BYTES } from "../constant/api.constant.js";
 
 export { upload };
 
@@ -13,7 +17,10 @@ export { upload };
 export const uploadResume = async (req, res) => {
   try {
     if (!req.file) {
-      throw new appError('Please select a valid resume file (PDF or DOC/DOCX under 5MB) to upload.', 400);
+      throw new appError(
+        "Please select a valid resume file (PDF or DOC/DOCX under 5MB) to upload.",
+        400,
+      );
     }
 
     // Strictly verify file size < 5MB
@@ -22,26 +29,29 @@ export const uploadResume = async (req, res) => {
       if (fs.existsSync(req.file.path)) {
         fs.unlinkSync(req.file.path);
       }
-      throw new appError('File size exceeds the limit. Resume file must be strictly less than 5 MB.', 400);
+      throw new appError(
+        "File size exceeds the limit. Resume file must be strictly less than 5 MB.",
+        400,
+      );
     }
 
     // Extract user ID from auth middleware req.user
-    const userId = req.user?.userId || req.user?._id || req.user?.id;
+    const userId = req.user?.userId;
     if (!userId) {
-      throw new appError('User authentication context missing.', 401);
+      throw new appError("User authentication context missing.", 401);
     }
 
     // Process uploaded resume through AI agent and save to MongoDB
     const result = await processAndSaveResume({
       userId,
       filePath: req.file.path,
-      originalFilename: req.file.originalname
+      originalFilename: req.file.originalname,
     });
 
     return res.status(201).json({
       success: true,
-      message: 'Resume uploaded, parsed by AI, and stored successfully.',
-      data: result
+      message: "Resume uploaded, parsed by AI, and stored successfully.",
+      data: result,
     });
   } catch (error) {
     // Cleanup temporary file on error
@@ -49,7 +59,11 @@ export const uploadResume = async (req, res) => {
       try {
         fs.unlinkSync(req.file.path);
       } catch (cleanupErr) {
-        await logError('uploadResumeCleanup', cleanupErr.message, cleanupErr.stack);
+        await logError(
+          "uploadResumeCleanup",
+          cleanupErr.message,
+          cleanupErr.stack,
+        );
       }
     }
     return handleError(error, res);
@@ -61,11 +75,11 @@ export const uploadResume = async (req, res) => {
  */
 export const getMyResumes = async (req, res) => {
   try {
-    const userId = req.user?.userId || req.user?._id || req.user?.id;
+    const userId = req.user?.userId;
     const resumes = await getUserResumes(userId);
     return res.status(200).json({
       success: true,
-      data: resumes
+      data: resumes,
     });
   } catch (error) {
     return handleError(error, res);
@@ -81,7 +95,7 @@ export const getSingleResume = async (req, res) => {
     const resume = await getResumeById(id);
     return res.status(200).json({
       success: true,
-      data: resume
+      data: resume,
     });
   } catch (error) {
     return handleError(error, res);
@@ -93,11 +107,11 @@ export const getSingleResume = async (req, res) => {
  */
 export const saveResumeData = async (req, res) => {
   try {
-    const userId = req.user?.userId || req.user?._id || req.user?.id;
+    const userId = req.user?.userId;
     const { resumeData } = req.body || {};
 
-    const { Resume } = await import('../model/Resume.js');
-    let resumeDoc = await Resume.findOne({ userId, type: 'ORIGINAL' });
+    const { Resume } = await import("../model/Resume.js");
+    let resumeDoc = await Resume.findOne({ userId, type: "ORIGINAL" });
     if (resumeDoc) {
       resumeDoc.parsedData = resumeData;
       await resumeDoc.save();
@@ -105,13 +119,13 @@ export const saveResumeData = async (req, res) => {
       resumeDoc = await Resume.create({
         userId,
         parsedData: resumeData,
-        type: 'ORIGINAL',
+        type: "ORIGINAL",
       });
     }
 
     return res.status(200).json({
       success: true,
-      message: 'Resume saved successfully',
+      message: "Resume saved successfully",
       data: resumeDoc,
     });
   } catch (error) {
@@ -124,13 +138,13 @@ export const saveResumeData = async (req, res) => {
  */
 export const generateResumePdfController = async (req, res) => {
   try {
-    const userId = req.user?.userId || req.user?._id || req.user?.id;
+    const userId = req.user?.userId;
     const { tailoredResumeData, template } = req.body || {};
 
-    const { generateResumePdf } = await import('../pdf/resumePdfService.js');
+    const { generateResumePdf } = await import("../pdf/resumePdfService.js");
     const pdfPath = await generateResumePdf({
       resumeData: tailoredResumeData || {},
-      template: template || 'modern',
+      template: template || "modern",
       userId,
     });
 
@@ -150,14 +164,14 @@ export const generateResumePdfController = async (req, res) => {
 export const deleteResumeController = async (req, res) => {
   try {
     const { id } = req.params;
-    const { Resume } = await import('../model/Resume.js');
+    const { Resume } = await import("../model/Resume.js");
     const result = await Resume.findByIdAndDelete(id);
     if (!result) {
-      throw new appError('Resume not found', 404);
+      throw new appError("Resume not found", 404);
     }
     return res.status(200).json({
       success: true,
-      message: 'Resume deleted successfully'
+      message: "Resume deleted successfully",
     });
   } catch (error) {
     return handleError(error, res);
@@ -170,19 +184,19 @@ export const deleteResumeController = async (req, res) => {
 export const downloadOriginalResume = async (req, res) => {
   try {
     const { id } = req.params;
-    const { Resume } = await import('../model/Resume.js');
+    const { Resume } = await import("../model/Resume.js");
     const resume = await Resume.findById(id);
-    
+
     if (!resume || !resume.filePath) {
-      throw new appError('Resume file not found', 404);
+      throw new appError("Resume file not found", 404);
     }
 
-    const fs = await import('fs');
+    const fs = await import("fs");
     if (!fs.existsSync(resume.filePath)) {
-      throw new appError('File missing on server', 404);
+      throw new appError("File missing on server", 404);
     }
 
-    res.download(resume.filePath, resume.originalFile || 'resume.pdf');
+    res.download(resume.filePath, resume.originalFile || "resume.pdf");
   } catch (error) {
     return handleError(error, res);
   }
@@ -194,5 +208,5 @@ export default {
   getMyResumes,
   getSingleResume,
   deleteResumeController,
-  downloadOriginalResume
+  downloadOriginalResume,
 };
