@@ -1,7 +1,7 @@
 import { parseNaukriJobCard, parseNaukriJobDetails } from './naukriParser.js';
 import { naukriSelectors } from './naukriSelectors.js';
 import { naukriConfig } from './naukriConfig.js';
-import { verifyPageIsAuthenticated } from './naukriSessionService.js';
+import { verifyPageIsAuthenticated, ensureAuthenticatedSession } from './naukriSessionService.js';
 import { logError, logJobEvent } from '../../../utils/logger.js';
 import { getExistingSourceUrls, getExistingContentFingerprints } from '../../../repositories/job.repository.js';
 import { logSkippedJobService } from '../../../services/skippedApplication.service.js';
@@ -175,11 +175,11 @@ export const discoverJobs = async (page, searchConfig = {}) => {
       `Initiating Naukri discovery across ${searchTargets.length} query targets (scrape limit: ${maxJobs})`
     );
 
-    // Verify authenticated session before running search
-    const authCheck = await verifyPageIsAuthenticated(page);
+    // Ensure authenticated session before running search (auto-logins if unauthenticated)
+    const authCheck = await ensureAuthenticatedSession(page, searchConfig.userId);
     if (!authCheck.isAuthenticated) {
       await logJobEvent('naukriSource.discoverJobs', 'WARNING', `Naukri session is unauthenticated or expired (${authCheck.statusReason})`);
-      throw new Error(`SESSION_EXPIRED: Naukri session is ${authCheck.statusReason}. Please reconnect your account.`);
+      throw new Error(`AUTHENTICATION_REQUIRED: Naukri session is ${authCheck.statusReason}. Please connect your Naukri account.`);
     }
 
     // 1. Scan SRP pages across query targets sequentially to gather unscraped target URLs

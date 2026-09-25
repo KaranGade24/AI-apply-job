@@ -129,6 +129,68 @@ export const getEncryptedSessionState = async (userId) => {
 };
 
 /**
+ * Ensures page is authenticated. If unauthenticated ("Login" or "Continue with Google" buttons visible),
+ * automatically attempts login using stored decrypted user credentials, updates session, and re-verifies.
+ * @param {import('playwright').Page} page
+ * @param {string} userId
+ * @returns {Promise<{isAuthenticated: boolean, statusReason: string}>}
+ */
+export const ensureAuthenticatedSession = async (page, userId) => {
+  try {
+    if (!page || page.isClosed()) {
+      return { isAuthenticated: false, statusReason: 'PAGE_CLOSED' };
+    }
+
+    // Initial check
+    let verification = await verifyPageIsAuthenticated(page);
+    if (verification.isAuthenticated) {
+      return { isAuthenticated: true, statusReason: 'AUTHENTICATED' };
+    }
+
+    // Unauthenticated state detected (Login / Google login button visible)
+    if (userId) {
+      const account = await JobSourceAccount.findOne({ userId, source: 'naukri' });
+      const rawUsername = account?.credentials?.username ? decryptData(account.credentials.username) : null;
+      const rawPassword = account?.credentials?.password ? decryptData(account.credentials.password) : null;
+
+      if (rawUsername && rawPassword) {
+        await logJobEvent(
+          'naukriSessionService.ensureAuth',
+          'PROGRESS',
+          `Unauthenticated page detected. Attempting automated login for user ${userId}...`
+        );
+
+        // Navigate to login page
+        await page.goto(naukriSelectors.auth.loginPageUrl, { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(async () => {
+          await page.evaluate(() => window.stop()).catch(() => {});
+        });
+
+        // Fill credentials and click login
+        await page.fill(naukriSelectors.auth.usernameInput, rawUsername).catch(() => {});
+        await page.fill(naukriSelectors.auth.passwordInput, rawPassword).catch(() => {});
+        await page.click(naukriSelectors.auth.submitButton).catch(() => {});
+
+        // Wait for login completion
+        await page.waitForTimeout(4000);
+
+        // Re-verify authentication state
+        const reCheck = await verifyPageIsAuthenticated(page);
+        if (reCheck.isAuthenticated) {
+          await saveEncryptedSessionState(userId, page.context());
+          await logJobEvent('naukriSessionService.ensureAuth', 'SUCCESS', `Automated login successful. Session updated for user ${userId}`);
+          return { isAuthenticated: true, statusReason: 'RE_AUTHENTICATED' };
+        }
+      }
+    }
+
+    return { isAuthenticated: false, statusReason: verification.statusReason };
+  } catch (error) {
+    await logError('naukriSessionService.ensureAuthenticatedSession', error.message);
+    return { isAuthenticated: false, statusReason: 'ERROR' };
+  }
+};
+
+/**
  * Loads saved Naukri session into a Playwright browser context and strictly verifies authentication before usage.
  * @param {import('playwright').Browser} browser
  * @param {string} userId
@@ -137,17 +199,16 @@ export const getEncryptedSessionState = async (userId) => {
 export const loadAndVerifySessionContext = async (browser, userId) => {
   const sessionData = await getEncryptedSessionState(userId);
 
-  if (!sessionData) {
-    await JobSourceAccount.updateOne({ userId, source: 'naukri' }, { $set: { status: 'authenticationRequired' } });
-    throw new Error('AUTHENTICATION_REQUIRED: No saved Naukri session found. Please connect your Naukri account.');
-  }
-
-  const context = await browser.newContext({
-    storageState: sessionData,
+  const contextOptions = {
     userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     viewport: { width: 1280, height: 800 },
-  });
+  };
 
+  if (sessionData && sessionData.cookies) {
+    contextOptions.storageState = sessionData;
+  }
+
+  const context = await browser.newContext(contextOptions);
   const page = await context.newPage();
 
   // Navigate to Naukri user homepage to verify authenticated state
@@ -155,20 +216,15 @@ export const loadAndVerifySessionContext = async (browser, userId) => {
     await page.evaluate(() => window.stop()).catch(() => {});
   });
 
-  const verification = await verifyPageIsAuthenticated(page);
+  const ensureAuth = await ensureAuthenticatedSession(page, userId);
 
-  if (!verification.isAuthenticated) {
+  if (!ensureAuth.isAuthenticated) {
     await context.close().catch(() => {});
 
-    let newStatus = 'sessionExpired';
-    if (verification.isChallenge) {
-      newStatus = 'verificationRequired';
-    }
-
-    await JobSourceAccount.updateOne({ userId, source: 'naukri' }, { $set: { status: newStatus } });
+    await JobSourceAccount.updateOne({ userId, source: 'naukri' }, { $set: { status: 'authenticationRequired' } });
     await BrowserSession.updateOne({ userId, source: 'naukri' }, { $set: { status: 'expired' } });
 
-    throw new Error(`SESSION_INVALID: Naukri session is ${verification.statusReason}. Please reconnect your account.`);
+    throw new Error(`AUTHENTICATION_REQUIRED: Naukri session is ${ensureAuth.statusReason}. Please connect your Naukri account.`);
   }
 
   return { context, page };
@@ -178,5 +234,6 @@ export default {
   verifyPageIsAuthenticated,
   saveEncryptedSessionState,
   getEncryptedSessionState,
+  ensureAuthenticatedSession,
   loadAndVerifySessionContext,
 };
