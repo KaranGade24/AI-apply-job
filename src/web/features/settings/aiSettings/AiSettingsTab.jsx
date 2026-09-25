@@ -10,7 +10,7 @@ import { AI_PROVIDERS, AI_MODELS } from '../../../constants/config';
 export const AiSettingsTab = () => {
   const { settings, updateSettings, loading } = useContext(SettingsContext);
   const [provider, setProvider] = useState('googleGemini');
-  const [model, setModel] = useState('gemini-2.0-flash');
+  const [model, setModel] = useState('gemini-1.5-flash');
   const [temperature, setTemperature] = useState(0.1);
   const [apiKey, setApiKey] = useState('');
   const [showKey, setShowKey] = useState(false);
@@ -20,7 +20,7 @@ export const AiSettingsTab = () => {
   React.useEffect(() => {
     if (settings?.aiSettings) {
       setProvider(settings.aiSettings.provider || 'googleGemini');
-      setModel(settings.aiSettings.model || 'gemini-2.0-flash');
+      setModel(settings.aiSettings.model || 'gemini-1.5-flash');
       setTemperature(settings.aiSettings.temperature ?? 0.1);
       setApiKey(settings.aiSettings.apiKey || '');
     }
@@ -80,7 +80,7 @@ export const AiSettingsTab = () => {
               value={provider}
               onChange={(e) => {
                 setProvider(e.target.value);
-                setModel(AI_MODELS[e.target.value]?.[0]?.id || 'gemini-2.0-flash');
+                setModel(AI_MODELS[e.target.value]?.[0]?.id || 'gemini-1.5-flash');
               }}
               options={AI_PROVIDERS}
             />

@@ -11,7 +11,7 @@ export const SettingsProvider = ({ children }) => {
   const [settings, setSettings] = useState({
     aiSettings: {
       provider: 'googleGemini',
-      model: 'gemini-2.5-flash',
+      model: 'gemini-1.5-flash',
       temperature: 0.1,
       apiKey: '',
     },
@@ -27,13 +27,13 @@ export const SettingsProvider = ({ children }) => {
     },
     jobSetting: {
       defaultSources: ['jobViaReferral', 'naukri', 'linkedin'],
-      keywords: ['MERN Developer', 'Node.js Developer', 'Backend Developer'],
-      locations: ['Pune', 'Remote'],
+      keywords: [],
+      locations: [],
       minExp: 0,
-      maxExp: 2,
+      maxExp: 10,
       workMode: ['remote', 'hybrid', 'workFromOffice'],
       employmentType: ['fullTime'],
-      preferredApplicationMethods: ['email', 'googleForm', 'phone', 'unknown'],
+      preferredApplicationMethods: ['email', 'googleForm', 'websiteForm', 'phone', 'unknown'],
     },
     applicationSetting: {
       autoApplyEnabled: false,
@@ -43,7 +43,7 @@ export const SettingsProvider = ({ children }) => {
     },
     resumeSetting: {
       defaultTemplate: 'ATS Modern',
-      targetPages: 2,
+      targetPages: 1,
       sections: {
         header: true,
         summary: true,

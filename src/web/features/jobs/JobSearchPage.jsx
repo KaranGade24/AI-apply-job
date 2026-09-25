@@ -68,11 +68,11 @@ export const JobSearchPage = () => {
     try {
       const parsedKeywords = keyword
         ? keyword.split(',').map((k) => k.trim()).filter(Boolean)
-        : settings.jobSetting?.keywords || ['MERN Developer', 'Node.js Developer'];
+        : settings.jobSetting?.keywords || [];
 
       const searchConfig = {
         keywords: parsedKeywords,
-        locations: selectedLocations.length > 0 ? selectedLocations : ['Pune', 'Remote'],
+        locations: selectedLocations.length > 0 ? selectedLocations : (settings.jobSetting?.locations || []),
         sources: settings.jobSetting?.defaultSources || ['jobViaReferral', 'naukri', 'linkedin'],
         maxJobs: 20,
       };

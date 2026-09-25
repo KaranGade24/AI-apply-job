@@ -14,7 +14,7 @@ export const JobSettingTab = () => {
     (settings.jobSetting?.locations || []).join(', ')
   );
   const [minExp, setMinExp] = useState(settings.jobSetting?.minExp ?? 0);
-  const [maxExp, setMaxExp] = useState(settings.jobSetting?.maxExp ?? 2);
+  const [maxExp, setMaxExp] = useState(settings.jobSetting?.maxExp ?? 10);
   const [maxJobsToSearch, setMaxJobsToSearch] = useState(settings.jobSetting?.maxJobsToSearch ?? 20);
   const [preferredMethods, setPreferredMethods] = useState(
     settings.jobSetting?.preferredApplicationMethods || ['email', 'googleForm', 'phone', 'unknown']

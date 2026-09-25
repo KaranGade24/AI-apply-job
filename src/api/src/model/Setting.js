@@ -4,8 +4,8 @@ const settingSchema = new mongoose.Schema(
   {
     userId: { type: String, required: true, unique: true, index: true },
     aiSettings: {
-      provider: { type: String },
-      model: { type: String },
+      provider: { type: String, default: "googleGemini" },
+      model: { type: String, default: "gemini-1.5-flash" },
       temperature: { type: Number, default: 0.1 },
       apiKey: { type: String, default: "" },
     },
@@ -20,11 +20,11 @@ const settingSchema = new mongoose.Schema(
       headline: { type: String },
     },
     jobSetting: {
-      defaultSources: { type: [String] },
-      keywords: { type: [String] },
-      locations: { type: [String] },
+      defaultSources: { type: [String], default: ["jobViaReferral", "naukri", "linkedin"] },
+      keywords: { type: [String], default: [] },
+      locations: { type: [String], default: [] },
       minExp: { type: Number, default: 0 },
-      maxExp: { type: Number, default: 2 },
+      maxExp: { type: Number, default: 10 },
       workMode: {
         type: [String],
         default: ["remote", "hybrid", "workFromOffice"],
@@ -32,18 +32,18 @@ const settingSchema = new mongoose.Schema(
       employmentType: { type: [String], default: ["fullTime"] },
       preferredApplicationMethods: {
         type: [String],
-        default: ["email", "googleForm", "phone", "unknown"],
+        default: ["email", "googleForm", "websiteForm", "phone", "unknown"],
       },
     },
     applicationSetting: {
       autoApplyEnabled: { type: Boolean, default: false },
-      maxDailyApplications: { type: Number, default: 10 },
+      maxDailyApplications: { type: Number, default: 20 },
       notifyOnStatusChange: { type: Boolean, default: true },
       preferredEmail: { type: String },
     },
     resumeSetting: {
       defaultTemplate: { type: String, default: "ATS Modern" },
-      targetPages: { type: Number, default: 2 },
+      targetPages: { type: Number, default: 1 },
       sections: {
         header: { type: Boolean, default: true },
         summary: { type: Boolean, default: true },

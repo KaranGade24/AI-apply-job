@@ -10,13 +10,13 @@ import { RESUME_TEMPLATES } from '../../../constants/config';
 export const ResumeSettingTab = () => {
   const { settings, updateSettings, loading } = useContext(SettingsContext);
   const [template, setTemplate] = useState(settings.resumeSetting?.defaultTemplate || 'ATS Modern');
-  const [targetPages, setTargetPages] = useState(settings.resumeSetting?.targetPages ?? 2);
+  const [targetPages, setTargetPages] = useState(settings.resumeSetting?.targetPages ?? 1);
   const [savedMsg, setSavedMsg] = useState('');
 
   React.useEffect(() => {
     if (settings.resumeSetting) {
       setTemplate(settings.resumeSetting.defaultTemplate || 'ATS Modern');
-      setTargetPages(settings.resumeSetting.targetPages ?? 2);
+      setTargetPages(settings.resumeSetting.targetPages ?? 1);
     }
   }, [settings.resumeSetting]);
 
