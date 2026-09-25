@@ -6,38 +6,60 @@ import { getExistingSourceUrls, getExistingContentFingerprints } from '../../../
 import { logSkippedJobService } from '../../../services/skippedApplication.service.js';
 
 /**
- * Builds valid Naukri search URLs dynamically from search configuration
- * Example: https://www.naukri.com/mern-developer-jobs-in-pune?experience=1
+ * Builds array of valid Naukri target search URLs for all keywords and locations
+ * Example: https://www.naukri.com/mern-developer-jobs-in-pune?k=MERN%20Developer&l=pune&experience=0
  * @param {object} searchConfig
- * @param {number} pageNum
- * @returns {string} Target Naukri SRP URL
+ * @returns {Array<{label: string, url: string}>}
  */
-export const buildSearchUrl = (searchConfig = {}, pageNum = 1) => {
+export const buildSearchUrls = (searchConfig = {}) => {
   const keywords = (searchConfig.keywords || []).map((k) => String(k).trim()).filter(Boolean);
   const locations = (searchConfig.locations || []).map((l) => String(l).trim()).filter(Boolean);
   const minExp = Number(searchConfig.experience?.min ?? searchConfig.minExp ?? 0);
 
-  const primaryKw = keywords[0] || 'software-developer';
-  const kwSlug = primaryKw.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  const targets = [];
+  const effectiveKeywords = keywords.length > 0 ? keywords : ['Software Developer'];
+  const effectiveLocations = locations.length > 0 ? locations : ['India'];
 
-  let url = `${naukriConfig.baseUrl}/${kwSlug}-jobs`;
+  for (const kw of effectiveKeywords) {
+    const kwSlug = kw.toLowerCase().replace(/[^a-z0-9]+/g, '-');
 
-  if (locations.length > 0) {
-    const locSlug = locations[0].toLowerCase().replace(/[^a-z0-9]+/g, '-');
-    url = `${naukriConfig.baseUrl}/${kwSlug}-jobs-in-${locSlug}`;
+    for (const loc of effectiveLocations) {
+      const locSlug = loc.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+      let baseUrl = `${naukriConfig.baseUrl}/${kwSlug}-jobs-in-${locSlug}`;
+
+      const queryParams = new URLSearchParams();
+      queryParams.set('k', kw);
+      if (loc && loc.toLowerCase() !== 'india') {
+        queryParams.set('l', loc);
+      }
+      if (minExp >= 0) {
+        queryParams.set('experience', String(minExp));
+      }
+
+      targets.push({
+        label: `${kw} in ${loc}`,
+        baseUrl,
+        queryParams,
+      });
+    }
   }
 
+  return targets;
+};
+
+/**
+ * Builds paginated URL for a target search object
+ * @param {object} targetObj
+ * @param {number} pageNum
+ * @returns {string}
+ */
+export const formatPaginatedUrl = (targetObj, pageNum = 1) => {
+  let url = targetObj.baseUrl;
   if (pageNum > 1) {
     url = `${url}-${pageNum}`;
   }
-
-  const queryParams = new URLSearchParams();
-  if (minExp >= 0) {
-    queryParams.set('experience', String(minExp));
-  }
-
-  const queryString = queryParams.toString();
-  return queryString ? `${url}?${queryString}` : url;
+  const qStr = targetObj.queryParams.toString();
+  return qStr ? `${url}?${qStr}` : url;
 };
 
 /**
@@ -53,7 +75,7 @@ export const open = async (page, targetUrl) => {
     }).catch(async () => {
       await page.evaluate(() => window.stop()).catch(() => {});
     });
-    await page.waitForSelector(naukriSelectors.jobList.jobCard, { timeout: 4000 }).catch(() => {});
+    await page.waitForSelector('a.title, a[href*="/job-listings-"], .srp-jobtuple-wrapper, article.jobTuple', { timeout: 4000 }).catch(() => {});
   } catch (error) {
     await logError('naukriSource.open', error.message);
   }
@@ -70,28 +92,38 @@ export const getJobListingUrls = async (page, searchConfig = {}) => {
     if (page.isClosed()) return [];
     const limit = searchConfig.maxJobs || naukriConfig.safetyLimits.maxJobsPerRun;
 
-    const urls = await page.evaluate(({ selectors, maxLimit }) => {
+    const urls = await page.evaluate(({ maxLimit }) => {
       const links = new Set();
-      const elements = document.querySelectorAll(selectors.jobList.jobTitle);
+      const selectors = [
+        'a.title',
+        'a.job-title',
+        'a[href*="/job-listings-"]',
+        '.title.fw500',
+        'h2.title a',
+        'a[href*="naukri.com/job-listings"]',
+      ];
 
-      for (const el of elements) {
-        const href = el.href || el.getAttribute('href');
-        if (!href) continue;
-        const normalized = href.trim();
+      for (const sel of selectors) {
+        const elements = document.querySelectorAll(sel);
+        for (const el of elements) {
+          const href = el.href || el.getAttribute('href');
+          if (!href) continue;
+          const normalized = href.trim();
 
-        if (
-          normalized.startsWith('http') &&
-          normalized.includes('naukri.com') &&
-          !normalized.includes('/login') &&
-          !normalized.includes('/register') &&
-          !normalized.includes('/faq')
-        ) {
-          links.add(normalized);
-          if (links.size >= maxLimit) break;
+          if (
+            normalized.startsWith('http') &&
+            normalized.includes('naukri.com') &&
+            !normalized.includes('/login') &&
+            !normalized.includes('/register') &&
+            !normalized.includes('/faq')
+          ) {
+            links.add(normalized);
+            if (links.size >= maxLimit) break;
+          }
         }
       }
       return Array.from(links);
-    }, { selectors: naukriSelectors, maxLimit: limit }).catch(() => []);
+    }, { maxLimit: limit }).catch(() => []);
 
     return urls;
   } catch (error) {
@@ -133,50 +165,61 @@ export const discoverJobs = async (page, searchConfig = {}) => {
     const maxJobs = searchConfig.maxJobs || naukriConfig.safetyLimits.maxJobsPerRun;
     const newTargetUrls = [];
 
-    let pageNum = 1;
+    const searchTargets = buildSearchUrls(searchConfig);
     const maxPages = naukriConfig.pagination.maxPages;
 
-    await logJobEvent('naukriSource.discoverJobs', 'START', `Initiating Naukri job discovery (limit: ${maxJobs})`);
+    await logJobEvent(
+      'naukriSource.discoverJobs',
+      'START',
+      `Initiating Naukri discovery across ${searchTargets.length} query targets (scrape limit: ${maxJobs})`
+    );
 
-    // 1. Scan SRP pages to gather unscraped target URLs
-    while (newTargetUrls.length < maxJobs && pageNum <= maxPages) {
-      if (searchConfig.abortSignal?.aborted) {
-        await logJobEvent('naukriSource.discoverJobs', 'CANCELLED', 'Naukri discovery cancelled by user');
-        throw new Error('JOB_DISCOVERY_ABORTED');
-      }
+    // 1. Scan SRP pages across query targets sequentially to gather unscraped target URLs
+    for (let tIndex = 0; tIndex < searchTargets.length; tIndex++) {
+      if (newTargetUrls.length >= maxJobs) break;
 
-      const srpUrl = buildSearchUrl(searchConfig, pageNum);
-      await logJobEvent('naukriSource.discoverJobs', 'PROGRESS', `Scanning Naukri page ${pageNum}: ${srpUrl}`);
+      const targetObj = searchTargets[tIndex];
+      let pageNum = 1;
 
-      await open(page, srpUrl);
-
-      const listingUrls = await getJobListingUrls(page, { maxJobs: 20 });
-      if (listingUrls.length === 0) break;
-
-      const existingUrlsSet = await getExistingSourceUrls(listingUrls);
-      const unscrapedUrls = listingUrls.filter((url) => {
-        const norm = url.trim().toLowerCase().replace(/\/$/, '');
-        return !existingUrlsSet.has(url) && !existingUrlsSet.has(norm);
-      });
-
-      const skippedInBatch = listingUrls.length - unscrapedUrls.length;
-      if (skippedInBatch > 0) {
-        await logJobEvent(
-          'naukriSource.discoverJobs',
-          'PROGRESS',
-          `Skipped ${skippedInBatch} previously processed Naukri URLs on page ${pageNum}`
-        );
-      }
-
-      for (const url of unscrapedUrls) {
-        const norm = url.trim().toLowerCase().replace(/\/$/, '');
-        const exists = newTargetUrls.some((u) => u.trim().toLowerCase().replace(/\/$/, '') === norm);
-        if (!exists && newTargetUrls.length < maxJobs) {
-          newTargetUrls.push(url);
+      while (newTargetUrls.length < maxJobs && pageNum <= maxPages) {
+        if (searchConfig.abortSignal?.aborted) {
+          await logJobEvent('naukriSource.discoverJobs', 'CANCELLED', 'Naukri discovery cancelled by user');
+          throw new Error('JOB_DISCOVERY_ABORTED');
         }
-      }
 
-      pageNum++;
+        const srpUrl = formatPaginatedUrl(targetObj, pageNum);
+        await logJobEvent('naukriSource.discoverJobs', 'PROGRESS', `[Query ${tIndex + 1}/${searchTargets.length}] Scanning Naukri page ${pageNum}: ${srpUrl}`);
+
+        await open(page, srpUrl);
+
+        const listingUrls = await getJobListingUrls(page, { maxJobs: 20 });
+        if (listingUrls.length === 0) break;
+
+        const existingUrlsSet = await getExistingSourceUrls(listingUrls);
+        const unscrapedUrls = listingUrls.filter((url) => {
+          const norm = url.trim().toLowerCase().replace(/\/$/, '');
+          return !existingUrlsSet.has(url) && !existingUrlsSet.has(norm);
+        });
+
+        const skippedInBatch = listingUrls.length - unscrapedUrls.length;
+        if (skippedInBatch > 0) {
+          await logJobEvent(
+            'naukriSource.discoverJobs',
+            'PROGRESS',
+            `Skipped ${skippedInBatch} previously processed Naukri URLs on page ${pageNum}`
+          );
+        }
+
+        for (const url of unscrapedUrls) {
+          const norm = url.trim().toLowerCase().replace(/\/$/, '');
+          const exists = newTargetUrls.some((u) => u.trim().toLowerCase().replace(/\/$/, '') === norm);
+          if (!exists && newTargetUrls.length < maxJobs) {
+            newTargetUrls.push(url);
+          }
+        }
+
+        pageNum++;
+      }
     }
 
     await logJobEvent(

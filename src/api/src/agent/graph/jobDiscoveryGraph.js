@@ -133,10 +133,21 @@ const discoverJobsNode = async (state) => {
           `[Attempt ${currentAttempt}/${MAX_DISCOVERY_ATTEMPTS}] Scraping source: ${sourceName} (scrape limit: ${scrapeLimit})`,
         );
 
-        // Load decrypted session for Naukri if available
+        // Load decrypted session for Naukri (mandatory authentication)
         let sessionState = null;
-        if (sourceName === 'naukri' && config.userId) {
-          sessionState = await getNaukriDecryptedSession(config.userId).catch(() => null);
+        if (sourceName === 'naukri') {
+          if (config.userId) {
+            sessionState = await getNaukriDecryptedSession(config.userId).catch(() => null);
+          }
+
+          if (!sessionState) {
+            await logJobEvent(
+              "discoverJobsNode",
+              "WARNING",
+              `Naukri search requires mandatory user account connection. User ${config.userId || 'unknown'} has no active session.`
+            );
+            throw new Error("Naukri authentication required. Please connect your Naukri account before searching on Naukri.");
+          }
         }
 
         const contextOptions = {

@@ -106,6 +106,27 @@ export const JobSearchPage = () => {
   };
 
   const handleSearch = async () => {
+    // 1. Mandatory Naukri authentication check if Naukri is selected as a source
+    if (selectedSources.includes('naukri')) {
+      try {
+        const token = localStorage.getItem('token');
+        const statusRes = await fetch('/api/naukri/status', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const statusJson = await statusRes.json();
+        
+        if (!statusRes.ok || !statusJson.data?.isConnected) {
+          showToast('Naukri search requires an active connected account. Please connect your account first.');
+          setIsNaukriModalOpen(true);
+          return;
+        }
+      } catch (err) {
+        showToast('Failed to verify Naukri account status. Please connect your account.');
+        setIsNaukriModalOpen(true);
+        return;
+      }
+    }
+
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }

@@ -4,11 +4,11 @@ import {
   connectNaukriController,
   disconnectNaukriController,
 } from '../controller/naukriAccount.controller.js';
-import { authenticate } from '../middlewares/auth.middleware.js';
+import { authMiddleware } from '../middlewares/auth.middleware.js';
 
 const router = express.Router();
 
-router.use(authenticate);
+router.use(authMiddleware);
 
 router.get('/status', getNaukriStatusController);
 router.post('/connect', connectNaukriController);
