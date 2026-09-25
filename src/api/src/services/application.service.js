@@ -10,13 +10,28 @@ import {
   getUserApplications as repositoryGetUserApplications,
 } from "../repositories/application.repository.js";
 import { Job } from "../model/Job.js";
-import { APPLICATION_STATUS, RESUME_PAGE_COUNT, RESUME_PDF_TEMPLATES, resolveUserResumeSettings } from "../constant/application.constant.js";
+import { APPLICATION_STATUS, RESUME_PAGE_COUNT, RESUME_TEMPLATES, resolveUserResumeSettings } from "../constant/application.constant.js";
 import { generateResumePdf } from "../pdf/resumePdfService.js";
 import { sendApplicationEmail } from "../integrations/email/emailService.js";
 import { formatAndCleanEmailBody } from "../agent/prompt/applicationEmail.js";
 import { getActiveResumeByUserId } from "../repositories/resume.repository.js";
 import { logError, logJobEvent } from "../utils/logger.js";
 import { appError } from "../utils/errors.js";
+
+/**
+ * Checks if an application's status is "Locked" (already applied or further in the funnel),
+ * preventing any modifications to tailored content or moving back to earlier stages.
+ */
+const isApplicationLocked = (status) => {
+  const lockedStatuses = [
+    APPLICATION_STATUS.APPLIED,
+    APPLICATION_STATUS.SENT,
+    APPLICATION_STATUS.INTERVIEW,
+    APPLICATION_STATUS.OFFER,
+    APPLICATION_STATUS.REJECTED,
+  ];
+  return lockedStatuses.includes(status);
+};
 
 /**
  * Creates an application for a specific job and initiates the application graph
@@ -138,9 +153,16 @@ export const approveAndSendApplication = async (applicationId, userId) => {
       throw new appError("Unauthorized access to job application", 403);
     }
 
-    if (application.status !== APPLICATION_STATUS.WAITING_FOR_REVIEW) {
+    if (isApplicationLocked(application.status)) {
       throw new appError(
-        `Cannot approve application in '${application.status}' status. Must be 'waiting_for_review'`,
+        `Cannot approve or send an application that is already in '${application.status}' status.`,
+        400,
+      );
+    }
+
+    if (application.status !== APPLICATION_STATUS.WAITING_FOR_REVIEW && application.status !== APPLICATION_STATUS.APPROVED) {
+      throw new appError(
+        `Cannot approve application in '${application.status}' status. Must be 'waiting_for_review' or 'approved'`,
         400,
       );
     }
@@ -227,6 +249,13 @@ export const rejectApplication = async (
       throw new appError("Unauthorized access to job application", 403);
     }
 
+    if (isApplicationLocked(application.status)) {
+      throw new appError(
+        `Application is already in a final or post-applied state ('${application.status}') and cannot be rejected.`,
+        400,
+      );
+    }
+
     const updated = await updateApplicationStatus(
       applicationId,
       APPLICATION_STATUS.REJECTED,
@@ -266,6 +295,13 @@ export const editApplicationEmail = async (
       application.userId.toString() !== userId
     ) {
       throw new appError("Unauthorized access to job application", 403);
+    }
+
+    if (isApplicationLocked(application.status)) {
+      throw new appError(
+        `Cannot edit cover letter for an application that is already in '${application.status}' status.`,
+        400,
+      );
     }
 
     const rawBody = emailData.body || application.email.body;
@@ -344,10 +380,10 @@ export const updateApplicationResumeService = async (
       throw new appError("Unauthorized access to job application", 403);
     }
 
-    if (application.status !== APPLICATION_STATUS.WAITING_FOR_REVIEW) {
+    if (isApplicationLocked(application.status)) {
       throw new appError(
-        `Resume can only be updated for applications in '${APPLICATION_STATUS.WAITING_FOR_REVIEW}' status. Current status: '${application.status}'`,
-        400
+        `Cannot update resume for an application that is already in '${application.status}' status.`,
+        400,
       );
     }
 
@@ -449,6 +485,13 @@ export const tailorApplicationService = async (userId, applicationId) => {
       throw new appError("No associated job found for this application to tailor for", 400);
     }
 
+    if (isApplicationLocked(app.status)) {
+      throw new appError(
+        `Cannot re-tailor an application that is already in '${app.status}' status.`,
+        400,
+      );
+    }
+
     // Run the jobApplication agent with forceRegenerate to re-tailor and draft
     // Reset error state before starting
     await updateApplicationStatus(applicationId, APPLICATION_STATUS.PENDING, { error: null });
@@ -466,6 +509,46 @@ export const tailorApplicationService = async (userId, applicationId) => {
  */
 export const updateApplicationStatusDirectService = async (id, status) => {
   try {
+    const app = await findApplicationById(id);
+    if (!app) {
+      throw new appError("Application not found", 404);
+    }
+
+    // Validate if the new status is valid
+    const validStatuses = Object.values(APPLICATION_STATUS);
+    if (!validStatuses.includes(status)) {
+      throw new appError(`Invalid status: ${status}. Must be one of: ${validStatuses.join(", ")}`, 400);
+    }
+
+    // If application is locked (Applied/Sent/etc), only allow moving forward to Interview, Offer, Rejected
+    if (isApplicationLocked(app.status)) {
+      const allowedPostAppliedTransitions = [
+        APPLICATION_STATUS.INTERVIEW,
+        APPLICATION_STATUS.OFFER,
+        APPLICATION_STATUS.REJECTED,
+        APPLICATION_STATUS.APPLIED, // Allow re-setting same status
+        APPLICATION_STATUS.SENT,    // Allow re-setting same status
+      ];
+
+      if (!allowedPostAppliedTransitions.includes(status)) {
+        throw new appError(
+          `Application is already '${app.status}'. You can only transition to Interview, Offer, or Rejected.`,
+          400,
+        );
+      }
+    }
+
+    // Additional rule: Once approved or applied, cannot move back to pending or waiting_for_review
+    const currentStatusLockedOrApproved = isApplicationLocked(app.status) || app.status === APPLICATION_STATUS.APPROVED;
+    const tryingToMoveBack = status === APPLICATION_STATUS.PENDING || status === APPLICATION_STATUS.WAITING_FOR_REVIEW;
+    
+    if (currentStatusLockedOrApproved && tryingToMoveBack) {
+      throw new appError(
+        `Cannot move application back to '${status}' once it has been ${app.status === APPLICATION_STATUS.APPROVED ? 'approved' : 'applied'}.`,
+        400
+      );
+    }
+
     return await updateApplicationStatus(id, status, { logMessage: `Status manually updated to ${status}` });
   } catch (error) {
     await logError("applicationService.updateApplicationStatusDirectService", error.message);
@@ -520,6 +603,11 @@ export const previewOrGenerateDraftService = async (userId, payload) => {
             skills: existing.resume?.tailoredResumeData?.skills || skills || [],
           },
         };
+      }
+
+      // If existing is locked, prevent regeneration
+      if (existing && (forceRegenerate || payload?.triggerTailor) && isApplicationLocked(existing.status)) {
+        throw new appError(`Cannot regenerate tailoring for an application that is already '${existing.status}'.`, 400);
       }
 
       // Only execute the job application agent pipeline if forceRegenerate or triggerTailor is explicitly requested

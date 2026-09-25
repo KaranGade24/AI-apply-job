@@ -219,6 +219,7 @@ export const ApplicationsPage = () => {
                     pendingStatuses[app._id] !== (app.status || 'pending');
                   const isUpdating = updatingId === app._id;
                   const isTailoring = tailoringId === app._id;
+                  const isLocked = ['applied', 'sent', 'interview', 'offer', 'rejected'].includes(app.status?.toLowerCase());
 
                   return (
                     <tr
@@ -270,8 +271,8 @@ export const ApplicationsPage = () => {
                               currentSelectedStatus
                             )}`}
                           >
-                            <option value="pending">Pending</option>
-                            <option value="waiting_for_review">Waiting Review</option>
+                            {!isLocked && <option value="pending">Pending</option>}
+                            {!isLocked && <option value="waiting_for_review">Waiting Review</option>}
                             <option value="Applied">Applied</option>
                             <option value="Interview">Interview</option>
                             <option value="Offer">Offer</option>
@@ -307,20 +308,22 @@ export const ApplicationsPage = () => {
                       >
                         {/* Dedicated Tailor & Draft Button: reads job, tailors resume, writes mail */}
                         <div className="inline-flex items-center gap-1">
-                          <button
-                            type="button"
-                            onClick={() => handleTailorAndReview(app)}
-                            disabled={isTailoring}
-                            className="inline-flex items-center gap-1.5 text-xs font-bold text-blue-700 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-3 py-1.5 rounded-lg transition-colors cursor-pointer shadow-2xs"
-                            title="Read job, tailor resume for requirements, and generate draft email/pitch"
-                          >
-                            {isTailoring ? (
-                              <RefreshCw className="w-3 h-3 animate-spin text-blue-600" />
-                            ) : (
-                              <Sparkles className="w-3 h-3 text-blue-600" />
-                            )}
-                            <span>Tailor & Draft</span>
-                          </button>
+                          {!isLocked && (
+                            <button
+                              type="button"
+                              onClick={() => handleTailorAndReview(app)}
+                              disabled={isTailoring}
+                              className="inline-flex items-center gap-1.5 text-xs font-bold text-blue-700 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-3 py-1.5 rounded-lg transition-colors cursor-pointer shadow-2xs"
+                              title="Read job, tailor resume for requirements, and generate draft email/pitch"
+                            >
+                              {isTailoring ? (
+                                <RefreshCw className="w-3 h-3 animate-spin text-blue-600" />
+                              ) : (
+                                <Sparkles className="w-3 h-3 text-blue-600" />
+                              )}
+                              <span>Tailor & Draft</span>
+                            </button>
+                          )}
 
                           {isTailoring && (
                             <button

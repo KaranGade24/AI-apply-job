@@ -2,7 +2,7 @@ import path from "path";
 import crypto from "crypto";
 import { renderHtmlToPdf } from "./pdfRenderer.js";
 import { resumeRenderer } from "./resumeRenderer.js";
-import { RESUME_PDF_TEMPLATES, RESUME_PAGE_COUNT, resolveUserResumeSettings } from "../constant/application.constant.js";
+import { RESUME_TEMPLATES, RESUME_PAGE_COUNT, resolveUserResumeSettings } from "../constant/application.constant.js";
 import { logError } from "../utils/logger.js";
 import { appError } from "../utils/errors.js";
 import { findUserById, findUserProfileByUserId } from "../repositories/user.repository.js";
@@ -19,9 +19,17 @@ export const buildResumeHtml = async (resumeData = {}, template, userId) => {
     const userSettings = await resolveUserResumeSettings(userId);
     activeTemplate = userSettings.template;
   }
-  activeTemplate = activeTemplate || RESUME_PDF_TEMPLATES.MODERN;
   
-  const themeName = activeTemplate === RESUME_PDF_TEMPLATES.MINIMAL ? "minimal" : activeTemplate === RESUME_PDF_TEMPLATES.ATS ? "ats" : "modern";
+  // Default fallback
+  activeTemplate = activeTemplate || "ATS Modern";
+  
+  // Map template ID/Name to internal theme name
+  let themeName = "modern";
+  const lowerT = activeTemplate.toLowerCase();
+  if (lowerT.includes("minimal")) themeName = "minimal";
+  else if (lowerT.includes("ats")) themeName = "ats";
+  else if (lowerT.includes("tech")) themeName = "modern"; // Or a specific tech theme if available
+  
   return await resumeRenderer.render(resumeData, themeName);
 };
 
@@ -29,13 +37,13 @@ export const buildResumeHtml = async (resumeData = {}, template, userId) => {
  * Generates a tailored PDF resume from structured JSON data with dynamic page auto-fit scaling.
  * @param {object} params
  * @param {object} params.resumeData - Tailored structured resume JSON
- * @param {string} [params.template] - Resume PDF template choice ('modern', 'minimal', 'ats')
+ * @param {string} [params.template] - Resume PDF template choice
  * @param {string} [params.filename] - Custom output filename
  * @param {string} [params.userId] - Optional User ID to fetch fallback user profile details
  * @param {number|string} [params.targetPages] - Target page length (default: RESUME_PAGE_COUNT)
  * @returns {Promise<string>} Output PDF file path
  */
-export const generateResumePdf = async ({ resumeData, template = RESUME_PDF_TEMPLATES.MODERN, filename, userId, targetPages }) => {
+export const generateResumePdf = async ({ resumeData, template = "ATS Modern", filename, userId, targetPages }) => {
   try {
     if (!resumeData || typeof resumeData !== "object") {
       throw new appError("Valid resumeData object is required to generate PDF", 400);
@@ -92,7 +100,7 @@ export const generateResumePdf = async ({ resumeData, template = RESUME_PDF_TEMP
     }
 
     // Resolve user-specific dynamic constants from DB
-    const userSettings = userId ? await resolveUserResumeSettings(userId) : { template: RESUME_PDF_TEMPLATES.MODERN, pageCount: RESUME_PAGE_COUNT };
+    const userSettings = userId ? await resolveUserResumeSettings(userId) : { template: "ATS Modern", pageCount: RESUME_PAGE_COUNT };
     
     const activeTemplate = template || userSettings.template;
     const activePageCount = targetPages || resumeData.targetPages || userSettings.pageCount;
@@ -100,7 +108,12 @@ export const generateResumePdf = async ({ resumeData, template = RESUME_PDF_TEMP
     resumeData.personalInfo = personalInfo;
     resumeData.targetPages = activePageCount;
 
-    const themeName = activeTemplate === RESUME_PDF_TEMPLATES.MINIMAL ? "minimal" : activeTemplate === RESUME_PDF_TEMPLATES.ATS ? "ats" : "modern";
+    // Map template ID/Name to internal theme name
+    let themeName = "modern";
+    const lowerT = activeTemplate.toLowerCase();
+    if (lowerT.includes("minimal")) themeName = "minimal";
+    else if (lowerT.includes("ats")) themeName = "ats";
+    
     const htmlContent = await resumeRenderer.render(resumeData, themeName);
 
     const fullName = personalInfo.fullName || personalInfo.name || "Candidate Name";

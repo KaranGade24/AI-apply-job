@@ -54,8 +54,8 @@ export const ApplicationReviewModal = ({
   const [recipient, setRecipient] = useState('');
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
-  const [currentStatus, setCurrentStatus] = useState('pending');
-  const [selectedStatus, setSelectedStatus] = useState('pending');
+  const [currentStatus, setCurrentStatus] = useState('Pending');
+  const [selectedStatus, setSelectedStatus] = useState('Pending');
   const [statusUpdating, setStatusUpdating] = useState(false);
   const [candidateInfo, setCandidateInfo] = useState(null);
 
@@ -83,7 +83,7 @@ export const ApplicationReviewModal = ({
 
         if (existingApp) {
           setApplication(existingApp);
-          const initialStat = existingApp.status || 'pending';
+          const initialStat = existingApp.status || 'Pending';
           setCurrentStatus(initialStat);
           setSelectedStatus(initialStat);
           setRecipient(existingApp.email?.recipient || job.hrEmail || '');
@@ -114,7 +114,7 @@ export const ApplicationReviewModal = ({
           }
           if (draftRes.data.application) {
             setApplication(draftRes.data.application);
-            const appStat = draftRes.data.application.status || 'pending';
+            const appStat = draftRes.data.application.status || 'Pending';
             setCurrentStatus(appStat);
             setSelectedStatus(appStat);
           }
@@ -177,6 +177,8 @@ export const ApplicationReviewModal = ({
     showToast('Copied to clipboard!');
     setTimeout(() => setCopiedKey(null), 2000);
   };
+
+  const isLocked = ['applied', 'sent', 'interview', 'offer', 'rejected'].includes(currentStatus?.toLowerCase());
 
   // Submit / Confirm application action
   const handleConfirmApply = async () => {
@@ -547,7 +549,7 @@ export const ApplicationReviewModal = ({
               {activeTab === 'review' && (
                 <div className="space-y-6">
                   {/* Status Banner */}
-                  {(currentStatus === 'waiting_for_review' || currentStatus === 'pending') && (
+                  {!isLocked && (currentStatus === 'waiting_for_review' || currentStatus === 'pending') && (
                     <div className="flex flex-col gap-3">
                       <div className="p-4 rounded-xl border border-blue-200 bg-blue-50/70 flex items-center justify-between gap-3 text-xs shadow-sm">
                         <div className="flex items-center gap-3">
@@ -633,7 +635,7 @@ export const ApplicationReviewModal = ({
                             selectedStatus
                           )}`}
                         >
-                          <option value="pending">Pending</option>
+                          <option value="Pending">Pending</option>
                           <option value="waiting_for_review">Waiting Review</option>
                           <option value="Applied">Applied</option>
                           <option value="Interview">Interview</option>
@@ -944,14 +946,16 @@ export const ApplicationReviewModal = ({
                       <p className="text-[11px] text-slate-500 mt-0.5">Customized for this specific job's keywords and requirements.</p>
                     </div>
                     <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={handleRegenerateDraft}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 text-slate-700 rounded-lg text-[11px] font-bold hover:bg-slate-50 transition-all cursor-pointer"
-                      >
-                        <RefreshCw className="w-3 h-3" />
-                        Re-tailor
-                      </button>
+                      {!isLocked && (
+                        <button
+                          type="button"
+                          onClick={handleRegenerateDraft}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 text-slate-700 rounded-lg text-[11px] font-bold hover:bg-slate-50 transition-all cursor-pointer"
+                        >
+                          <RefreshCw className="w-3 h-3" />
+                          Re-tailor
+                        </button>
+                      )}
                       {application?.resume?.pdfPath && (
                         <a 
                           href={`/api/applications/${application._id}/pdf?token=${localStorage.getItem('token')}`}
@@ -994,14 +998,16 @@ export const ApplicationReviewModal = ({
                       <p className="text-[11px] text-slate-500 mt-0.5">Tailored outreach based on the application method.</p>
                     </div>
                     <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={handleRegenerateDraft}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 text-slate-700 rounded-lg text-[11px] font-bold hover:bg-slate-50 transition-all cursor-pointer"
-                      >
-                        <RefreshCw className="w-3 h-3" />
-                        Re-draft
-                      </button>
+                      {!isLocked && (
+                        <button
+                          type="button"
+                          onClick={handleRegenerateDraft}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 text-slate-700 rounded-lg text-[11px] font-bold hover:bg-slate-50 transition-all cursor-pointer"
+                        >
+                          <RefreshCw className="w-3 h-3" />
+                          Re-draft
+                        </button>
+                      )}
                       <Button 
                         variant="ghost" 
                         size="sm" 
@@ -1155,9 +1161,14 @@ export const ApplicationReviewModal = ({
 
                     <div className="space-y-3 pt-2">
                       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
-                        {['pending', 'waiting_for_review', 'Applied', 'Interview', 'Offer', 'Rejected'].map((st) => {
+                        {['Pending', 'waiting_for_review', 'Applied', 'Interview', 'Offer', 'Rejected'].map((st) => {
                           const isSelected = (selectedStatus || currentStatus).toLowerCase() === st.toLowerCase();
-                          const label = st === 'waiting_for_review' ? 'Waiting Review' : st === 'pending' ? 'Pending' : st;
+                          const label = st === 'waiting_for_review' ? 'Waiting Review' : st === 'Pending' ? 'Pending' : st;
+                          
+                          // If locked, only allow post-applied statuses
+                          const isAllowed = !isLocked || ['Applied', 'Interview', 'Offer', 'Rejected'].includes(st);
+                          if (!isAllowed) return null;
+
                           return (
                             <button
                               key={st}
@@ -1252,7 +1263,7 @@ export const ApplicationReviewModal = ({
           </Button>
 
           <div className="flex items-center gap-2.5 w-full sm:w-auto">
-            {detectedMethod === 'email' && (
+            {!isLocked && detectedMethod === 'email' && (
               <Button
                 variant="secondary"
                 size="sm"
@@ -1268,9 +1279,19 @@ export const ApplicationReviewModal = ({
               size="sm"
               loading={actionLoading}
               onClick={handleConfirmApply}
-              className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white gap-1.5 cursor-pointer font-bold px-5"
+              disabled={isLocked}
+              className={`w-full sm:w-auto gap-1.5 cursor-pointer font-bold px-5 ${
+                isLocked 
+                  ? 'bg-slate-100 text-slate-400 border border-slate-200' 
+                  : 'bg-blue-600 hover:bg-blue-700 text-white'
+              }`}
             >
-              {detectedMethod === 'email' ? (
+              {isLocked ? (
+                <>
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  Application Locked
+                </>
+              ) : detectedMethod === 'email' ? (
                 <>
                   <Send className="w-3.5 h-3.5" />
                   Approve & Apply

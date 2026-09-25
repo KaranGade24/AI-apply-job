@@ -1,13 +1,13 @@
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import { generateResumePdf } from "../../../pdf/resumePdfService.js";
-import { RESUME_PDF_TEMPLATES } from "../../../constant/application.constant.js";
+import { RESUME_TEMPLATES } from "../../../constant/application.constant.js";
 import { logError } from "../../../utils/logger.js";
 
 export const generateResumePdfTool = tool(
   async ({
     tailoredResumeData,
-    template = RESUME_PDF_TEMPLATES.MODERN,
+    template = "ATS Modern",
     userId,
   }) => {
     try {
@@ -38,7 +38,7 @@ export const generateResumePdfTool = tool(
       template: z
         .string()
         .optional()
-        .default(RESUME_PDF_TEMPLATES.MODERN)
+        .default("ATS Modern")
         .describe("Resume PDF template choice"),
       userId: z
         .string()
