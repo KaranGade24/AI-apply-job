@@ -34,6 +34,7 @@ export const searchConfigSchema = z.preprocess(
     preferredApplicationMethods: z.array(z.string()).default(["email", "googleForm", "websiteForm", "phone", "unknown"]),
     postedWithin: z.string().default("24h"),
     maxJobs: z.number().default(10),
+    searchMode: z.string().default("byQuery"),
     userId: z.string().optional()
   })
 );

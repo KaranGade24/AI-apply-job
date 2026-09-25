@@ -16,10 +16,10 @@ export const SCRAPER_DEFAULTS = Object.freeze({
 export const DEFAULT_JOB_STRUCTURE = Object.freeze({
   title: '',
   company: '',
-  location: 'Remote / Unspecified',
+  location: '',
   workMode: 'unspecified',
   employmentType: 'fullTime',
-  experienceRequired: 'Not Specified',
+  experienceRequired: '',
   description: '',
   requirements: [],
   responsibilities: [],

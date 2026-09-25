@@ -53,10 +53,10 @@ export const parseCompany = async (page, contentText = '') => {
       return titleMatch[1].trim();
     }
 
-    return 'Company Not Specified';
+    return '';
   } catch (error) {
     await logError('jobViaReferralParser.parseCompany', error.message);
-    return 'Company Not Specified';
+    return '';
   }
 };
 

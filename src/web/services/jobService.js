@@ -1,9 +1,10 @@
 import { fetchWithAuth } from './api';
 
-export const discoverJobsApi = async (searchConfig = {}) => {
+export const discoverJobsApi = async (searchConfig = {}, options = {}) => {
   return await fetchWithAuth('/jobs/discover', {
     method: 'POST',
     body: JSON.stringify(searchConfig),
+    ...options,
   });
 };
 

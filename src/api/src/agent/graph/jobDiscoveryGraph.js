@@ -129,7 +129,12 @@ const discoverJobsNode = async (state) => {
     // Use source adapter to search and scrape jobs
     discovered = await sourceAdapter.searchJobs(page, {
       maxJobs: scrapeLimit,
-      categoryUrl: undefined,
+      categoryUrl: config.categoryUrl,
+      keywords: config.keywords,
+      locations: config.locations,
+      workMode: config.workMode,
+      experience: config.experience,
+      attemptCount: currentAttempt,
     });
 
     await logJobEvent(

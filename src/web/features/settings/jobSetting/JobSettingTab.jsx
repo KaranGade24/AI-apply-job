@@ -16,6 +16,7 @@ export const JobSettingTab = () => {
   const [minExp, setMinExp] = useState(settings.jobSetting?.minExp ?? 0);
   const [maxExp, setMaxExp] = useState(settings.jobSetting?.maxExp ?? 10);
   const [maxJobsToSearch, setMaxJobsToSearch] = useState(settings.jobSetting?.maxJobsToSearch ?? 20);
+  const [searchMode, setSearchMode] = useState(settings.jobSetting?.searchMode || 'byQuery');
   const [preferredMethods, setPreferredMethods] = useState(
     settings.jobSetting?.preferredApplicationMethods || ['email', 'googleForm', 'phone', 'unknown']
   );
@@ -28,6 +29,7 @@ export const JobSettingTab = () => {
       setMinExp(settings.jobSetting.minExp ?? 0);
       setMaxExp(settings.jobSetting.maxExp ?? 10);
       setMaxJobsToSearch(settings.jobSetting.maxJobsToSearch ?? 20);
+      setSearchMode(settings.jobSetting.searchMode || 'byQuery');
       if (settings.jobSetting.preferredApplicationMethods) {
         setPreferredMethods(settings.jobSetting.preferredApplicationMethods);
       }
@@ -52,6 +54,7 @@ export const JobSettingTab = () => {
         minExp: Number(minExp),
         maxExp: Number(maxExp),
         maxJobsToSearch: Number(maxJobsToSearch),
+        searchMode: searchMode,
         preferredApplicationMethods: preferredMethods,
       },
     };

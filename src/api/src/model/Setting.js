@@ -31,6 +31,7 @@ const settingSchema = new mongoose.Schema(
       },
       employmentType: { type: [String], default: ["fullTime"] },
       maxJobsToSearch: { type: Number, default: 20 },
+      searchMode: { type: String, default: "byQuery" },
       preferredApplicationMethods: {
         type: [String],
         default: ["email", "googleForm", "websiteForm", "phone", "unknown"],

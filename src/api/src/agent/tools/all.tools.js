@@ -1,5 +1,6 @@
 import { resumeParseTool } from './resumeParse.tool.js';
 import { jobDiscoveryTool } from './jobDiscover.tool.js';
+import { jobUrlResolverTool } from './jobUrlResolver.tool.js';
 import { getNextApplicationTool } from './application/getNextApplicationTool.js';
 import { getApplicationMethodTool } from './application/getApplicationMethodTool.js';
 import { generateResumeTool } from './application/generateResumeTool.js';
@@ -9,6 +10,7 @@ import { sendApplicationEmailTool } from './application/sendApplicationEmailTool
 export const tools = [
   resumeParseTool,
   jobDiscoveryTool,
+  jobUrlResolverTool,
   getNextApplicationTool,
   getApplicationMethodTool,
   generateResumeTool,

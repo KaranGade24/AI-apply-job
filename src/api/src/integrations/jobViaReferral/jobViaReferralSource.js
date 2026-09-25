@@ -4,6 +4,25 @@ import { SCRAPER_DEFAULTS } from '../../constant/job.constant.js';
 import { JOB_VIA_REFERRAL_CATEGORIES } from '../../constant/jobViaReferral.constant.js';
 import { logError, logJobEvent } from '../../utils/logger.js';
 import { getExistingSourceUrls } from '../../repositories/job.repository.js';
+import { resolveJobSearchUrlsWithAI } from '../../agent/tools/jobUrlResolver.tool.js';
+
+/**
+ * Constructs clean, paginated WordPress URLs for category and search query endpoints
+ * @param {string} targetUrl - Target URL (e.g. https://jobviareferral.com/?s=QA+Tester or https://jobviareferral.com/category/qa-referral-jobs/)
+ * @param {number} pageNum - 1-based page number
+ */
+export const formatListingPageUrl = (targetUrl, pageNum) => {
+  if (pageNum === 1) return targetUrl;
+
+  if (targetUrl.includes('?')) {
+    const [base, query] = targetUrl.split('?');
+    const cleanBase = base.replace(/\/$/, '');
+    return `${cleanBase}/page/${pageNum}/?${query}`;
+  }
+
+  const cleanBase = targetUrl.replace(/\/$/, '');
+  return `${cleanBase}/page/${pageNum}/`;
+};
 
 /**
  * Navigates to JobViaReferral target category page quickly
@@ -93,52 +112,94 @@ export const openJobDetails = async (page, jobUrl) => {
 
 /**
  * Main Orchestrator: Discovers and extracts normalized job listings from JobViaReferral
- * Pre-filters existing/skipped URLs in DB before opening detail pages to avoid re-scraping and unnecessary API usage.
+ * Uses AI URL Resolver to prioritize search & category URLs. Executes queries sequentially
+ * and stops as soon as target unscraped job limit is met.
  * @param {import('playwright').Page} page - Active Playwright page instance
- * @param {object} searchConfig - Scraper options (categoryUrl, maxJobs, etc.)
+ * @param {object} searchConfig - Scraper options (keywords, locations, experience, maxJobs, etc.)
  * @returns {Promise<Array<object>>} List of normalized job objects
  */
 export const discoverJobs = async (page, searchConfig = {}) => {
   try {
-    const baseCategoryUrl = searchConfig.categoryUrl || JOB_VIA_REFERRAL_CATEGORIES.FRESHER_REFERRAL;
     const maxJobs = searchConfig.maxJobs || SCRAPER_DEFAULTS.MAX_JOBS_PER_RUN;
 
+    // 1. Resolve prioritized search & category URLs via AI decision engine
+    let targetStrategy = null;
+    if (searchConfig.categoryUrl) {
+      targetStrategy = {
+        resolvedUrls: [{ url: searchConfig.categoryUrl, label: 'Custom Selected Category', priority: 1 }],
+        reasoning: 'User explicitly specified target category URL.'
+      };
+    } else {
+      targetStrategy = await resolveJobSearchUrlsWithAI(searchConfig);
+    }
+
+    const resolvedUrls = targetStrategy.resolvedUrls || [];
+    await logJobEvent(
+      'discoverJobs',
+      'START',
+      `Executing search strategy with ${resolvedUrls.length} prioritized URL target(s). Reason: ${targetStrategy.reasoning}`
+    );
+
     const newTargetUrls = [];
-    let pageNum = 1;
-    const MAX_PAGES_TO_SCAN = 10;
 
-    // Scan listing pages until we find unscraped target URLs
-    while (newTargetUrls.length < maxJobs && pageNum <= MAX_PAGES_TO_SCAN) {
-      const currentCategoryUrl = pageNum === 1
-        ? baseCategoryUrl
-        : `${baseCategoryUrl.replace(/\/$/, '')}/page/${pageNum}/`;
+    // 2. Process query/category URLs sequentially one by one
+    for (let qIndex = 0; qIndex < resolvedUrls.length; qIndex++) {
+      const targetObj = resolvedUrls[qIndex];
+      const baseUrl = targetObj.url;
 
-      await logJobEvent('discoverJobs', 'PROGRESS', `Scanning category listing page ${pageNum}: ${currentCategoryUrl}`);
-      await openJobViaReferral(page, currentCategoryUrl);
+      await logJobEvent(
+        'discoverJobs',
+        'PROGRESS',
+        `[Query ${qIndex + 1}/${resolvedUrls.length}] Processing: ${targetObj.label} -> ${baseUrl}`
+      );
 
-      const listingUrls = await getJobListingUrls(page, { maxJobs: 20 });
-      if (listingUrls.length === 0) break;
+      let pageNum = 1;
+      const MAX_PAGES_PER_URL = 5;
 
-      // Query DB for existing jobs or skipped jobs
-      const existingUrlsSet = await getExistingSourceUrls(listingUrls);
-      const unscrapedUrls = listingUrls.filter((url) => !existingUrlsSet.has(url));
+      while (newTargetUrls.length < maxJobs && pageNum <= MAX_PAGES_PER_URL) {
+        const currentListingUrl = formatListingPageUrl(baseUrl, pageNum);
 
-      const skippedInBatch = listingUrls.length - unscrapedUrls.length;
-      if (skippedInBatch > 0) {
         await logJobEvent(
           'discoverJobs',
           'PROGRESS',
-          `Skipped ${skippedInBatch} previously processed/skipped URLs on page ${pageNum}`
+          `Scanning page ${pageNum}: ${currentListingUrl}`
         );
-      }
+        await openJobViaReferral(page, currentListingUrl);
 
-      for (const url of unscrapedUrls) {
-        if (!newTargetUrls.includes(url) && newTargetUrls.length < maxJobs) {
-          newTargetUrls.push(url);
+        const listingUrls = await getJobListingUrls(page, { maxJobs: 20 });
+        if (listingUrls.length === 0) break;
+
+        // Query DB for existing jobs or skipped jobs
+        const existingUrlsSet = await getExistingSourceUrls(listingUrls);
+        const unscrapedUrls = listingUrls.filter((url) => !existingUrlsSet.has(url));
+
+        const skippedInBatch = listingUrls.length - unscrapedUrls.length;
+        if (skippedInBatch > 0) {
+          await logJobEvent(
+            'discoverJobs',
+            'PROGRESS',
+            `Skipped ${skippedInBatch} previously processed/skipped URLs on page ${pageNum}`
+          );
         }
+
+        for (const url of unscrapedUrls) {
+          if (!newTargetUrls.includes(url) && newTargetUrls.length < maxJobs) {
+            newTargetUrls.push(url);
+          }
+        }
+
+        pageNum++;
       }
 
-      pageNum++;
+      // Early Termination Rule: If query 1 (or current query) successfully found target unscraped jobs, STOP and do not execute next query!
+      if (newTargetUrls.length >= maxJobs) {
+        await logJobEvent(
+          'discoverJobs',
+          'PROGRESS',
+          `Target limit reached (${newTargetUrls.length}/${maxJobs}). Stopping search sequence early after Query ${qIndex + 1}.`
+        );
+        break;
+      }
     }
 
     await logJobEvent(
@@ -148,14 +209,14 @@ export const discoverJobs = async (page, searchConfig = {}) => {
     );
 
     if (newTargetUrls.length === 0) {
-      await logJobEvent('discoverJobs', 'SUCCESS', 'No new unscraped jobs found on current category pages.');
+      await logJobEvent('discoverJobs', 'SUCCESS', 'No new unscraped jobs found on target search URLs.');
       return [];
     }
 
     const context = page.context();
     const discoveredJobs = [];
 
-    // Scrape job detail pages with a 1-2 second delay in between jobs (not at the start)
+    // 3. Scrape detail pages for the identified unscraped URLs
     for (let i = 0; i < newTargetUrls.length; i++) {
       const jobUrl = newTargetUrls[i];
       let detailPage = null;
@@ -179,7 +240,7 @@ export const discoverJobs = async (page, searchConfig = {}) => {
         }
       }
 
-      // 1 to 2 sec delay in between jobs (never at start or after last item)
+      // 1 to 2 sec delay in between jobs
       if (i < newTargetUrls.length - 1) {
         const delayMs = Math.floor(Math.random() * 1000) + 1000;
         await new Promise((resolve) => setTimeout(resolve, delayMs));

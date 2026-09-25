@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext } from 'react';
+import React, { useState, useEffect, useContext, useRef } from 'react';
 import { Search, MapPin, Briefcase, Check, X, Plus } from 'lucide-react';
 import { Input } from '../../components/ui/Input';
 import { Select } from '../../components/ui/Select';
@@ -29,6 +29,8 @@ export const JobSearchPage = () => {
   const [toastMessage, setToastMessage] = useState('');
   const [isLocationDropdownOpen, setIsLocationDropdownOpen] = useState(false);
   const [customLocationInput, setCustomLocationInput] = useState('');
+
+  const abortControllerRef = useRef(null);
 
   const showToast = (msg) => {
     setToastMessage(msg);
@@ -80,7 +82,28 @@ export const JobSearchPage = () => {
     }
   }, [settings.jobSetting]);
 
+  const handleCancelSearch = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setSearching(false);
+    // Reset filters and active search state upon user stop
+    setKeyword('');
+    setSelectedLocations([]);
+    setMinExp(settings.jobSetting?.minExp ?? 0);
+    setMaxExp(settings.jobSetting?.maxExp ?? 2);
+    setScrapeLimit(settings.jobSetting?.maxJobsToSearch ?? 20);
+    showToast('Search canceled and filters reset.');
+  };
+
   const handleSearch = async () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     setSearching(true);
     try {
       const parsedKeywords = keyword
@@ -95,7 +118,7 @@ export const JobSearchPage = () => {
         maxJobs: Number(scrapeLimit),
       };
 
-      const res = await discoverJobsApi(searchConfig);
+      const res = await discoverJobsApi(searchConfig, { signal: controller.signal });
       if (res.data?.jobs && res.data.jobs.length > 0) {
         setJobs(res.data.jobs);
       } else if (res.jobs && res.jobs.length > 0) {
@@ -104,8 +127,15 @@ export const JobSearchPage = () => {
         fetchJobs();
       }
     } catch (err) {
-      fetchJobs();
+      if (err.name === 'AbortError') {
+        console.log('Search operation canceled by user.');
+      } else {
+        fetchJobs();
+      }
     } finally {
+      if (abortControllerRef.current === controller) {
+        abortControllerRef.current = null;
+      }
       setSearching(false);
     }
   };
@@ -290,9 +320,21 @@ export const JobSearchPage = () => {
             />
           </div>
 
-          <Button loading={searching} onClick={handleSearch} className="w-full md:w-auto px-6 cursor-pointer">
-            Search
-          </Button>
+          <div className="flex items-center gap-2 w-full md:w-auto shrink-0">
+            <Button loading={searching} onClick={handleSearch} className="w-full md:w-auto px-6 cursor-pointer">
+              Search
+            </Button>
+
+            {searching && (
+              <Button
+                variant="outline"
+                onClick={handleCancelSearch}
+                className="w-full md:w-auto px-4 border-rose-200 text-rose-600 hover:bg-rose-50 hover:text-rose-700 font-semibold cursor-pointer"
+              >
+                Cancel
+              </Button>
+            )}
+          </div>
         </div>
 
         {/* Advanced Filters: Exp and Scrape Limit */}

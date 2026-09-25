@@ -24,6 +24,7 @@ export const discoverJobsService = async ({
   userId,
   sources = ['jobViaReferral'],
   keywords = [],
+  searchMode = 'byQuery',
   locations = [],
   experience = { min: 0, max: 2 },
   workMode = ['remote', 'hybrid', 'workFromOffice'],
@@ -37,7 +38,7 @@ export const discoverJobsService = async ({
       throw new appError('User ID is required for job discovery', 400);
     }
 
-    await logJobEvent('discoverJobsService', 'START', `Initiating job discovery for User: ${userId}`);
+    await logJobEvent('discoverJobsService', 'START', `Initiating job discovery for User: ${userId} (Search Mode: ${searchMode})`);
 
     // 1. Fetch user's original candidate resume from MongoDB
     const originalResume = await findOriginalResumeByUserId(userId);
@@ -54,6 +55,7 @@ export const discoverJobsService = async ({
       userId,
       sources,
       keywords,
+      searchMode,
       locations,
       experience,
       workMode,
