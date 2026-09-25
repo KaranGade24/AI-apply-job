@@ -36,34 +36,42 @@ export const openJobViaReferral = async (
   try {
     await page.goto(categoryUrl, {
       waitUntil: 'domcontentloaded',
-      timeout: 8000
+      timeout: 12000
+    }).catch(async () => {
+      // Safely stop pending document load if timeout occurs
+      await page.evaluate(() => window.stop()).catch(() => {});
     });
-    await page.waitForSelector('h2 a, .gb-text a', { timeout: 3000 }).catch(() => {});
+    await page.waitForSelector('h2 a, .gb-text a, article a', { timeout: 4000 }).catch(() => {});
   } catch (error) {
     await logError('jobViaReferralSource.openJobViaReferral', error.message);
   }
 };
 
 /**
- * Finds and extracts job URLs from the current listing page in milliseconds
+ * Finds and extracts individual job post URLs from the current listing page
+ * Filters out query strings, search pagination, tags, and category links
  * @param {import('playwright').Page} page
  * @param {object} searchConfig
  * @returns {Promise<string[]>} List of individual job detail URLs
  */
 export const getJobListingUrls = async (page, searchConfig = {}) => {
   try {
+    if (page.isClosed()) return [];
     const limit = searchConfig.maxJobs || SCRAPER_DEFAULTS.MAX_JOBS_PER_RUN;
 
     const urls = await page.evaluate((maxLimit) => {
       const links = new Set();
       const elements = document.querySelectorAll(
-        'h2.gb-text a, h2 a, .gb-text a, header h2 a, main a'
+        'h2.gb-text a, h2 a, .gb-text a, header h2 a, main article a, .entry-title a'
       );
       for (const el of elements) {
         const href = el.href || el.getAttribute('href');
         if (!href) continue;
         const normalized = href.trim();
+
+        // Strictly exclude query parameters, search pagination, categories, feeds, and non-job pages
         if (
+          normalized.includes('?') ||
           normalized.includes('/category/') ||
           normalized.includes('/page/') ||
           normalized.includes('/tag/') ||
@@ -78,13 +86,17 @@ export const getJobListingUrls = async (page, searchConfig = {}) => {
         ) {
           continue;
         }
+
         if (normalized.startsWith('http') && normalized.includes('jobviareferral.com/')) {
-          links.add(normalized);
-          if (links.size >= maxLimit) break;
+          const path = normalized.replace(/^https?:\/\/[^\/]+/, '');
+          if (path && path !== '/' && path.length > 2) {
+            links.add(normalized);
+            if (links.size >= maxLimit) break;
+          }
         }
       }
       return Array.from(links);
-    }, limit);
+    }, limit).catch(() => []);
 
     return urls;
   } catch (error) {
@@ -102,11 +114,12 @@ export const openJobDetails = async (page, jobUrl) => {
   try {
     await page.goto(jobUrl, {
       waitUntil: 'domcontentloaded',
-      timeout: 6000
+      timeout: 10000
+    }).catch(async () => {
+      await page.evaluate(() => window.stop()).catch(() => {});
     });
   } catch (error) {
     await logError('jobViaReferralSource.openJobDetails', error.message);
-    throw error;
   }
 };
 
@@ -191,7 +204,7 @@ export const discoverJobs = async (page, searchConfig = {}) => {
         pageNum++;
       }
 
-      // Early Termination Rule: If query 1 (or current query) successfully found target unscraped jobs, STOP and do not execute next query!
+      // Early Termination Rule: If current query successfully found target unscraped jobs, STOP and do not execute next query!
       if (newTargetUrls.length >= maxJobs) {
         await logJobEvent(
           'discoverJobs',
@@ -222,7 +235,9 @@ export const discoverJobs = async (page, searchConfig = {}) => {
       let detailPage = null;
       try {
         detailPage = await context.newPage();
-        await detailPage.goto(jobUrl, { waitUntil: 'domcontentloaded', timeout: 8000 });
+        await detailPage.goto(jobUrl, { waitUntil: 'domcontentloaded', timeout: 12000 }).catch(async () => {
+          await detailPage.evaluate(() => window.stop()).catch(() => {});
+        });
         const jobData = await parseJobDetails(detailPage, jobUrl);
         if (jobData && jobData.title) {
           discoveredJobs.push(jobData);

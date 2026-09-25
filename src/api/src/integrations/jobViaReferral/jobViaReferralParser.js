@@ -621,6 +621,20 @@ export const parseEmploymentType = (page, contentText = '') => {
 export const parseJobDetails = async (page, jobUrl) => {
   try {
     const title = await parseTitle(page);
+    const cleanTitleLower = (title || '').toLowerCase();
+
+    // Reject non-job pages (search results, archives, 404s)
+    if (
+      !title ||
+      cleanTitleLower === 'untitled position' ||
+      cleanTitleLower.includes('search results') ||
+      cleanTitleLower.includes('nothing found') ||
+      cleanTitleLower.includes('page not found') ||
+      cleanTitleLower.includes('404')
+    ) {
+      return null;
+    }
+
     const description = await parseDescription(page);
 
     const company = await parseCompany(page, description);
@@ -665,7 +679,7 @@ export const parseJobDetails = async (page, jobUrl) => {
     };
   } catch (error) {
     await logError('jobViaReferralParser.parseJobDetails', error.message);
-    throw error;
+    return null;
   }
 };
 
