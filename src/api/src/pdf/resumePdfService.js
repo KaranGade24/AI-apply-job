@@ -2,6 +2,7 @@ import path from "path";
 import crypto from "crypto";
 import { renderHtmlToPdf } from "./pdfRenderer.js";
 import { resumeRenderer } from "./resumeRenderer.js";
+import { validatePdfPageCount } from "./pdfValidator.js";
 import { RESUME_TEMPLATES, RESUME_PAGE_COUNT, resolveUserResumeSettings } from "../constant/application.constant.js";
 import { logError } from "../utils/logger.js";
 import { appError } from "../utils/errors.js";
@@ -11,9 +12,11 @@ import { findUserById, findUserProfileByUserId } from "../repositories/user.repo
  * Delegates HTML building to resumeRenderer
  * @param {object} resumeData
  * @param {string} template
+ * @param {string} userId
+ * @param {number} scaleMultiplier
  * @returns {Promise<string>} HTML string
  */
-export const buildResumeHtml = async (resumeData = {}, template, userId) => {
+export const buildResumeHtml = async (resumeData = {}, template, userId, scaleMultiplier = 1.0) => {
   let activeTemplate = template;
   if (!activeTemplate && userId) {
     const userSettings = await resolveUserResumeSettings(userId);
@@ -28,13 +31,13 @@ export const buildResumeHtml = async (resumeData = {}, template, userId) => {
   const lowerT = activeTemplate.toLowerCase();
   if (lowerT.includes("minimal")) themeName = "minimal";
   else if (lowerT.includes("ats")) themeName = "ats";
-  else if (lowerT.includes("tech")) themeName = "modern"; // Or a specific tech theme if available
   
-  return await resumeRenderer.render(resumeData, themeName);
+  return await resumeRenderer.render({ ...resumeData, scaleMultiplier }, themeName);
 };
 
 /**
  * Generates a tailored PDF resume from structured JSON data with dynamic page auto-fit scaling.
+ * Includes a validation loop to ensure the final PDF matches the target page count.
  * @param {object} params
  * @param {object} params.resumeData - Tailored structured resume JSON
  * @param {string} [params.template] - Resume PDF template choice
@@ -103,7 +106,7 @@ export const generateResumePdf = async ({ resumeData, template = "ATS Modern", f
     const userSettings = userId ? await resolveUserResumeSettings(userId) : { template: "ATS Modern", pageCount: RESUME_PAGE_COUNT };
     
     const activeTemplate = template || userSettings.template;
-    const activePageCount = targetPages || resumeData.targetPages || userSettings.pageCount;
+    const activePageCount = parseInt(targetPages || resumeData.targetPages || userSettings.pageCount || 1, 10);
 
     resumeData.personalInfo = personalInfo;
     resumeData.targetPages = activePageCount;
@@ -114,8 +117,6 @@ export const generateResumePdf = async ({ resumeData, template = "ATS Modern", f
     if (lowerT.includes("minimal")) themeName = "minimal";
     else if (lowerT.includes("ats")) themeName = "ats";
     
-    const htmlContent = await resumeRenderer.render(resumeData, themeName);
-
     const fullName = personalInfo.fullName || personalInfo.name || "Candidate Name";
     const nameParts = fullName.trim().split(/\s+/);
     const firstName = nameParts[0]?.toLowerCase().replace(/[^a-z0-9]/gi, "") || "candidate";
@@ -128,7 +129,35 @@ export const generateResumePdf = async ({ resumeData, template = "ATS Modern", f
     const pdfFilename = filename || defaultFilename;
     const outputPath = path.join("uploads", "resumes", pdfFilename);
 
-    const savedPath = await renderHtmlToPdf(htmlContent, outputPath);
+    // Dynamic Robust Fitting Loop
+    let currentScaleMultiplier = 1.0;
+    let attempts = 0;
+    const MAX_ATTEMPTS = 3;
+    let savedPath = "";
+
+    while (attempts < MAX_ATTEMPTS) {
+      const htmlContent = await resumeRenderer.render({ ...resumeData, scaleMultiplier: currentScaleMultiplier }, themeName);
+      savedPath = await renderHtmlToPdf(htmlContent, outputPath);
+
+      // Verify actual page count
+      const validation = await validatePdfPageCount(savedPath, activePageCount);
+      
+      if (validation.isValid) {
+        break; // Success!
+      }
+
+      // If invalid, adjust multiplier and retry
+      if (validation.actualPages > activePageCount) {
+        // Too many pages, reduce scaling significantly
+        currentScaleMultiplier *= 0.94; 
+      } else {
+        // Too few pages, increase scaling (user wants it to fill the page)
+        currentScaleMultiplier *= 1.05;
+      }
+      
+      attempts++;
+    }
+
     return savedPath;
   } catch (error) {
     if (typeof logError === "function") {

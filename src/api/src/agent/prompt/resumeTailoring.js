@@ -31,11 +31,11 @@ export const buildResumeTailoringPrompt = ({
   if (pageStr === "1") {
     pageLengthGuidance = `
 Target Page Length: 1 Page (STRICT SINGLE PAGE FULL COVERAGE)
-- Tailor the candidate's resume so the output content volume naturally fills a full single A4 page.
-- Professional Summary: Write a compelling 2-3 sentence overview highlighting relevant expertise for this job.
-- Skills: Group skills into technical, tools, soft skills, and domain categories.
-- Work Experience & Projects: Provide 3-4 detailed, action-packed bullet points per key position/project with metrics, technical scope, and outcomes from the candidate's background.
-- Do NOT make bullet points overly brief or sparse; provide rich technical depth so the page is fully and beautifully populated without overflow.
+- Tailor the candidate's resume so the output content volume naturally fits on a full single A4 page.
+- Professional Summary: Write a concise, high-impact 2-sentence overview highlighting relevant expertise for this job.
+- Skills: Provide a focused, highly relevant list of technical skills categorized into 3-4 groups.
+- Work Experience & Projects: Provide 2-3 concise, action-packed bullet points per key position/project. Focus on the MOST relevant accomplishments for this job.
+- Content Management: If the candidate has extensive history, focus deeply on the most recent 2-3 roles and make older roles very brief (1 bullet point or just title/company/date) to ensure the total volume fits beautifully on one page without excessive font scaling.
 - Preserve all project Live Demo & GitHub repository links!`;
   } else if (pageStr === "2") {
     pageLengthGuidance = `

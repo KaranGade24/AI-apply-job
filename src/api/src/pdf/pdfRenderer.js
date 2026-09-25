@@ -35,6 +35,11 @@ export const renderHtmlToPdf = async (htmlContent, outputPath) => {
     browser = await createBrowser();
     page = await browser.newPage();
 
+    // Set flag to indicate this is a server-side PDF rendering run
+    await page.evaluate(() => {
+      window.isPdfRendering = true;
+    });
+
     await page.setContent(htmlContent, {
       waitUntil: "networkidle",
     });
@@ -62,54 +67,41 @@ export const renderHtmlToPdf = async (htmlContent, outputPath) => {
       document.body.removeChild(probe);
 
       // Printable page height taking 12mm top + 12mm bottom page margins into account (273mm of 297mm)
-      const printablePageHeightPx = (273 / 297) * a4HeightPx;
+      // We use 271mm (instead of 273mm) to provide a 2mm safety buffer for browser rendering differences.
+      const printablePageHeightPx = (271.0 / 297) * a4HeightPx;
 
       // Reset to baseline and clear min-height for unconstrained measurement
       const prevMinHeight = pageEl.style.minHeight;
       pageEl.style.minHeight = '0px';
 
+      // Set explicit A4 width to ensure wrapping is consistent during measurement
+      pageEl.style.width = '210mm';
+
+      const scaleMultiplier = parseFloat(document.body.getAttribute('data-scale-multiplier') || '1.0');
+
       document.documentElement.style.setProperty('--scale-factor', '1.0');
       await new Promise(r => requestAnimationFrame(r));
 
-      // Simulate exact page layout to determine required page count
+      /**
+       * Robust page count detection by checking the bounding rect of the main container
+       * after unconstraining its height.
+       */
       const getRequiredPageCount = () => {
-        const blocks = Array.from(pageEl.querySelectorAll(
-          '.resume-header, .header, .summary-text, .summary, .skill-row, .entry-item, .experience-item, .project, .education-item, .certifications, h2, .section-title, .project-description, .highlights'
-        ));
-
-        const leafBlocks = blocks.filter(b => !blocks.some(parent => parent !== b && parent.contains(b)));
-
-        let currentPageHeight = 0;
-        let pageCount = 1;
-
-        for (let i = 0; i < leafBlocks.length; i++) {
-          const el = leafBlocks[i];
-          const rect = el.getBoundingClientRect();
-          if (rect.height <= 0) continue;
-
-          const style = window.getComputedStyle(el);
-          const marginBottom = parseFloat(style.marginBottom || '0');
-          const h = rect.height + marginBottom;
-
-          if (currentPageHeight + h <= printablePageHeightPx) {
-            currentPageHeight += h;
-          } else {
-            pageCount++;
-            currentPageHeight = h;
-          }
-        }
-
-        return pageCount;
+        const height = pageEl.getBoundingClientRect().height;
+        return Math.ceil(height / printablePageHeightPx);
       };
 
-      let minScale = 0.50;
-      let maxScale = 1.30;
+      // Increased range for binary search: 0.30 to 2.00
+      let minScale = 0.30;
+      let maxScale = 2.00;
       let bestScale = 1.0;
 
-      // Binary search: 35 iterations gives high precision
-      for (let i = 0; i < 35; i++) {
+      // Binary search: 40 iterations for ultra-high precision
+      for (let i = 0; i < 40; i++) {
         const midScale = (minScale + maxScale) / 2;
-        document.documentElement.style.setProperty('--scale-factor', midScale.toFixed(4));
+        // Apply multiplier for fine-tuning
+        const currentScale = midScale * scaleMultiplier;
+        document.documentElement.style.setProperty('--scale-factor', currentScale.toFixed(5));
 
         const requiredPages = getRequiredPageCount();
 
@@ -121,7 +113,15 @@ export const renderHtmlToPdf = async (htmlContent, outputPath) => {
         }
       }
 
-      document.documentElement.style.setProperty('--scale-factor', bestScale.toFixed(4));
+      // Apply the best fitting scale with the multiplier
+      const finalScale = bestScale * scaleMultiplier;
+      document.documentElement.style.setProperty('--scale-factor', finalScale.toFixed(5));
+      
+      // Final verification: If still too high, force a slightly smaller scale as last resort
+      if (getRequiredPageCount() > targetPages) {
+        document.documentElement.style.setProperty('--scale-factor', (finalScale * 0.97).toFixed(5));
+      }
+
       pageEl.style.minHeight = prevMinHeight;
     });
 

@@ -10,64 +10,39 @@
   <script>
     (function autoFitToPage() {
       function adjustScale() {
+        // Skip if already handled by PDF renderer
+        if (window.isPdfRendering) return;
+
         const pageEl = document.querySelector('.resume') || document.querySelector('.page');
         if (!pageEl) return;
 
         const targetPages = parseInt(document.body.getAttribute('data-target-pages') || '1', 10);
 
-        // Measure real A4 height in pixels using a probe element (accurate across DPI/zoom)
         const probe = document.createElement('div');
         probe.style.cssText = 'position:absolute;visibility:hidden;height:297mm;width:1px;top:0;left:0;';
         document.body.appendChild(probe);
         const a4HeightPx = probe.getBoundingClientRect().height;
         document.body.removeChild(probe);
 
-        // Printable page height taking 12mm top + 12mm bottom page margins into account (273mm of 297mm)
-        const printablePageHeightPx = (273 / 297) * a4HeightPx;
+        const printablePageHeightPx = (272.5 / 297) * a4HeightPx;
 
-        // Simulate exact page layout to determine required page count
+        const prevMinHeight = pageEl.style.minHeight;
+        pageEl.style.minHeight = '0px';
+        pageEl.style.width = '210mm';
+
         const getRequiredPageCount = () => {
-          const blocks = Array.from(pageEl.querySelectorAll(
-            '.resume-header, .header, .summary-text, .summary, .skill-row, .entry-item, .experience-item, .project, .education-item, .certifications, h2, .section-title, .project-description, .highlights'
-          ));
-
-          const leafBlocks = blocks.filter(b => !blocks.some(parent => parent !== b && parent.contains(b)));
-
-          let currentPageHeight = 0;
-          let pageCount = 1;
-
-          for (let i = 0; i < leafBlocks.length; i++) {
-            const el = leafBlocks[i];
-            const rect = el.getBoundingClientRect();
-            if (rect.height <= 0) continue;
-
-            const style = window.getComputedStyle(el);
-            const marginBottom = parseFloat(style.marginBottom || '0');
-            const h = rect.height + marginBottom;
-
-            if (currentPageHeight + h <= printablePageHeightPx) {
-              currentPageHeight += h;
-            } else {
-              pageCount++;
-              currentPageHeight = h;
-            }
-          }
-
-          return pageCount;
+          const height = pageEl.getBoundingClientRect().height;
+          return Math.ceil(height / printablePageHeightPx);
         };
 
-        let minScale = 0.50;
-        let maxScale = 1.30;
+        let minScale = 0.35;
+        let maxScale = 1.50;
         let bestScale = 1.0;
 
-        // Bidirectional binary search
         for (let i = 0; i < 35; i++) {
           const midScale = (minScale + maxScale) / 2;
-          document.documentElement.style.setProperty('--scale-factor', midScale.toFixed(4));
-
-          const requiredPages = getRequiredPageCount();
-
-          if (requiredPages <= targetPages) {
+          document.documentElement.style.setProperty('--scale-factor', midScale.toFixed(5));
+          if (getRequiredPageCount() <= targetPages) {
             bestScale = midScale;
             minScale = midScale;
           } else {
@@ -75,7 +50,7 @@
           }
         }
 
-        document.documentElement.style.setProperty('--scale-factor', bestScale.toFixed(4));
+        document.documentElement.style.setProperty('--scale-factor', bestScale.toFixed(5));
         pageEl.style.minHeight = prevMinHeight;
       }
 
@@ -88,7 +63,7 @@
     })();
   </script>
 </head>
-<body data-target-pages="{{targetPages}}" style="--target-pages: {{targetPages}};">
+<body data-target-pages="{{targetPages}}" data-scale-multiplier="{{scaleMultiplier}}" style="--target-pages: {{targetPages}};">
   <main class="resume">
     {{{sections.header}}}
     {{{sections.summary}}}

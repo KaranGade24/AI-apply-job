@@ -127,6 +127,7 @@ export const prepareResumeData = (resumeData = {}) => {
     websiteUrl,
     summary,
     targetPages,
+    scaleMultiplier: resumeData.scaleMultiplier || 1.0,
     flatSkills,
     categorizedSkills,
     workExperience,
