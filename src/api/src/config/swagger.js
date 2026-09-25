@@ -33,9 +33,6 @@ export const swaggerOptions = {
     },
   },
   apis: [
-    routerGlobPattern,
-    rootRouterGlobPattern,
-    './src/api/src/router/*.js',
-    './src/router/*.js'
+    './src/api/src/router/*.js'
   ],
 };

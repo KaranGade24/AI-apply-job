@@ -88,7 +88,6 @@ applicationRouter.get("/", authMiddleware, applicationController.getApplications
  *         description: Detailed job application record
  *       404:
  *         description: Application not found
- * /api/applications/{id}:
  *   delete:
  *     summary: Delete a job application record
  *     description: Only allowed if the application is not approved or applied.
