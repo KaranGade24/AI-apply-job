@@ -1,5 +1,5 @@
 import fs from "fs/promises";
-import pdf from "pdf-parse";
+import { PDFParse } from "pdf-parse";
 
 /**
  * Validates the page count of a generated PDF
@@ -10,7 +10,7 @@ import pdf from "pdf-parse";
 export const validatePdfPageCount = async (pdfPath, targetPages) => {
   try {
     const dataBuffer = await fs.readFile(pdfPath);
-    const data = await pdf(dataBuffer);
+    const data = new PDFParse(dataBuffer);
 
     const actualPages = data.numpages;
     return {
