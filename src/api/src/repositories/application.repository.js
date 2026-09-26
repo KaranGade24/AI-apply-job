@@ -28,7 +28,7 @@ export const normalizeApplicationMethod = (rawMethod = "") => {
   if (lower.includes("google") || lower.includes("form")) {
     return APPLICATION_METHOD.GOOGLE_FORM;
   }
-  if (lower.includes("direct") || lower.includes("link") || lower.includes("website") || lower.includes("portal")) {
+  if (lower.includes("direct") || lower.includes("link") || lower.includes("website") || lower.includes("portal") || lower.includes("naukri")) {
     return APPLICATION_METHOD.WEBSITE_FORM;
   }
   if (lower.includes("email") || lower.includes("mailto")) {
