@@ -14,8 +14,6 @@ import { Resume } from "../../model/Resume.js";
 import { logError, logResumeEvent, logJobEvent } from "../../utils/logger.js";
 import { calculateScrapeLimit, resolveUserJobSearchSettings, MAX_DISCOVERY_ATTEMPTS } from "../../constant/agent.constant.js";
 import { logSkippedJobService } from "../../services/skippedApplication.service.js";
-import { getNaukriDecryptedSession } from "../../services/naukriAccount.service.js";
-import { loadAndVerifySessionContext } from "../../integrations/jobSources/naukri/naukriSessionService.js";
 
 export { searchConfigSchema };
 
@@ -84,17 +82,23 @@ const discoverJobsNode = async (state) => {
   let browser = null;
   let context = null;
   let page = null;
-  const allDiscovered = [];
+  let discovered = [];
 
   try {
     const config = state.config;
-    const sourcesToScrape = (config.sources && config.sources.length > 0)
-      ? config.sources
-      : ["jobViaReferral", "naukri"];
-
+    const sourceName =
+      config.sources[state.currentSourceIndex || 0] || "jobViaReferral";
     const targetMaxMatched = config.maxJobs || 5;
     const scrapeLimit = calculateScrapeLimit(targetMaxMatched, state.maxJobsToSearch);
     const currentAttempt = state.attemptCount || 1;
+
+    await logJobEvent(
+      "discoverJobsNode",
+      "START",
+      `[Attempt ${currentAttempt}/${MAX_DISCOVERY_ATTEMPTS}] Scraping source: ${sourceName} (scrape limit: ${scrapeLimit})`,
+    );
+
+    const sourceAdapter = getJobSource(sourceName);
 
     browser = await createBrowser();
     context = await browser.newContext({
@@ -122,92 +126,31 @@ const discoverJobsNode = async (state) => {
 
     page = await context.newPage();
 
-    for (const sourceName of sourcesToScrape) {
-      if (config.abortSignal?.aborted) {
-        throw new Error("JOB_DISCOVERY_ABORTED");
-      }
+    // Use source adapter to search and scrape jobs
+    discovered = await sourceAdapter.searchJobs(page, {
+      maxJobs: scrapeLimit,
+      categoryUrl: config.categoryUrl,
+      keywords: config.keywords,
+      locations: config.locations,
+      workMode: config.workMode,
+      experience: config.experience,
+      attemptCount: currentAttempt,
+      abortSignal: config.abortSignal,
+    });
 
-      try {
-        await logJobEvent(
-          "discoverJobsNode",
-          "START",
-          `[Attempt ${currentAttempt}/${MAX_DISCOVERY_ATTEMPTS}] Scraping source: ${sourceName} (scrape limit: ${scrapeLimit})`,
-        );
-
-        let sourceContext = null;
-        let sourcePage = null;
-
-        if (sourceName === 'naukri') {
-          if (!config.userId) {
-            throw new Error("Naukri authentication required. User ID is missing.");
-          }
-          const verifiedSession = await loadAndVerifySessionContext(browser, config.userId);
-          sourceContext = verifiedSession.context;
-          sourcePage = verifiedSession.page;
-        } else {
-          sourceContext = await browser.newContext({
-            userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            viewport: { width: 1280, height: 800 },
-          });
-          sourceContext.setDefaultTimeout(10000);
-          sourceContext.setDefaultNavigationTimeout(10000);
-          sourcePage = await sourceContext.newPage();
-        }
-
-        const sourceAdapter = getJobSource(sourceName);
-        const discovered = await sourceAdapter.searchJobs(sourcePage, {
-          maxJobs: scrapeLimit,
-          categoryUrl: config.categoryUrl,
-          keywords: config.keywords,
-          locations: config.locations,
-          workMode: config.workMode,
-          experience: config.experience,
-          attemptCount: currentAttempt,
-          abortSignal: config.abortSignal,
-          userId: config.userId,
-        });
-
-        await sourceContext.close().catch(() => {});
-
-        if (discovered && discovered.length > 0) {
-          allDiscovered.push(...discovered);
-          await logJobEvent(
-            "discoverJobsNode",
-            "SUCCESS",
-            `Discovered ${discovered.length} jobs from ${sourceName}`,
-          );
-        } else {
-          await logJobEvent(
-            "discoverJobsNode",
-            "INFO",
-            `No new jobs found from ${sourceName}`,
-          );
-        }
-      } catch (sourceError) {
-        if (sourceError.message?.includes("ABORTED")) {
-          throw sourceError;
-        }
-        await logError(`discoverJobsNode.${sourceName}`, sourceError.message);
-
-        // If Naukri authentication failed or session expired, record error explicitly for user feedback
-        if (
-          sourceError.message?.includes("AUTHENTICATION_REQUIRED") ||
-          sourceError.message?.includes("SESSION_INVALID") ||
-          sourceError.message?.includes("SESSION_EXPIRED") ||
-          sourceError.message?.includes("Naukri authentication required")
-        ) {
-          throw new Error(sourceError.message);
-        }
-      }
-    }
+    await logJobEvent(
+      "discoverJobsNode",
+      "SUCCESS",
+      `Discovered ${discovered?.length || 0} jobs from ${sourceName}`,
+    );
 
     return {
-      rawJobs: allDiscovered,
+      rawJobs: discovered || [],
     };
   } catch (error) {
     await logError("jobDiscoveryGraph.discoverJobsNode", error.message);
     return {
-      rawJobs: allDiscovered,
+      rawJobs: [],
       errors: [...(state.errors || []), error.message],
     };
   } finally {

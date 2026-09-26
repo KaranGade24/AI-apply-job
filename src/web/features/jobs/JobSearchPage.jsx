@@ -8,20 +8,14 @@ import { ApplicationReviewModal } from '../applications/ApplicationReviewModal';
 import { getDiscoveredJobsApi, discoverJobsApi, deleteJobApi } from '../../services/jobService';
 import { createApplicationApi } from '../../services/applicationService';
 import { SettingsContext } from '../../context/SettingsContext';
-import { NaukriConnectModal } from './NaukriConnectModal';
 
 const AVAILABLE_LOCATIONS = ['Pune', 'Bengaluru', 'Hyderabad', 'Mumbai', 'Remote', 'Delhi NCR', 'Chennai'];
-const AVAILABLE_SOURCES = [
-  { id: 'jobViaReferral', label: 'JobViaReferral' },
-  { id: 'naukri', label: 'Naukri' },
-];
 
 export const JobSearchPage = () => {
   const { settings } = useContext(SettingsContext);
 
   const [keyword, setKeyword] = useState('');
   const [selectedLocations, setSelectedLocations] = useState([]);
-  const [selectedSources, setSelectedSources] = useState(['jobViaReferral', 'naukri']);
   const [minExp, setMinExp] = useState(0);
   const [maxExp, setMaxExp] = useState(2);
   const [scrapeLimit, setScrapeLimit] = useState(20);
@@ -34,9 +28,7 @@ export const JobSearchPage = () => {
   const [reviewingJob, setReviewingJob] = useState(null);
   const [toastMessage, setToastMessage] = useState('');
   const [isLocationDropdownOpen, setIsLocationDropdownOpen] = useState(false);
-  const [isSourceDropdownOpen, setIsSourceDropdownOpen] = useState(false);
   const [customLocationInput, setCustomLocationInput] = useState('');
-  const [isNaukriModalOpen, setIsNaukriModalOpen] = useState(false);
 
   const abortControllerRef = useRef(null);
 
@@ -106,27 +98,6 @@ export const JobSearchPage = () => {
   };
 
   const handleSearch = async () => {
-    // 1. Mandatory Naukri authentication check if Naukri is selected as a source
-    if (selectedSources.includes('naukri')) {
-      try {
-        const token = localStorage.getItem('token');
-        const statusRes = await fetch('/api/naukri/status', {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const statusJson = await statusRes.json();
-        
-        if (!statusRes.ok || !statusJson.data?.isConnected) {
-          showToast('Naukri search requires an active connected account. Please connect your account first.');
-          setIsNaukriModalOpen(true);
-          return;
-        }
-      } catch (err) {
-        showToast('Failed to verify Naukri account status. Please connect your account.');
-        setIsNaukriModalOpen(true);
-        return;
-      }
-    }
-
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
@@ -142,7 +113,7 @@ export const JobSearchPage = () => {
       const searchConfig = {
         keywords: parsedKeywords,
         locations: selectedLocations.length > 0 ? selectedLocations : (settings.jobSetting?.locations || []),
-        sources: selectedSources.length > 0 ? selectedSources : ['jobViaReferral', 'naukri'],
+        sources: settings.jobSetting?.defaultSources || ['jobViaReferral', 'naukri', 'linkedin'],
         experience: { min: Number(minExp), max: Number(maxExp) },
         maxJobs: Number(scrapeLimit),
       };
@@ -159,16 +130,6 @@ export const JobSearchPage = () => {
       if (err.name === 'AbortError') {
         console.log('Search operation canceled by user.');
       } else {
-        const errorMsg = err.message || 'Job discovery failed.';
-        showToast(errorMsg);
-        if (
-          errorMsg.includes('AUTHENTICATION_REQUIRED') ||
-          errorMsg.includes('SESSION_INVALID') ||
-          errorMsg.includes('SESSION_EXPIRED') ||
-          errorMsg.includes('Naukri authentication')
-        ) {
-          setIsNaukriModalOpen(true);
-        }
         fetchJobs();
       }
     } finally {
@@ -188,18 +149,6 @@ export const JobSearchPage = () => {
       setSelectedLocations(selectedLocations.filter((l) => l !== loc));
     } else {
       setSelectedLocations([...selectedLocations, loc]);
-    }
-  };
-
-  const toggleSource = (sourceId) => {
-    if (selectedSources.includes(sourceId)) {
-      if (selectedSources.length === 1) {
-        showToast('At least one job source must be selected.');
-        return;
-      }
-      setSelectedSources(selectedSources.filter((s) => s !== sourceId));
-    } else {
-      setSelectedSources([...selectedSources, sourceId]);
     }
   };
 
@@ -284,36 +233,20 @@ export const JobSearchPage = () => {
       )}
 
       {/* Header */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Job Search</h1>
-          <p className="text-sm text-slate-500 mt-0.5">
-            Find your next opportunity with AI-powered job matching.
-          </p>
-        </div>
-
-        <button
-          type="button"
-          onClick={() => setIsNaukriModalOpen(true)}
-          className="inline-flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-slate-900 to-indigo-950 text-white hover:from-slate-800 hover:to-indigo-900 rounded-xl text-xs font-bold shadow-sm transition-all cursor-pointer"
-        >
-          <Briefcase className="w-4 h-4 text-indigo-400" />
-          <span>Connect Naukri Account</span>
-        </button>
+      <div>
+        <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Job Search</h1>
+        <p className="text-sm text-slate-500 mt-0.5">
+          Find your next opportunity with AI-powered job matching.
+        </p>
       </div>
 
-      <NaukriConnectModal
-        isOpen={isNaukriModalOpen}
-        onClose={() => setIsNaukriModalOpen(false)}
-      />
-
       {/* Search Bar Container */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-4">
-        <div className="flex flex-col lg:flex-row items-stretch lg:items-center gap-3.5">
+      <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-xs space-y-3">
+        <div className="flex flex-col md:flex-row items-center gap-3">
           {/* Keyword Search Input */}
-          <div className="flex-1 w-full min-w-[280px]">
+          <div className="flex-1 w-full">
             <Input
-              placeholder="Job title, skills, company (e.g. MERN Developer, Node.js)..."
+              placeholder="Job title, skills, company (e.g. MERN, Node.js)..."
               value={keyword}
               onChange={(e) => setKeyword(e.target.value)}
               icon={<Search className="w-4 h-4 text-slate-400" />}
@@ -321,14 +254,14 @@ export const JobSearchPage = () => {
           </div>
 
           {/* Multi-Location Selection Dropdown trigger */}
-          <div className="relative w-full lg:w-64 shrink-0">
+          <div className="relative w-full md:w-72">
             <button
               type="button"
               onClick={() => setIsLocationDropdownOpen(!isLocationDropdownOpen)}
-              className="w-full flex items-center justify-between gap-2 px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+              className="w-full flex items-center justify-between gap-2 px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-100 transition-colors"
             >
-              <span className="flex items-center gap-2 truncate">
-                <MapPin className="w-4 h-4 text-blue-600 shrink-0" />
+              <span className="flex items-center gap-1.5 truncate">
+                <MapPin className="w-3.5 h-3.5 text-blue-600 shrink-0" />
                 {selectedLocations.length === 0
                   ? 'All Locations'
                   : `${selectedLocations.length} Location${selectedLocations.length > 1 ? 's' : ''} Selected`}
@@ -368,48 +301,6 @@ export const JobSearchPage = () => {
                     onKeyDown={handleAddCustomLocation}
                     className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-md text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
                   />
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Multi Job Source Selection Dropdown trigger */}
-          <div className="relative w-full md:w-56">
-            <button
-              type="button"
-              onClick={() => setIsSourceDropdownOpen(!isSourceDropdownOpen)}
-              className="w-full flex items-center justify-between gap-2 px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
-            >
-              <span className="flex items-center gap-1.5 truncate">
-                <Briefcase className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                {selectedSources.length === AVAILABLE_SOURCES.length
-                  ? 'All Sources (2)'
-                  : `${selectedSources.length} Source${selectedSources.length > 1 ? 's' : ''}`}
-              </span>
-              <span className="text-slate-400 text-[10px]">▼</span>
-            </button>
-
-            {/* Job Source Multi-Select Popover */}
-            {isSourceDropdownOpen && (
-              <div className="absolute top-full left-0 right-0 mt-1.5 bg-white border border-slate-200 rounded-xl shadow-xl p-3 z-30 space-y-2">
-                <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Job Sources</div>
-                <div className="space-y-1">
-                  {AVAILABLE_SOURCES.map((src) => {
-                    const isSelected = selectedSources.includes(src.id);
-                    return (
-                      <button
-                        key={src.id}
-                        type="button"
-                        onClick={() => toggleSource(src.id)}
-                        className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-semibold text-left transition-colors cursor-pointer ${
-                          isSelected ? 'bg-indigo-50 text-indigo-700' : 'hover:bg-slate-50 text-slate-700'
-                        }`}
-                      >
-                        <span>{src.label}</span>
-                        {isSelected && <Check className="w-3.5 h-3.5 text-indigo-600" />}
-                      </button>
-                    );
-                  })}
                 </div>
               </div>
             )}
@@ -475,29 +366,6 @@ export const JobSearchPage = () => {
               className="w-full bg-slate-50 border border-slate-200 rounded-md px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </div>
-        </div>
-
-        {/* Selected Sources Pills Bar */}
-        <div className="flex flex-wrap items-center gap-1.5 pt-1">
-          <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mr-1">Active Sources:</span>
-          {selectedSources.map((srcId) => {
-            const label = AVAILABLE_SOURCES.find((s) => s.id === srcId)?.label || srcId;
-            return (
-              <span
-                key={srcId}
-                className="inline-flex items-center gap-1 px-2.5 py-1 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-md text-xs font-semibold"
-              >
-                {label}
-                <button
-                  type="button"
-                  onClick={() => toggleSource(srcId)}
-                  className="hover:text-indigo-900 cursor-pointer"
-                >
-                  <X className="w-3 h-3" />
-                </button>
-              </span>
-            );
-          })}
         </div>
 
         {/* Selected Locations Pills Bar */}
