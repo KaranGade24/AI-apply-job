@@ -11,14 +11,14 @@ import { handleError } from "../utils/errors.js";
 export const discoverJobsController = async (req, res) => {
   const abortController = new AbortController();
 
-  req.on('close', () => {
+  req.on("close", () => {
     if (!res.headersSent) {
       abortController.abort();
     }
   });
 
   try {
-    const userId = req.user?.userId || req.user?.id || req.user?._id;
+    const userId = req.user?.userId;
 
     const {
       sources,
@@ -58,7 +58,7 @@ export const discoverJobsController = async (req, res) => {
       });
     }
   } catch (error) {
-    if (abortController.signal.aborted || error.message?.includes('ABORTED')) {
+    if (abortController.signal.aborted || error.message?.includes("ABORTED")) {
       if (!res.headersSent) {
         return res.status(499).json({
           success: false,
