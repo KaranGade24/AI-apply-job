@@ -24,6 +24,7 @@ applicationRouter.patch("/:id/status", authMiddleware, applicationController.upd
 applicationRouter.post("/:id/tailor", authMiddleware, applicationController.tailorApplication);
 applicationRouter.post("/:id/answers", authMiddleware, applicationController.submitAnswers);
 applicationRouter.put("/:id/answers", authMiddleware, applicationController.saveAnswers);
+applicationRouter.post("/:id/refill-form", authMiddleware, applicationController.refillApplicationForm);
 applicationRouter.post("/:id/confirm", authMiddleware, applicationController.confirmFinal);
 applicationRouter.post("/:id/analyze-portal", authMiddleware, applicationController.analyzePortal);
 applicationRouter.post("/:id/advance-portal", authMiddleware, applicationController.advancePortalAction);

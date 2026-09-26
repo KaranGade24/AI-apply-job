@@ -86,6 +86,13 @@ export const saveEditedAnswersApi = async (id, answers = []) => {
   });
 };
 
+export const refillApplicationFormApi = async (id, answers = []) => {
+  return await fetchWithAuth(`/applications/${id}/refill-form`, {
+    method: 'POST',
+    body: JSON.stringify({ answers }),
+  });
+};
+
 export const confirmFinalApplicationApi = async (id, confirmedAnswers = []) => {
   return await fetchWithAuth(`/applications/${id}/confirm`, {
     method: 'POST',

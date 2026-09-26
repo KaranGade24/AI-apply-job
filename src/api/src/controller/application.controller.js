@@ -484,6 +484,31 @@ export const saveAnswers = async (req, res, next) => {
 };
 
 /**
+ * Refill form in browser with updated user answers and re-inspect fields
+ */
+export const refillApplicationForm = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user?.userId;
+    const { answers } = req.body || {};
+
+    const updated = await applicationService.refillApplicationFormService(
+      id,
+      userId,
+      answers || []
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Application form refilled and verified successfully in browser",
+      data: updated,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * AI Portal Intelligence: Analyze employer careers portal / application page
  */
 export const analyzePortal = async (req, res, next) => {

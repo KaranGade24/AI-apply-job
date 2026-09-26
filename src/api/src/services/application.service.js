@@ -380,6 +380,48 @@ export const saveEditedAnswersService = async (applicationId, userId, answers = 
 };
 
 /**
+ * Refills the application form in the live browser with user's updated answers and re-inspects the form
+ * @param {string} applicationId
+ * @param {string} userId
+ * @param {Array<object>} answers
+ * @returns {Promise<object>}
+ */
+export const refillApplicationFormService = async (applicationId, userId, answers = []) => {
+  try {
+    const application = await findApplicationById(applicationId);
+    if (!application) {
+      throw new appError("Application not found", 404);
+    }
+
+    if (
+      application.userId._id?.toString() !== userId &&
+      application.userId?.toString() !== userId
+    ) {
+      throw new appError("Unauthorized access to application", 403);
+    }
+
+    await logJobEvent(
+      'refillApplicationFormService',
+      'REFILL_START',
+      `Refilling form in browser for application ${applicationId} with ${answers.length} updated answers...`
+    );
+
+    // Run Naukri application with confirmSubmission = false to re-fill and re-inspect
+    await runNaukriApplication({
+      applicationId,
+      userId,
+      finalEditedAnswers: answers,
+      confirmSubmission: false,
+    });
+
+    return await findApplicationById(applicationId);
+  } catch (error) {
+    await logError('applicationService.refillApplicationFormService', error.message);
+    throw error;
+  }
+};
+
+/**
  * Human Rejection Action: User rejects candidate application draft
  * @param {string} applicationId
  * @param {string} userId

@@ -36,6 +36,7 @@ import {
   submitMissingAnswersApi,
   confirmFinalApplicationApi,
   saveEditedAnswersApi,
+  refillApplicationFormApi,
   analyzePortalApi,
   advancePortalActionApi,
   tailorRoleOutreachApi,
@@ -70,6 +71,8 @@ export const ApplicationReviewModal = ({
   const [reviewAnswers, setReviewAnswers] = useState({});
   const [analyzingPortal, setAnalyzingPortal] = useState(false);
   const [advancingPortal, setAdvancingPortal] = useState(false);
+  const [refillingForm, setRefillingForm] = useState(false);
+  const [savingAnswers, setSavingAnswers] = useState(false);
 
   // Multi-role & Direct Email Outreach state
   const [tailoringRoleId, setTailoringRoleId] = useState(null);
@@ -294,6 +297,58 @@ export const ApplicationReviewModal = ({
       showToast('Submission error: ' + (err.message || 'Please retry'));
     } finally {
       setActionLoading(false);
+    }
+  };
+
+  // Save edited answers without refilling browser
+  const handleSaveAnswers = async () => {
+    if (!application?._id) return;
+    setSavingAnswers(true);
+    try {
+      const formatted = Object.entries(reviewAnswers).map(([questionId, answer]) => ({
+        questionId,
+        answer,
+      }));
+      const res = await saveEditedAnswersApi(application._id, formatted);
+      if (res?.data) {
+        setApplication(res.data);
+      }
+      showToast('Answers saved successfully!');
+      if (onApplicationUpdated) onApplicationUpdated();
+    } catch (err) {
+      showToast('Error saving answers: ' + (err.message || 'Please retry'));
+    } finally {
+      setSavingAnswers(false);
+    }
+  };
+
+  // Refill live browser form with updated user answers and re-inspect fields
+  const handleRefillForm = async () => {
+    if (!application?._id) return;
+    setRefillingForm(true);
+    try {
+      showToast('AI refilling browser form with your updated information and re-verifying...');
+      const formatted = Object.entries(reviewAnswers).map(([questionId, answer]) => ({
+        questionId,
+        answer,
+      }));
+      const res = await refillApplicationFormApi(application._id, formatted);
+      if (res?.data) {
+        setApplication(res.data);
+        if (res.data.form?.reviewFields) {
+          const updatedReview = {};
+          res.data.form.reviewFields.forEach((f) => {
+            updatedReview[f.questionId] = f.answer ?? '';
+          });
+          setReviewAnswers(updatedReview);
+        }
+      }
+      showToast('Form successfully refilled and re-verified in browser!');
+      if (onApplicationUpdated) onApplicationUpdated();
+    } catch (err) {
+      showToast('Refill error: ' + (err.message || 'Please retry'));
+    } finally {
+      setRefillingForm(false);
     }
   };
 
@@ -1163,37 +1218,38 @@ export const ApplicationReviewModal = ({
                         </div>
                       )}
 
-                      {/* CHECKPOINT 2: Final Application Review */}
+                      {/* CHECKPOINT 2: Final Application Review & Interactive Form Refill */}
                       {application?.form?.reviewFields?.length > 0 && (
                         <div className="p-5 rounded-xl border border-blue-200 bg-blue-50/30 space-y-4 shadow-xs">
-                          <div className="flex items-start justify-between gap-3">
+                          <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
                             <div>
                               <div className="flex items-center gap-2">
                                 <span className="px-2 py-0.5 bg-blue-700 text-white rounded text-[10px] font-black uppercase tracking-wider">
                                   Checkpoint 2
                                 </span>
                                 <h3 className="text-sm font-bold text-slate-900">
-                                  Review Your Complete Application Before Submission
+                                  Review & Edit AI-Filled Application Form
                                 </h3>
                               </div>
                               <p className="text-xs text-slate-600 mt-1">
-                                All questionnaire questions are answered. Review every answer below, edit anything if needed, and confirm to submit on Naukri.
+                                Below is the exact information AI detected and filled into the employer's form. You can edit any field, click <strong>"Refill in Browser"</strong> to re-populate the live form and re-inspect, or <strong>"Confirm & Apply"</strong> to complete your application.
                               </p>
                             </div>
                             <span className="text-xs font-bold text-blue-800 bg-blue-100 px-2.5 py-1 rounded-full shrink-0">
-                              {application.form.reviewFields.length} Fields
+                              {application.form.reviewFields.length} Filled Fields
                             </span>
                           </div>
 
                           <div className="space-y-3 pt-1">
                             {application.form.reviewFields.map((field) => (
-                              <div key={field.questionId} className="p-3.5 bg-white rounded-xl border border-slate-200 space-y-2">
+                              <div key={field.questionId} className="p-3.5 bg-white rounded-xl border border-slate-200 space-y-2 shadow-2xs">
                                 <div className="flex items-center justify-between gap-2">
-                                  <label className="text-xs font-bold text-slate-800">
-                                    {field.question}
+                                  <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-blue-600 shrink-0" />
+                                    <span>{field.question}</span>
                                   </label>
                                   <span
-                                    className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                                    className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider ${
                                       field.source === 'profile'
                                         ? 'bg-blue-100 text-blue-800'
                                         : field.source === 'resume'
@@ -1204,35 +1260,37 @@ export const ApplicationReviewModal = ({
                                     }`}
                                   >
                                     {field.source === 'profile'
-                                      ? 'Profile'
+                                      ? 'From Profile'
                                       : field.source === 'resume'
-                                      ? 'Resume'
+                                      ? 'From Resume'
                                       : field.source === 'ai'
                                       ? 'AI Grounded'
-                                      : 'User Answered'}
+                                      : 'User Edit'}
                                   </span>
                                 </div>
 
                                 {field.options && field.options.length > 0 ? (
-                                  <select
-                                    value={reviewAnswers[field.questionId] ?? field.answer ?? ''}
-                                    onChange={(e) =>
-                                      setReviewAnswers((prev) => ({
-                                        ...prev,
-                                        [field.questionId]: e.target.value,
-                                      }))
-                                    }
-                                    className="w-full text-xs p-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:outline-hidden bg-white"
-                                  >
-                                    {field.options.map((opt) => (
-                                      <option key={opt} value={opt}>
-                                        {opt}
-                                      </option>
-                                    ))}
-                                  </select>
+                                  <div className="space-y-1.5">
+                                    <select
+                                      value={reviewAnswers[field.questionId] ?? field.answer ?? ''}
+                                      onChange={(e) =>
+                                        setReviewAnswers((prev) => ({
+                                          ...prev,
+                                          [field.questionId]: e.target.value,
+                                        }))
+                                      }
+                                      className="w-full text-xs p-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:outline-hidden bg-white font-medium"
+                                    >
+                                      {field.options.map((opt) => (
+                                        <option key={opt} value={opt}>
+                                          {opt}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </div>
                                 ) : field.type === 'textarea' ? (
                                   <textarea
-                                    rows={2}
+                                    rows={3}
                                     value={reviewAnswers[field.questionId] ?? field.answer ?? ''}
                                     onChange={(e) =>
                                       setReviewAnswers((prev) => ({
@@ -1240,11 +1298,33 @@ export const ApplicationReviewModal = ({
                                         [field.questionId]: e.target.value,
                                       }))
                                     }
-                                    className="w-full text-xs p-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:outline-hidden"
+                                    placeholder={`Enter ${field.question}...`}
+                                    className="w-full text-xs p-2.5 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:outline-hidden leading-relaxed font-medium"
                                   />
+                                ) : field.type === 'radio' && field.options && field.options.length > 0 ? (
+                                  <div className="flex flex-wrap gap-3 pt-1">
+                                    {field.options.map((opt) => (
+                                      <label key={opt} className="flex items-center gap-2 cursor-pointer text-xs text-slate-700">
+                                        <input
+                                          type="radio"
+                                          name={`radio-${field.questionId}`}
+                                          value={opt}
+                                          checked={(reviewAnswers[field.questionId] ?? field.answer) === opt}
+                                          onChange={() =>
+                                            setReviewAnswers((prev) => ({
+                                              ...prev,
+                                              [field.questionId]: opt,
+                                            }))
+                                          }
+                                          className="text-blue-600 focus:ring-blue-500"
+                                        />
+                                        <span>{opt}</span>
+                                      </label>
+                                    ))}
+                                  </div>
                                 ) : (
                                   <input
-                                    type="text"
+                                    type={field.type === 'number' ? 'number' : 'text'}
                                     value={reviewAnswers[field.questionId] ?? field.answer ?? ''}
                                     onChange={(e) =>
                                       setReviewAnswers((prev) => ({
@@ -1252,14 +1332,38 @@ export const ApplicationReviewModal = ({
                                         [field.questionId]: e.target.value,
                                       }))
                                     }
-                                    className="w-full text-xs p-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:outline-hidden"
+                                    placeholder={`Enter ${field.question}...`}
+                                    className="w-full text-xs p-2.5 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:outline-hidden font-medium"
                                   />
                                 )}
                               </div>
                             ))}
                           </div>
 
-                          <div className="flex justify-end pt-2">
+                          <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-blue-200/60">
+                            <div className="flex items-center gap-2">
+                              <Button
+                                size="xs"
+                                variant="outline"
+                                loading={savingAnswers}
+                                onClick={handleSaveAnswers}
+                                className="text-slate-700 border-slate-300 hover:bg-slate-100 font-bold gap-1 cursor-pointer"
+                              >
+                                <Save className="w-3.5 h-3.5" />
+                                <span>Save Changes</span>
+                              </Button>
+
+                              <Button
+                                size="xs"
+                                loading={refillingForm}
+                                onClick={handleRefillForm}
+                                className="bg-amber-600 hover:bg-amber-700 text-white font-bold gap-1 cursor-pointer shadow-2xs"
+                              >
+                                <RefreshCw className={`w-3.5 h-3.5 ${refillingForm ? 'animate-spin' : ''}`} />
+                                <span>Refill & Re-verify in Browser</span>
+                              </Button>
+                            </div>
+
                             <Button
                               size="sm"
                               loading={actionLoading}
@@ -1267,7 +1371,7 @@ export const ApplicationReviewModal = ({
                               className="bg-blue-600 hover:bg-blue-700 text-white font-bold gap-1.5 cursor-pointer shadow-xs"
                             >
                               <CheckCircle2 className="w-3.5 h-3.5" />
-                              Confirm & Apply on Naukri
+                              <span>Confirm & Apply on Naukri</span>
                             </Button>
                           </div>
                         </div>
