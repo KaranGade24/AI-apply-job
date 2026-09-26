@@ -135,14 +135,13 @@ const discoverJobsNode = async (state) => {
       const type = route.request().resourceType();
       const url = route.request().url();
       if (
-        type === 'image' ||
         type === 'media' ||
         type === 'font' ||
         /(?:googleads|adsbygoogle|doubleclick|googletagservices|googlesyndication|ezoic|adnxs|amazon-adsystem|analytics|tracker|facebook\.net|taboola|outbrain|criteo|pubmatic)/i.test(url)
       ) {
-        return route.abort();
+        return route.abort().catch(() => {});
       }
-      return route.continue();
+      return route.continue().catch(() => {});
     });
 
     page = await context.newPage();

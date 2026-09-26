@@ -7,14 +7,14 @@ import { JobCard } from './JobCard';
 import { ApplicationReviewModal } from '../applications/ApplicationReviewModal';
 import { getDiscoveredJobsApi, discoverJobsApi, deleteJobApi } from '../../services/jobService';
 import { createApplicationApi } from '../../services/applicationService';
-import { getNaukriStatusApi } from '../../services/naukriService';
-import { NaukriConnectModal } from '../naukri/NaukriConnectModal';
+import { useNaukri } from '../../context/NaukriContext';
 import { SettingsContext } from '../../context/SettingsContext';
 
 const AVAILABLE_LOCATIONS = ['Pune', 'Bengaluru', 'Hyderabad', 'Mumbai', 'Remote', 'Delhi NCR', 'Chennai'];
 
 export const JobSearchPage = () => {
   const { settings } = useContext(SettingsContext);
+  const { isConnected, naukriStatus, openNaukriModal, refreshNaukriStatus } = useNaukri();
 
   const [keyword, setKeyword] = useState('');
   const [selectedLocations, setSelectedLocations] = useState([]);
@@ -33,23 +33,12 @@ export const JobSearchPage = () => {
   const [customLocationInput, setCustomLocationInput] = useState('');
   const [selectedSources, setSelectedSources] = useState(['naukri', 'jobViaReferral']);
   const [excludeKeywords, setExcludeKeywords] = useState('Senior, Lead, Manager');
-  const [naukriStatus, setNaukriStatus] = useState(null);
-  const [isNaukriModalOpen, setIsNaukriModalOpen] = useState(false);
 
   const abortControllerRef = useRef(null);
 
   const showToast = (msg) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(''), 3000);
-  };
-
-  const fetchNaukriStatus = async () => {
-    try {
-      const res = await getNaukriStatusApi();
-      if (res.data) setNaukriStatus(res.data);
-    } catch {
-      // ignore
-    }
   };
 
   const fetchJobs = async () => {
@@ -81,7 +70,7 @@ export const JobSearchPage = () => {
 
   useEffect(() => {
     fetchJobs();
-    fetchNaukriStatus();
+    refreshNaukriStatus();
   }, []);
 
   useEffect(() => {
@@ -173,26 +162,22 @@ export const JobSearchPage = () => {
   };
 
   const handleSearch = async () => {
-    // 1. If Naukri is selected, verify live whether user is connected
+    // 1. If Naukri is selected, verify whether user is connected
     if (selectedSources.includes('naukri')) {
-      let isConnected = Boolean(naukriStatus?.connected || naukriStatus?.status === 'connected');
+      let currentConnected = isConnected;
 
-      // Live verification if local state is not yet marked connected
-      if (!isConnected) {
-        try {
-          const res = await getNaukriStatusApi();
-          if (res.data?.connected || res.data?.status === 'connected') {
-            isConnected = true;
-            setNaukriStatus(res.data);
-          }
-        } catch {
-          isConnected = false;
-        }
+      // Check live status if not already connected in state
+      if (!currentConnected) {
+        const fresh = await refreshNaukriStatus();
+        currentConnected = Boolean(fresh?.connected === true || fresh?.status === 'connected');
       }
 
-      // If NOT connected, open connection window
-      if (!isConnected) {
-        setIsNaukriModalOpen(true);
+      // If NOT connected, open connection window and search automatically after connect
+      if (!currentConnected) {
+        openNaukriModal(() => {
+          showToast('Naukri session connected! Searching jobs now...');
+          executeJobSearch();
+        });
         showToast('Naukri connection is required to search on Naukri. Please connect your account.');
         return;
       }
@@ -423,7 +408,7 @@ export const JobSearchPage = () => {
                 }`}
               >
                 <span>Naukri</span>
-                {naukriStatus?.connected ? (
+                {isConnected ? (
                   <span className="w-2 h-2 rounded-full bg-emerald-400" title="Connected" />
                 ) : (
                   <span className="w-2 h-2 rounded-full bg-amber-400" title="Session required" />
@@ -453,10 +438,14 @@ export const JobSearchPage = () => {
             {/* Quick Naukri Session Manager Trigger */}
             <button
               type="button"
-              onClick={() => setIsNaukriModalOpen(true)}
-              className="text-xs font-semibold text-blue-600 hover:text-blue-800 underline flex items-center gap-1 self-start sm:self-auto cursor-pointer"
+              onClick={() => openNaukriModal()}
+              className={`text-xs font-bold flex items-center gap-1.5 self-start sm:self-auto cursor-pointer transition-colors px-2.5 py-1 rounded-md border ${
+                isConnected
+                  ? 'text-emerald-700 bg-emerald-50 border-emerald-200 hover:bg-emerald-100'
+                  : 'text-amber-800 bg-amber-50 border-amber-200 hover:bg-amber-100'
+              }`}
             >
-              {naukriStatus?.connected ? '✓ Naukri Session Active (Manage)' : '⚠️ Connect Naukri Session'}
+              {isConnected ? '✓ Naukri Session Active (Manage)' : '⚠️ Connect Naukri Session'}
             </button>
           </div>
 
@@ -580,22 +569,6 @@ export const JobSearchPage = () => {
           onApplicationUpdated={fetchJobs}
         />
       )}
-
-      {/* Naukri Session Modal */}
-      <NaukriConnectModal
-        isOpen={isNaukriModalOpen}
-        onClose={() => setIsNaukriModalOpen(false)}
-        onStatusChange={(data) => {
-          setNaukriStatus(data);
-          if (data?.connected || data?.status === 'connected') {
-            setIsNaukriModalOpen(false);
-            showToast('Naukri session connected! Searching jobs now...');
-            executeJobSearch();
-          } else {
-            fetchJobs();
-          }
-        }}
-      />
     </div>
   );
 };

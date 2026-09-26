@@ -1,14 +1,12 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import {
   X,
   ShieldCheck,
-  Lock,
-  Globe,
   CheckCircle2,
   AlertCircle,
   KeyRound,
   FileCode,
-  Loader2,
   RefreshCw,
   LogOut,
   ExternalLink
@@ -20,10 +18,13 @@ import {
   saveNaukriSessionApi,
   disconnectNaukriApi
 } from '../../services/naukriService';
+import { useNaukri } from '../../context/NaukriContext';
 
 export const NaukriConnectModal = ({ isOpen, onClose, onStatusChange }) => {
+  const { setNaukriStatus, naukriStatus: contextStatus } = useNaukri();
+
   const [loading, setLoading] = useState(false);
-  const [statusData, setStatusData] = useState(null);
+  const [statusData, setStatusData] = useState(contextStatus || null);
   const [activeTab, setActiveTab] = useState('browser'); // 'browser' | 'cookies'
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -36,11 +37,11 @@ export const NaukriConnectModal = ({ isOpen, onClose, onStatusChange }) => {
       setLoading(true);
       setErrorMessage('');
       const res = await getNaukriStatusApi();
-      if (res.data) {
-        setStatusData(res.data);
-      }
+      const data = res?.data || res || {};
+      setStatusData(data);
+      if (setNaukriStatus) setNaukriStatus(data);
     } catch (err) {
-      setErrorMessage(err.response?.data?.message || 'Failed to fetch Naukri status.');
+      setErrorMessage(err.message || 'Failed to fetch Naukri status.');
     } finally {
       setLoading(false);
     }
@@ -51,6 +52,20 @@ export const NaukriConnectModal = ({ isOpen, onClose, onStatusChange }) => {
       fetchStatus();
       setErrorMessage('');
       setSuccessMessage('');
+      document.body.style.overflow = 'hidden';
+
+      const handleKeyDown = (e) => {
+        if (e.key === 'Escape') {
+          onClose?.();
+        }
+      };
+      window.addEventListener('keydown', handleKeyDown);
+      return () => {
+        document.body.style.overflow = 'unset';
+        window.removeEventListener('keydown', handleKeyDown);
+      };
+    } else {
+      document.body.style.overflow = 'unset';
     }
   }, [isOpen]);
 
@@ -60,10 +75,11 @@ export const NaukriConnectModal = ({ isOpen, onClose, onStatusChange }) => {
       setErrorMessage('');
       setSuccessMessage('');
       const res = await connectNaukriApi();
-      const data = res.data;
+      const data = res?.data || res || {};
       setStatusData(data);
+      if (setNaukriStatus) setNaukriStatus(data);
 
-      if (data.authenticated && data.status === 'connected') {
+      if (data.authenticated || data.connected || data.status === 'connected') {
         setSuccessMessage('Naukri session is active and verified!');
         if (onStatusChange) onStatusChange(data);
       } else {
@@ -73,7 +89,7 @@ export const NaukriConnectModal = ({ isOpen, onClose, onStatusChange }) => {
       }
     } catch (err) {
       setErrorMessage(
-        err.response?.data?.message || 'Failed to connect to Naukri. Please check connection.'
+        err.message || 'Failed to connect to Naukri. Please check connection.'
       );
     } finally {
       setLoading(false);
@@ -99,14 +115,16 @@ export const NaukriConnectModal = ({ isOpen, onClose, onStatusChange }) => {
         }
       });
 
-      const data = res.data;
+      const data = res?.data || res || {};
       setStatusData(data);
+      if (setNaukriStatus) setNaukriStatus(data);
+
       setSuccessMessage('Naukri authenticated successfully! Encrypted session stored.');
       setPassword(''); // Clear password immediately from component memory
       if (onStatusChange) onStatusChange(data);
     } catch (err) {
       setErrorMessage(
-        err.response?.data?.message || 'Login failed. Please verify your credentials or use cookie import.'
+        err.message || 'Login failed. Please verify your credentials or use cookie import.'
       );
     } finally {
       setLoading(false);
@@ -136,7 +154,6 @@ export const NaukriConnectModal = ({ isOpen, onClose, onStatusChange }) => {
           payload.cookies = [parsed];
         }
       } catch {
-        // Plain string format or cookie header line format: name=val; name2=val2
         const rawCookies = cookiesInput
           .split(';')
           .map((part) => {
@@ -149,14 +166,16 @@ export const NaukriConnectModal = ({ isOpen, onClose, onStatusChange }) => {
       }
 
       const res = await saveNaukriSessionApi(payload);
-      const data = res.data;
+      const data = res?.data || res || {};
       setStatusData(data);
+      if (setNaukriStatus) setNaukriStatus(data);
+
       setSuccessMessage('Naukri session imported and verified successfully!');
       setCookiesInput('');
       if (onStatusChange) onStatusChange(data);
     } catch (err) {
       setErrorMessage(
-        err.response?.data?.message || 'Failed to import session. Please verify cookie validity.'
+        err.message || 'Failed to import session. Please verify cookie validity.'
       );
     } finally {
       setLoading(false);
@@ -170,11 +189,13 @@ export const NaukriConnectModal = ({ isOpen, onClose, onStatusChange }) => {
       setLoading(true);
       setErrorMessage('');
       await disconnectNaukriApi();
-      setStatusData({ connected: false, status: 'disconnected', userName: '' });
+      const disconnectedState = { connected: false, status: 'disconnected', userName: '' };
+      setStatusData(disconnectedState);
+      if (setNaukriStatus) setNaukriStatus(disconnectedState);
       setSuccessMessage('Naukri account disconnected.');
-      if (onStatusChange) onStatusChange({ connected: false, status: 'disconnected' });
+      if (onStatusChange) onStatusChange(disconnectedState);
     } catch (err) {
-      setErrorMessage(err.response?.data?.message || 'Failed to disconnect.');
+      setErrorMessage(err.message || 'Failed to disconnect.');
     } finally {
       setLoading(false);
     }
@@ -182,16 +203,26 @@ export const NaukriConnectModal = ({ isOpen, onClose, onStatusChange }) => {
 
   if (!isOpen) return null;
 
-  const isConnected = statusData?.connected || statusData?.status === 'connected';
+  const isConnected = Boolean(
+    statusData?.connected === true ||
+    statusData?.status === 'connected' ||
+    statusData?.authenticated === true
+  );
   const isAuthRequired = statusData?.status === 'authenticationRequired';
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200">
-      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
+  const modalContent = (
+    <div
+      className="fixed inset-0 z-[99999] flex items-center justify-center p-4 sm:p-6 bg-slate-950/75 backdrop-blur-sm overflow-y-auto"
+      onClick={onClose}
+    >
+      <div
+        className="relative w-full max-w-lg bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col my-auto max-h-[92vh]"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Header */}
-        <div className="flex items-center justify-between p-5 border-b border-slate-100 bg-slate-50/50">
+        <div className="flex items-center justify-between p-5 border-b border-slate-100 bg-slate-50/80">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center text-white font-extrabold shadow-sm">
+            <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center text-white font-black text-lg shadow-sm">
               N
             </div>
             <div>
@@ -200,6 +231,7 @@ export const NaukriConnectModal = ({ isOpen, onClose, onStatusChange }) => {
             </div>
           </div>
           <button
+            type="button"
             onClick={onClose}
             className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 rounded-lg transition-colors cursor-pointer"
           >
@@ -208,25 +240,25 @@ export const NaukriConnectModal = ({ isOpen, onClose, onStatusChange }) => {
         </div>
 
         {/* Content Body */}
-        <div className="p-6 space-y-5 overflow-y-auto">
+        <div className="p-6 space-y-4 overflow-y-auto">
           {/* Security Notice */}
-          <div className="flex items-start gap-2.5 p-3 rounded-xl bg-emerald-50/80 border border-emerald-200/80 text-emerald-800 text-xs">
+          <div className="flex items-start gap-2.5 p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs">
             <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
             <p className="leading-relaxed">
-              <strong className="font-semibold">Security Boundary:</strong> Your credentials are never stored. Only the authenticated browser session is encrypted with <strong className="font-semibold">AES-256-GCM</strong> and securely reused.
+              <strong className="font-semibold">Security Boundary:</strong> Credentials are never stored. Only the authenticated browser session is encrypted with <strong className="font-semibold">AES-256-GCM</strong>.
             </p>
           </div>
 
-          {/* Status Display */}
-          <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/60 space-y-2">
+          {/* Status Display Card */}
+          <div className="p-4 rounded-xl border border-slate-200 bg-slate-50 space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Session Status</span>
               {isConnected ? (
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800">
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
                   <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> Connected
                 </span>
               ) : isAuthRequired ? (
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800">
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-200">
                   <AlertCircle className="w-3.5 h-3.5 text-amber-600" /> Session Expired
                 </span>
               ) : (
@@ -249,13 +281,13 @@ export const NaukriConnectModal = ({ isOpen, onClose, onStatusChange }) => {
               </p>
             )}
 
-            <div className="pt-2 flex items-center gap-2">
+            <div className="pt-2 flex items-center gap-2 flex-wrap">
               <Button
                 variant="outline"
                 size="sm"
                 onClick={handleTestOrConnect}
                 loading={loading}
-                className="text-xs font-semibold flex items-center gap-1.5"
+                className="text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
               >
                 <RefreshCw className="w-3.5 h-3.5" />
                 {isConnected ? 'Re-verify Session' : 'Check Session on Naukri'}
@@ -267,7 +299,7 @@ export const NaukriConnectModal = ({ isOpen, onClose, onStatusChange }) => {
                   size="sm"
                   onClick={handleDisconnect}
                   disabled={loading}
-                  className="text-xs font-semibold text-rose-600 border-rose-200 hover:bg-rose-50"
+                  className="text-xs font-semibold text-rose-600 border-rose-200 hover:bg-rose-50 cursor-pointer"
                 >
                   <LogOut className="w-3.5 h-3.5" /> Disconnect
                 </Button>
@@ -292,7 +324,7 @@ export const NaukriConnectModal = ({ isOpen, onClose, onStatusChange }) => {
 
           {/* Connect / Reconnect Actions */}
           {(!isConnected || isAuthRequired) && (
-            <div className="space-y-4 pt-2">
+            <div className="space-y-4 pt-1">
               <div className="flex border-b border-slate-200">
                 <button
                   type="button"
@@ -333,7 +365,7 @@ export const NaukriConnectModal = ({ isOpen, onClose, onStatusChange }) => {
                       placeholder="e.g. name@example.com"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-900"
                     />
                   </div>
 
@@ -347,7 +379,7 @@ export const NaukriConnectModal = ({ isOpen, onClose, onStatusChange }) => {
                       placeholder="••••••••••••"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-900"
                     />
                   </div>
 
@@ -371,7 +403,7 @@ export const NaukriConnectModal = ({ isOpen, onClose, onStatusChange }) => {
                     placeholder='[{"name": "nlogin", "value": "..."}, {"name": "cId", "value": "..."}]'
                     value={cookiesInput}
                     onChange={(e) => setCookiesInput(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-900"
                   />
                   <div className="flex items-center justify-between">
                     <a
@@ -399,13 +431,15 @@ export const NaukriConnectModal = ({ isOpen, onClose, onStatusChange }) => {
 
         {/* Footer */}
         <div className="p-4 border-t border-slate-100 bg-slate-50 flex items-center justify-end">
-          <Button variant="ghost" size="sm" onClick={onClose} className="text-xs font-semibold">
+          <Button variant="ghost" size="sm" onClick={onClose} className="text-xs font-semibold cursor-pointer">
             Close
           </Button>
         </div>
       </div>
     </div>
   );
+
+  return typeof document !== 'undefined' ? createPortal(modalContent, document.body) : null;
 };
 
 export default NaukriConnectModal;

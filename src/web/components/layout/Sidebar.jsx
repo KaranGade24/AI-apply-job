@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -8,25 +8,14 @@ import {
   Bot,
   Settings,
   LogOut,
-  Sparkles,
-  Globe
+  Sparkles
 } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
-import { getNaukriStatusApi } from '../../services/naukriService';
-import { NaukriConnectModal } from '../../features/naukri/NaukriConnectModal';
+import { useNaukri } from '../../context/NaukriContext';
 
 export const Sidebar = () => {
   const { user, logout } = useAuth();
-  const [isNaukriModalOpen, setIsNaukriModalOpen] = useState(false);
-  const [naukriConnected, setNaukriConnected] = useState(false);
-
-  useEffect(() => {
-    getNaukriStatusApi()
-      .then((res) => {
-        if (res.data?.connected) setNaukriConnected(true);
-      })
-      .catch(() => {});
-  }, []);
+  const { isConnected, openNaukriModal } = useNaukri();
 
   const navItems = [
     { label: 'Dashboard', path: '/', icon: LayoutDashboard },
@@ -82,23 +71,24 @@ export const Sidebar = () => {
           <div className="pt-2 border-t border-slate-800/60 mt-2">
             <button
               type="button"
-              onClick={() => setIsNaukriModalOpen(true)}
+              onClick={() => openNaukriModal()}
               className="w-full flex items-center justify-between px-3.5 py-2.5 rounded-lg text-sm font-medium text-slate-300 hover:bg-slate-800/80 hover:text-white transition-colors cursor-pointer group"
+              title={isConnected ? 'Naukri account connected' : 'Click to connect Naukri account'}
             >
               <div className="flex items-center gap-3">
-                <div className="w-4 h-4 rounded bg-blue-600 text-white text-[10px] font-black flex items-center justify-center shrink-0">
+                <div className="w-5 h-5 rounded bg-blue-600 text-white text-[11px] font-black flex items-center justify-center shrink-0">
                   N
                 </div>
                 <span>Naukri</span>
               </div>
               <span
                 className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                  naukriConnected
+                  isConnected
                     ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
                     : 'bg-slate-800 text-slate-400 border border-slate-700'
                 }`}
               >
-                {naukriConnected ? 'Connected' : 'Connect'}
+                {isConnected ? 'Connected' : 'Connect'}
               </span>
             </button>
           </div>
@@ -126,18 +116,8 @@ export const Sidebar = () => {
           </button>
         </div>
       </div>
-
-      <NaukriConnectModal
-        isOpen={isNaukriModalOpen}
-        onClose={() => setIsNaukriModalOpen(false)}
-        onStatusChange={(data) => {
-          if (data?.connected || data?.status === 'connected') {
-            setNaukriConnected(true);
-          } else {
-            setNaukriConnected(false);
-          }
-        }}
-      />
     </aside>
   );
 };
+
+export default Sidebar;

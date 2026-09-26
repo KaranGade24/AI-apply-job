@@ -15,7 +15,7 @@ export const mapFreshnessDays = (postedWithin) => {
   if (lower.includes('15d') || lower === '15') return 15;
   if (lower.includes('30d') || lower.includes('1m') || lower === '30') return 30;
 
-  return 7; // Default to last 7 days
+  return 7;
 };
 
 /**
@@ -42,86 +42,99 @@ export const mapWorkModes = (workModes = []) => {
 
 /**
  * Maps universal search configuration to Naukri search URLs and filters
+ * Generates primary and fallback candidate search URLs
  * @param {object} searchConfig
- * @returns {{ targetUrl: string, searchParams: URLSearchParams, keywords: string[], locations: string[], minExp: number, maxExp: number }}
+ * @returns {{ targetUrl: string, candidateUrls: string[], keywords: string[], locations: string[], minExp: number, maxExp: number }}
  */
 export const mapUniversalFiltersToNaukri = (searchConfig = {}) => {
-  const keywords = Array.isArray(searchConfig.keywords)
-    ? searchConfig.keywords
-    : searchConfig.keywords
-    ? [searchConfig.keywords]
-    : [];
+  let rawKeywords = searchConfig.keywords || [];
+  if (typeof rawKeywords === 'string') {
+    rawKeywords = rawKeywords.split(',').map((k) => k.trim()).filter(Boolean);
+  } else if (Array.isArray(rawKeywords)) {
+    rawKeywords = rawKeywords.flatMap((k) =>
+      typeof k === 'string' ? k.split(',').map((x) => x.trim()).filter(Boolean) : []
+    );
+  }
 
-  const locations = Array.isArray(searchConfig.locations)
-    ? searchConfig.locations
-    : searchConfig.locations
-    ? [searchConfig.locations]
-    : [];
+  const keywords = rawKeywords.length > 0 ? rawKeywords : ['Software Engineer'];
+
+  let rawLocations = searchConfig.locations || [];
+  if (typeof rawLocations === 'string') {
+    rawLocations = rawLocations.split(',').map((l) => l.trim()).filter(Boolean);
+  } else if (Array.isArray(rawLocations)) {
+    rawLocations = rawLocations.flatMap((l) =>
+      typeof l === 'string' ? l.split(',').map((x) => x.trim()).filter(Boolean) : []
+    );
+  }
+
+  const locations = rawLocations.length > 0 ? rawLocations : ['Pune'];
 
   const minExp = typeof searchConfig.experience?.min === 'number' ? searchConfig.experience.min : 0;
   const maxExp = typeof searchConfig.experience?.max === 'number' ? searchConfig.experience.max : 2;
 
-  // Construct URL parameters
-  const params = new URLSearchParams();
-
-  if (keywords.length > 0) {
-    params.set('k', keywords.join(' '));
-  } else {
-    params.set('k', 'Software Engineer');
-  }
-
-  if (locations.length > 0) {
-    // Filter out "Remote" from geographic locations to avoid Naukri city mismatch
-    const geoLocations = locations.filter((l) => l.toLowerCase() !== 'remote');
-    if (geoLocations.length > 0) {
-      params.set('l', geoLocations.join(', '));
-    }
-  }
-
-  if (minExp !== undefined && minExp !== null) {
-    params.set('experience', String(minExp));
-  }
-
-  const freshness = mapFreshnessDays(searchConfig.postedWithin);
-  if (freshness) {
-    params.set('freshness', String(freshness));
-  }
-
-  const workModes = mapWorkModes(searchConfig.workMode);
-  if (workModes.includes('wfh') && !workModes.includes('office')) {
-    params.set('wfhType', '0'); // Naukri Remote/WFH
-  }
-
-  // Construct clean base search URL
-  let keywordSlug = (keywords[0] || 'jobs')
+  // Primary keyword and location slugs
+  const primaryKeyword = keywords[0] || 'Software Engineer';
+  const primaryKeywordSlug = primaryKeyword
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-|-$/g, '');
 
-  let locationSlug = '';
-  if (locations.length > 0 && locations[0].toLowerCase() !== 'remote') {
-    locationSlug = locations[0]
+  const geoLocations = locations.filter((l) => l.toLowerCase() !== 'remote');
+  const primaryLocation = geoLocations[0] || 'Pune';
+  const primaryLocationSlug = primaryLocation
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
+
+  const candidateUrls = [];
+
+  // Candidate 1: Direct Clean Naukri Slug URL (Most reliable on modern Naukri)
+  // e.g. https://www.naukri.com/mern-developer-jobs-in-pune?experience=0
+  candidateUrls.push(
+    `https://www.naukri.com/${primaryKeywordSlug}-jobs-in-${primaryLocationSlug}?experience=${minExp}`
+  );
+
+  // Candidate 2: Clean Naukri Slug without query params
+  // e.g. https://www.naukri.com/mern-developer-jobs-in-pune
+  candidateUrls.push(
+    `https://www.naukri.com/${primaryKeywordSlug}-jobs-in-${primaryLocationSlug}`
+  );
+
+  // Candidate 3: Secondary keyword if available (e.g. Node js Developer)
+  if (keywords.length > 1) {
+    const secondaryKeyword = keywords[1];
+    const secondarySlug = secondaryKeyword
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-|-$/g, '');
+    candidateUrls.push(
+      `https://www.naukri.com/${secondarySlug}-jobs-in-${primaryLocationSlug}?experience=${minExp}`
+    );
+    candidateUrls.push(
+      `https://www.naukri.com/${secondarySlug}-jobs-in-${primaryLocationSlug}`
+    );
   }
 
-  let basePath = `${keywordSlug}-jobs`;
-  if (locationSlug) {
-    basePath += `-in-${locationSlug}`;
-  }
+  // Candidate 4: Query parameter search
+  // e.g. https://www.naukri.com/jobs-in-pune?k=MERN+Developer&experience=0
+  candidateUrls.push(
+    `https://www.naukri.com/jobs-in-${primaryLocationSlug}?k=${encodeURIComponent(primaryKeyword)}&experience=${minExp}`
+  );
 
-  const targetUrl = `${NAUKRI_URLS.BASE_SEARCH}/${basePath}?${params.toString()}`;
+  // Candidate 5: Generic keyword search
+  // e.g. https://www.naukri.com/${primaryKeywordSlug}-jobs
+  candidateUrls.push(`https://www.naukri.com/${primaryKeywordSlug}-jobs`);
+
+  // Remove duplicates
+  const uniqueCandidateUrls = Array.from(new Set(candidateUrls));
 
   return {
-    targetUrl,
-    searchParams: params,
+    targetUrl: uniqueCandidateUrls[0],
+    candidateUrls: uniqueCandidateUrls,
     keywords,
     locations,
     minExp,
-    maxExp,
-    workModes,
-    freshness
+    maxExp
   };
 };
 

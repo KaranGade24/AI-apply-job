@@ -24,12 +24,12 @@ import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { getApplicationsApi } from '../../services/applicationService';
 import { getDiscoveredJobsApi, deleteJobApi } from '../../services/jobService';
-import { getNaukriStatusApi } from '../../services/naukriService';
-import { NaukriConnectModal } from '../naukri/NaukriConnectModal';
+import { useNaukri } from '../../context/NaukriContext';
 
 export const DashboardPage = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const { isConnected, naukriStatus, openNaukriModal, refreshNaukriStatus } = useNaukri();
 
   const [stats, setStats] = useState({
     totalJobs: 0,
@@ -42,8 +42,6 @@ export const DashboardPage = () => {
   const [approvedJobs, setApprovedJobs] = useState(new Set());
   const [activities, setActivities] = useState([]);
   const [tailoredResumes, setTailoredResumes] = useState([]);
-  const [naukriStatus, setNaukriStatus] = useState(null);
-  const [isNaukriModalOpen, setIsNaukriModalOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
 
   const showToast = (msg) => {
@@ -55,9 +53,9 @@ export const DashboardPage = () => {
     Promise.all([
       getApplicationsApi({ limit: 100 }),
       getDiscoveredJobsApi(),
-      getNaukriStatusApi().catch(() => ({ data: { connected: false, status: 'disconnected' } }))
+      refreshNaukriStatus()
     ])
-      .then(([appsRes, jobsRes, naukriRes]) => {
+      .then(([appsRes, jobsRes]) => {
         const apps = appsRes.data || [];
         const jobs = jobsRes.data || [];
         const interviews = apps.filter((a) => a.status === 'Interview').length;
@@ -72,10 +70,6 @@ export const DashboardPage = () => {
         });
 
         setMatchedJobs(jobs);
-
-        if (naukriRes?.data) {
-          setNaukriStatus(naukriRes.data);
-        }
 
         // Dynamic activities from real applications
         const recentActivities = apps.slice(0, 5).map((app, idx) => {
@@ -213,7 +207,7 @@ export const DashboardPage = () => {
             <Button
               size="sm"
               variant={isNaukriConnected ? 'outline' : 'default'}
-              onClick={() => setIsNaukriModalOpen(true)}
+              onClick={() => openNaukriModal(() => loadData())}
               className="text-xs font-bold cursor-pointer"
             >
               {isNaukriConnected ? 'Manage Naukri Session' : 'Connect Naukri'}
@@ -492,16 +486,6 @@ export const DashboardPage = () => {
           )}
         </div>
       </Card>
-
-      {/* Naukri Connect Modal */}
-      <NaukriConnectModal
-        isOpen={isNaukriModalOpen}
-        onClose={() => setIsNaukriModalOpen(false)}
-        onStatusChange={(data) => {
-          setNaukriStatus(data);
-          loadData();
-        }}
-      />
     </div>
   );
 };
