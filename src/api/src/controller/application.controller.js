@@ -484,6 +484,46 @@ export const saveAnswers = async (req, res, next) => {
 };
 
 /**
+ * AI Portal Intelligence: Analyze employer careers portal / application page
+ */
+export const analyzePortal = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user?.userId;
+
+    const updated = await applicationService.analyzeEmployerPortalService(id, userId);
+
+    return res.status(200).json({
+      success: true,
+      message: "Employer portal analyzed successfully with AI",
+      data: updated,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Advance employer portal action (e.g. click matched role accordion / inner Apply Now)
+ */
+export const advancePortalAction = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user?.userId;
+
+    const updated = await applicationService.advanceEmployerPortalActionService(id, userId);
+
+    return res.status(200).json({
+      success: true,
+      message: "Portal action executed successfully",
+      data: updated,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * Delete a job application
  */
 export const deleteApplication = async (req, res, next) => {

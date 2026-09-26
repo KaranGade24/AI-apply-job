@@ -93,4 +93,17 @@ export const confirmFinalApplicationApi = async (id, confirmedAnswers = []) => {
   });
 };
 
+export const analyzePortalApi = async (id) => {
+  return await fetchWithAuth(`/applications/${id}/analyze-portal`, {
+    method: 'POST',
+  });
+};
+
+export const advancePortalActionApi = async (id) => {
+  return await fetchWithAuth(`/applications/${id}/advance-portal`, {
+    method: 'POST',
+  });
+};
+
+
 

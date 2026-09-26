@@ -25,6 +25,8 @@ applicationRouter.post("/:id/tailor", authMiddleware, applicationController.tail
 applicationRouter.post("/:id/answers", authMiddleware, applicationController.submitAnswers);
 applicationRouter.put("/:id/answers", authMiddleware, applicationController.saveAnswers);
 applicationRouter.post("/:id/confirm", authMiddleware, applicationController.confirmFinal);
+applicationRouter.post("/:id/analyze-portal", authMiddleware, applicationController.analyzePortal);
+applicationRouter.post("/:id/advance-portal", authMiddleware, applicationController.advancePortalAction);
 
 /**
  * @swagger

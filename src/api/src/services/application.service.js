@@ -18,6 +18,12 @@ import { sendApplicationEmail } from "../integrations/email/emailService.js";
 import { formatAndCleanEmailBody } from "../agent/prompt/applicationEmail.js";
 import { getActiveResumeByUserId } from "../repositories/resume.repository.js";
 import { runNaukriApplication } from "../integrations/applicationPlatforms/naukri/naukriApplication.js";
+import { extractPageContent } from "../application/pageAnalysis/pageContentExtractor.js";
+import { classifyPageWithLlm } from "../application/pageAnalysis/pageClassifierLlm.js";
+import { navigatePortalWithAiDecision } from "../application/pageAnalysis/pageNavigator.js";
+import { BrowserManager } from "../browser/browserManager.js";
+import { findNaukriAccountByUserId } from "../repositories/naukriAccount.repository.js";
+import { decryptValue } from "../utils/encryption.js";
 import { logError, logJobEvent } from "../utils/logger.js";
 import { appError } from "../utils/errors.js";
 
@@ -892,3 +898,214 @@ ${candidateName}`,
     throw error;
   }
 };
+
+/**
+ * AI Portal Intelligence:
+ * Opens the rendered employer careers portal / application page, extracts DOM content,
+ * and uses Gemini LLM to analyze the page structure (openings list / accordion / form / email).
+ *
+ * @param {string} applicationId
+ * @param {string} userId
+ * @returns {Promise<object>} Updated application with pageAnalysis
+ */
+export const analyzeEmployerPortalService = async (applicationId, userId) => {
+  let browser = null;
+  let context = null;
+  let page = null;
+
+  try {
+    const application = await findApplicationById(applicationId);
+    if (!application) {
+      throw new appError("Application not found", 404);
+    }
+
+    const job = application.jobId || {};
+    const jobUrl = job.applicationUrl || job.sourceUrl;
+    if (!jobUrl) {
+      throw new appError("Job application URL is missing", 400);
+    }
+
+    // Retrieve active session if available
+    const naukriAccount = await findNaukriAccountByUserId(userId);
+    let sessionState = null;
+    if (naukriAccount?.encryptedStorageState?.cipherText) {
+      try {
+        const decrypted = decryptValue(naukriAccount.encryptedStorageState);
+        sessionState = JSON.parse(decrypted);
+      } catch (err) {
+        await logError("analyzeEmployerPortalService.decrypt", err.message);
+      }
+    }
+
+    browser = await BrowserManager.launch();
+    context = await BrowserManager.createContext(
+      browser,
+      sessionState ? { storageState: sessionState } : {}
+    );
+    page = await context.newPage();
+
+    await updateApplicationStatus(applicationId, APPLICATION_STATUS.ANALYZING_PORTAL, {
+      logMessage: `Opening and analyzing employer portal for "${job.title}"...`,
+    });
+
+    await page.goto(jobUrl, { waitUntil: "domcontentloaded", timeout: 25000 }).catch(async () => {
+      await page.evaluate(() => window.stop()).catch(() => {});
+    });
+    await page.waitForTimeout(2000);
+
+    // If on Naukri job page with #company-site-button, click it to reach the actual company portal
+    let activePage = page;
+    const companySiteBtn = page
+      .locator(
+        '#company-site-button, button:has-text("Apply on company site"), a:has-text("Apply on company site")'
+      )
+      .first();
+    const hasCompanySiteBtn = await companySiteBtn.isVisible().catch(() => false);
+
+    if (hasCompanySiteBtn) {
+      await logJobEvent(
+        "analyzeEmployerPortalService",
+        "NAVIGATE_EXTERNAL",
+        "Clicking #company-site-button to navigate to employer careers site"
+      );
+      const newPagePromise = context.waitForEvent("page", { timeout: 6000 }).catch(() => null);
+      await companySiteBtn.click().catch(() => {});
+      const popup = await newPagePromise;
+      if (popup) {
+        await popup.waitForLoadState("domcontentloaded").catch(() => {});
+        activePage = popup;
+      }
+      await activePage.waitForTimeout(3000);
+    }
+
+    // Extract rendered page content
+    const extracted = await extractPageContent(activePage);
+
+    // Send to Gemini AI LLM for semantic classification and next action decision
+    const analysis = await classifyPageWithLlm(extracted, job, userId);
+
+    const updated = await JobApplication.findByIdAndUpdate(
+      applicationId,
+      {
+        pageAnalysis: {
+          ...analysis,
+          pageTitle: extracted.title,
+          currentUrl: activePage.url(),
+          analyzedAt: new Date(),
+        },
+      },
+      { new: true }
+    ).populate("jobId");
+
+    await updateApplicationStatus(applicationId, APPLICATION_STATUS.WAITING_FOR_REVIEW, {
+      logMessage: `AI analyzed page: ${analysis.pageType}. ${analysis.summary}`,
+    });
+
+    return updated;
+  } catch (error) {
+    await logError("applicationService.analyzeEmployerPortalService", error.message);
+    throw error;
+  } finally {
+    await BrowserManager.closeSafely({ page, context, browser });
+  }
+};
+
+/**
+ * Advances the employer portal action based on the AI decision
+ * (e.g. clicks the matched role accordion like "Node JS Developer" and its inner "Apply Now" button)
+ *
+ * @param {string} applicationId
+ * @param {string} userId
+ * @returns {Promise<object>} Updated application record
+ */
+export const advanceEmployerPortalActionService = async (applicationId, userId) => {
+  let browser = null;
+  let context = null;
+  let page = null;
+
+  try {
+    const application = await findApplicationById(applicationId);
+    if (!application) {
+      throw new appError("Application not found", 404);
+    }
+
+    const job = application.jobId || {};
+    const portalUrl = application.pageAnalysis?.currentUrl || job.applicationUrl || job.sourceUrl;
+
+    const naukriAccount = await findNaukriAccountByUserId(userId);
+    let sessionState = null;
+    if (naukriAccount?.encryptedStorageState?.cipherText) {
+      try {
+        const decrypted = decryptValue(naukriAccount.encryptedStorageState);
+        sessionState = JSON.parse(decrypted);
+      } catch (err) {}
+    }
+
+    browser = await BrowserManager.launch();
+    context = await BrowserManager.createContext(
+      browser,
+      sessionState ? { storageState: sessionState } : {}
+    );
+    page = await context.newPage();
+
+    await page.goto(portalUrl, { waitUntil: "domcontentloaded", timeout: 25000 }).catch(async () => {
+      await page.evaluate(() => window.stop()).catch(() => {});
+    });
+    await page.waitForTimeout(2000);
+
+    // If still on Naukri job page with company site button
+    let activePage = page;
+    const companySiteBtn = page
+      .locator(
+        '#company-site-button, button:has-text("Apply on company site"), a:has-text("Apply on company site")'
+      )
+      .first();
+    if (await companySiteBtn.isVisible().catch(() => false)) {
+      const newPagePromise = context.waitForEvent("page", { timeout: 6000 }).catch(() => null);
+      await companySiteBtn.click().catch(() => {});
+      const popup = await newPagePromise;
+      if (popup) {
+        await popup.waitForLoadState("domcontentloaded").catch(() => {});
+        activePage = popup;
+      }
+      await activePage.waitForTimeout(3000);
+    }
+
+    // Re-verify current page content or execute action
+    const currentAnalysis = application.pageAnalysis || {};
+    const navResult = await navigatePortalWithAiDecision(activePage, currentAnalysis, context);
+    if (navResult.newPage) {
+      activePage = navResult.newPage;
+    }
+    await activePage.waitForTimeout(2500);
+
+    // Re-inspect the new state after clicking the matched role's Apply button
+    const postExtracted = await extractPageContent(activePage);
+    const postAnalysis = await classifyPageWithLlm(postExtracted, job, userId);
+
+    const updated = await JobApplication.findByIdAndUpdate(
+      applicationId,
+      {
+        pageAnalysis: {
+          ...postAnalysis,
+          pageTitle: postExtracted.title,
+          currentUrl: activePage.url(),
+          analyzedAt: new Date(),
+        },
+      },
+      { new: true }
+    ).populate("jobId");
+
+    await updateApplicationStatus(applicationId, APPLICATION_STATUS.WAITING_FOR_REVIEW, {
+      logMessage: `Advanced portal action: ${navResult.message}. New state: ${postAnalysis.pageType}`,
+    });
+
+    return updated;
+  } catch (error) {
+    await logError("applicationService.advanceEmployerPortalActionService", error.message);
+    throw error;
+  } finally {
+    await BrowserManager.closeSafely({ page, context, browser });
+  }
+};
+

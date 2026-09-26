@@ -17,6 +17,9 @@ import {
   HUMAN_REASONS,
 } from '../../../constant/application.constant.js';
 import { FIELD_TYPES } from '../../../application/form/fieldTypes.js';
+import { extractPageContent } from '../../../application/pageAnalysis/pageContentExtractor.js';
+import { classifyPageWithLlm } from '../../../application/pageAnalysis/pageClassifierLlm.js';
+import { navigatePortalWithAiDecision } from '../../../application/pageAnalysis/pageNavigator.js';
 import { updateApplicationStatus, findApplicationById } from '../../../repositories/application.repository.js';
 import { JobApplication } from '../../../model/JobApplication.js';
 import { UserProfile } from '../../../model/UserProfile.js';
@@ -174,62 +177,133 @@ export const runNaukriApplication = async ({
       };
     }
 
-    // 8. Detect Apply Action
+    // 8. Detect Apply Action & Analyze Page Content
     const applyAction = await detectApplyAction(page);
+    let activePage = page;
 
     if (applyAction.isCompanySite) {
-      // Company site apply button detected
+      await updateApplicationStatus(applicationId, APPLICATION_STATUS.ANALYZING_PORTAL, {
+        logMessage: 'Employer directs to external career site. Navigating via #company-site-button...',
+      });
+
+      const newPagePromise = context.waitForEvent('page', { timeout: 6000 }).catch(() => null);
+      const companySiteBtn = page.locator(applyAction.selector || '#company-site-button').first();
+      await companySiteBtn.click().catch(() => {});
+      const popup = await newPagePromise;
+      if (popup) {
+        await popup.waitForLoadState('domcontentloaded').catch(() => {});
+        activePage = popup;
+      }
+      await activePage.waitForTimeout(3000);
+
+      // Extract rendered portal content and analyze with Gemini AI
+      const extracted = await extractPageContent(activePage);
+      const analysis = await classifyPageWithLlm(extracted, job, userId);
+
       await JobApplication.findByIdAndUpdate(applicationId, {
         applicationMethod: 'company_site',
-        status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
+        pageAnalysis: {
+          ...analysis,
+          pageTitle: extracted.title,
+          currentUrl: activePage.url(),
+          analyzedAt: new Date(),
+        },
       });
-      return {
-        status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
-        isCompanySite: true,
-        message: 'Job requires application on company website via #company-site-button.',
-      };
-    }
 
-    if (!applyAction.hasApply) {
-      // In case apply button has already turned into "Applied" or unavailable
-      const successCheck = await detectSubmissionSuccess(page);
-      if (successCheck.isSubmitted) {
+      // If portal renders a listings/accordion directory (e.g. "India Openings" with multiple roles)
+      if (analysis.pageType === 'job_listings_accordion' || analysis.nextRecommendedAction === 'click_opening_apply') {
+        await updateApplicationStatus(applicationId, APPLICATION_STATUS.APPLYING, {
+          logMessage: `AI matched role "${analysis.matchedRole?.title || job.title}". Expanding role and clicking Apply Now...`,
+        });
+
+        const navResult = await navigatePortalWithAiDecision(activePage, analysis, context);
+        if (navResult.newPage) {
+          activePage = navResult.newPage;
+        }
+        await activePage.waitForTimeout(2500);
+      }
+
+      // If email instructions with reference ID were detected
+      if (analysis.pageType === 'email_instructions' && analysis.emailContact?.email) {
+        const refId = analysis.emailContact.referenceId || analysis.matchedRole?.referenceId;
+        const subj = refId
+          ? `Application: ${job.title} (Ref: ${refId})`
+          : `Application: ${job.title}`;
+
+        await JobApplication.findByIdAndUpdate(applicationId, {
+          'email.recipient': analysis.emailContact.email,
+          'email.subject': subj,
+          'email.body': `Dear Hiring Team,\n\nI am applying for the ${job.title} position${refId ? ` (Reference ID: ${refId})` : ''} at ${job.company}. My tailored ATS resume is attached for your review.\n\nBest regards,\n${userDoc?.fullName || 'Applicant'}`,
+          status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
+        });
+
+        return {
+          status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
+          isCompanySite: true,
+          emailContact: analysis.emailContact,
+          message: `Employer specifies email applications with Ref ID ${refId || 'N/A'}. Prepared outreach draft.`,
+        };
+      }
+    } else {
+      if (!applyAction.hasApply) {
+        // In case apply button has already turned into "Applied" or unavailable
+        const successCheck = await detectSubmissionSuccess(page);
+        if (successCheck.isSubmitted) {
+          await updateApplicationStatus(applicationId, APPLICATION_STATUS.APPLIED, {
+            logMessage: 'Application confirmed as submitted on Naukri.',
+          });
+          return {
+            status: APPLICATION_STATUS.APPLIED,
+            message: 'Job application completed successfully.',
+          };
+        }
+      }
+
+      // 9. Click the direct Apply button
+      await updateApplicationStatus(applicationId, APPLICATION_STATUS.APPLYING, {
+        logMessage: 'Clicking Naukri Apply button (#apply-button)...',
+      });
+
+      const applyLocator = page.locator(applyAction.selector || '#apply-button').first();
+      await applyLocator.waitFor({ state: 'visible', timeout: 5000 }).catch(() => {});
+      await applyLocator.click().catch(() => {});
+      await page.waitForTimeout(3000);
+
+      // Check if application was completed directly without questionnaire
+      const immediateSuccess = await detectSubmissionSuccess(page);
+      if (immediateSuccess.isSubmitted) {
         await updateApplicationStatus(applicationId, APPLICATION_STATUS.APPLIED, {
-          logMessage: 'Application confirmed as submitted on Naukri.',
+          logMessage: 'Naukri 1-Click apply submitted successfully!',
+        });
+        await JobApplication.findByIdAndUpdate(applicationId, {
+          'form.submittedAt': new Date(),
         });
         return {
           status: APPLICATION_STATUS.APPLIED,
-          message: 'Job application completed successfully.',
+          message: 'Application submitted successfully via Naukri 1-Click apply.',
         };
+      }
+
+      // Also analyze the page rendered after clicking direct Apply!
+      const postApplyExtracted = await extractPageContent(page);
+      if (postApplyExtracted.openings.length > 0 && postApplyExtracted.formFieldsCount === 0) {
+        const postAnalysis = await classifyPageWithLlm(postApplyExtracted, job, userId);
+        await JobApplication.findByIdAndUpdate(applicationId, {
+          pageAnalysis: {
+            ...postAnalysis,
+            pageTitle: postApplyExtracted.title,
+            currentUrl: page.url(),
+            analyzedAt: new Date(),
+          },
+        });
+        if (postAnalysis.pageType === 'job_listings_accordion') {
+          await navigatePortalWithAiDecision(page, postAnalysis, context);
+          await page.waitForTimeout(2000);
+        }
       }
     }
 
-    // 9. Click the direct Apply button
-    await updateApplicationStatus(applicationId, APPLICATION_STATUS.APPLYING, {
-      logMessage: 'Clicking Naukri Apply button (#apply-button)...',
-    });
-
-    const applyLocator = page.locator(applyAction.selector || '#apply-button').first();
-    await applyLocator.waitFor({ state: 'visible', timeout: 5000 }).catch(() => {});
-    await applyLocator.click().catch(() => {});
-    await page.waitForTimeout(3000);
-
-    // 10. Check if application was completed directly without questionnaire
-    const immediateSuccess = await detectSubmissionSuccess(page);
-    if (immediateSuccess.isSubmitted) {
-      await updateApplicationStatus(applicationId, APPLICATION_STATUS.APPLIED, {
-        logMessage: 'Naukri 1-Click apply submitted successfully!',
-      });
-      await JobApplication.findByIdAndUpdate(applicationId, {
-        'form.submittedAt': new Date(),
-      });
-      return {
-        status: APPLICATION_STATUS.APPLIED,
-        message: 'Application submitted successfully via Naukri 1-Click apply.',
-      };
-    }
-
-    // 11. Multi-Step Form Inspection and Answering Loop
+    // 10. Multi-Step Form Inspection and Answering Loop
     let currentStep = 1;
     let allCollectedAnswers = [...(application.form?.answers || [])];
 

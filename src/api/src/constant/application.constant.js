@@ -18,6 +18,7 @@ export const APPLICATION_STATUS = Object.freeze({
   SENT: "sent",
   FAILED: "failed",
   // Browser application workflow statuses
+  ANALYZING_PORTAL: "analyzing_portal",
   SESSION_LOADING: "session_loading",
   SESSION_EXPIRED: "session_expired",
   OPENING_JOB: "opening_job",
@@ -31,6 +32,17 @@ export const APPLICATION_STATUS = Object.freeze({
   WAITING_FOR_FINAL_REVIEW: "waiting_for_final_review",
   SUBMITTING: "submitting",
   SUBMITTED: "Applied",
+});
+
+export const PORTAL_PAGE_TYPES = Object.freeze({
+  JOB_LISTINGS_ACCORDION: "job_listings_accordion",
+  JOB_DESCRIPTION_PAGE: "job_description_page",
+  APPLICATION_FORM: "application_form",
+  EMAIL_INSTRUCTIONS: "email_instructions",
+  EXTERNAL_ATS: "external_ats",
+  LOGIN_REQUIRED: "login_required",
+  ALREADY_APPLIED: "already_applied",
+  UNKNOWN: "unknown",
 });
 
 export const APPLICATION_STATUSES = APPLICATION_STATUS; // For backward compatibility or if frontend expects this name

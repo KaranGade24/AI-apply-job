@@ -138,6 +138,28 @@ const jobApplicationSchema = new mongoose.Schema(
       humanReason: { type: String, default: null }, // 'missingInformation' | 'captcha' | 'otp' | '2fa' | 'sessionExpired'
       submittedAt: { type: Date, default: null },
     },
+    pageAnalysis: {
+      pageType: { type: String, default: null },
+      pageTitle: { type: String, default: "" },
+      currentUrl: { type: String, default: "" },
+      summary: { type: String, default: "" },
+      matchedRole: {
+        title: { type: String, default: "" },
+        referenceId: { type: String, default: "" },
+        experience: { type: String, default: "" },
+        location: { type: String, default: "" },
+        actionSelector: { type: String, default: "" },
+      },
+      detectedOpenings: [{ type: String }],
+      instructions: { type: String, default: "" },
+      emailContact: {
+        email: { type: String, default: "" },
+        subject: { type: String, default: "" },
+        referenceId: { type: String, default: "" },
+      },
+      nextRecommendedAction: { type: String, default: "" },
+      analyzedAt: { type: Date, default: null },
+    },
     workflow: {
       threadId: {
         type: String,

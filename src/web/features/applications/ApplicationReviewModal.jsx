@@ -36,6 +36,8 @@ import {
   submitMissingAnswersApi,
   confirmFinalApplicationApi,
   saveEditedAnswersApi,
+  analyzePortalApi,
+  advancePortalActionApi,
 } from '../../services/applicationService';
 import { formatDate, getStatusBadgeStyle } from '../../utils/formatters';
 
@@ -63,6 +65,8 @@ export const ApplicationReviewModal = ({
   const [candidateInfo, setCandidateInfo] = useState(null);
   const [missingAnswers, setMissingAnswers] = useState({});
   const [reviewAnswers, setReviewAnswers] = useState({});
+  const [analyzingPortal, setAnalyzingPortal] = useState(false);
+  const [advancingPortal, setAdvancingPortal] = useState(false);
 
   // Method & source detection
   const isNaukriSource = job?.source === 'naukri';
@@ -281,24 +285,74 @@ export const ApplicationReviewModal = ({
     }
   };
 
+  // AI Portal Intelligence: Analyze rendered employer portal page
+  const handleAnalyzePortal = async () => {
+    if (!application?._id) return;
+    setAnalyzingPortal(true);
+    try {
+      showToast('Opening employer portal and analyzing rendered page with AI LLM...');
+      const res = await analyzePortalApi(application._id);
+      if (res?.data) {
+        setApplication(res.data);
+        if (res.data.status) {
+          setCurrentStatus(res.data.status);
+          setSelectedStatus(res.data.status);
+        }
+        showToast(`AI Analysis Complete: ${res.data.pageAnalysis?.summary || 'Rendered page classified'}`);
+      }
+      if (onApplicationUpdated) onApplicationUpdated();
+    } catch (err) {
+      showToast('Failed to analyze portal: ' + (err.message || 'Please retry'));
+    } finally {
+      setAnalyzingPortal(false);
+    }
+  };
+
+  // Advance employer portal action (expand matched role & click inner Apply Now)
+  const handleAdvancePortalAction = async () => {
+    if (!application?._id) return;
+    setAdvancingPortal(true);
+    try {
+      showToast('AI expanding matched role & clicking inner Apply Now button in browser...');
+      const res = await advancePortalActionApi(application._id);
+      if (res?.data) {
+        setApplication(res.data);
+        if (res.data.status) {
+          setCurrentStatus(res.data.status);
+          setSelectedStatus(res.data.status);
+        }
+        showToast('Portal action advanced! New page content analyzed.');
+      }
+      if (onApplicationUpdated) onApplicationUpdated();
+    } catch (err) {
+      showToast('Failed to advance portal action: ' + (err.message || 'Please retry'));
+    } finally {
+      setAdvancingPortal(false);
+    }
+  };
+
   // Submit / Confirm application action
   const handleConfirmApply = async () => {
     // If on Checkpoint 2 (waiting for final review)
-    if (application?.status === 'waiting_for_final_review' || (application?.form?.reviewFields?.length > 0 && isNaukriDirect)) {
+    if (application?.status === 'waiting_for_final_review' || (application?.form?.reviewFields?.length > 0 && isNaukri)) {
       return await handleConfirmFinal();
     }
 
     // If on Checkpoint 1 (missing answers)
-    if (application?.form?.missingQuestions?.length > 0 && isNaukriDirect) {
+    if (application?.form?.missingQuestions?.length > 0 && isNaukri) {
       return await handleSubmitMissingAnswers();
     }
 
     setActionLoading(true);
     try {
       if (application?._id) {
-        // If Naukri 1-Click apply, invoke approveAndSendApi which triggers browser automation!
-        if (isNaukriDirect) {
-          showToast('Starting Naukri 1-Click apply workflow in browser...');
+        // If Naukri 1-Click apply or Company Site Apply, invoke approveAndSendApi which triggers browser automation!
+        if (isNaukriDirect || isCompanySite) {
+          showToast(
+            isCompanySite
+              ? 'Opening company portal & executing AI application engine...'
+              : 'Starting Naukri 1-Click apply workflow in browser...'
+          );
           const approvedRes = await approveAndSendApi(application._id);
           if (approvedRes?.data) {
             setApplication(approvedRes.data);
@@ -322,11 +376,11 @@ export const ApplicationReviewModal = ({
             }
 
             if (nextStat === 'Applied') {
-              showToast('1-Click application submitted successfully on Naukri!');
+              showToast('Application submitted successfully!');
             } else if (nextStat === 'human_required') {
               showToast('Additional questionnaire answers required below.');
             } else if (nextStat === 'waiting_for_final_review') {
-              showToast('Questionnaire completed! Review all answers below before final submit.');
+              showToast('Form prepared! Review all answers below before final submit.');
             }
           }
         } else if (detectedMethod === 'email') {
@@ -1163,6 +1217,138 @@ export const ApplicationReviewModal = ({
                         </div>
                       </div>
 
+                      {/* AI Page & Portal Intelligence Card */}
+                      <div className="p-4 rounded-xl border border-indigo-200 bg-linear-to-br from-indigo-50/70 via-white to-purple-50/50 space-y-3.5 shadow-xs">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex items-center gap-2">
+                            <div className="p-1.5 bg-indigo-600 text-white rounded-lg">
+                              <Sparkles className="w-4 h-4" />
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-bold text-slate-900">
+                                  AI Page & Portal Intelligence
+                                </span>
+                                {application?.pageAnalysis?.pageType && (
+                                  <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider bg-indigo-100 text-indigo-800">
+                                    {application.pageAnalysis.pageType.replace(/_/g, ' ')}
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-[11px] text-slate-500">
+                                Analyzes rendered employer pages (accordions, job directories, forms, ref IDs) and decides actions
+                              </p>
+                            </div>
+                          </div>
+
+                          <Button
+                            size="xs"
+                            variant="outline"
+                            loading={analyzingPortal}
+                            onClick={handleAnalyzePortal}
+                            className="gap-1.5 text-indigo-700 border-indigo-300 hover:bg-indigo-50 shrink-0 font-bold cursor-pointer"
+                          >
+                            <RefreshCw className={`w-3 h-3 ${analyzingPortal ? 'animate-spin' : ''}`} />
+                            <span>{application?.pageAnalysis ? 'Re-Analyze with AI' : 'AI Analyze Page'}</span>
+                          </Button>
+                        </div>
+
+                        {/* Display Analysis Results if available */}
+                        {application?.pageAnalysis && (
+                          <div className="space-y-3 pt-1 text-xs">
+                            <div className="p-3 bg-white rounded-lg border border-indigo-100 space-y-2">
+                              <p className="text-slate-700 leading-relaxed font-medium">
+                                {application.pageAnalysis.summary}
+                              </p>
+
+                              {/* Matched Opening Details (like "Node JS Developer", Reference Id: IN-NJ-01, Exp: 1-3 Years, Loc: Pune) */}
+                              {application.pageAnalysis.matchedRole?.title && (
+                                <div className="p-2.5 bg-amber-50/70 rounded-lg border border-amber-200/80 space-y-1.5">
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-[10px] font-bold text-amber-800 uppercase tracking-wider">
+                                      AI Matched Opening
+                                    </span>
+                                    {application.pageAnalysis.matchedRole.referenceId && (
+                                      <span className="px-1.5 py-0.5 bg-amber-200/70 text-amber-900 rounded font-mono text-[10px] font-bold">
+                                        Ref ID: {application.pageAnalysis.matchedRole.referenceId}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-slate-800 font-semibold">
+                                    <span>{application.pageAnalysis.matchedRole.title}</span>
+                                    {application.pageAnalysis.matchedRole.experience && (
+                                      <span className="text-[11px] text-slate-500 font-normal">
+                                        • Exp: {application.pageAnalysis.matchedRole.experience}
+                                      </span>
+                                    )}
+                                    {application.pageAnalysis.matchedRole.location && (
+                                      <span className="text-[11px] text-slate-500 font-normal">
+                                        • Loc: {application.pageAnalysis.matchedRole.location}
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  {application.pageAnalysis.nextRecommendedAction === 'click_opening_apply' && (
+                                    <div className="pt-1.5 flex items-center justify-between">
+                                      <span className="text-[11px] text-amber-900">
+                                        Target action: Click "{application.pageAnalysis.matchedRole.targetButtonText || 'Apply Now'}"
+                                      </span>
+                                      <Button
+                                        size="xs"
+                                        loading={advancingPortal}
+                                        onClick={handleAdvancePortalAction}
+                                        className="bg-amber-600 hover:bg-amber-700 text-white font-bold gap-1 shadow-xs cursor-pointer"
+                                      >
+                                        <ArrowRight className="w-3 h-3" />
+                                        <span>Expand & Click Apply Now</span>
+                                      </Button>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+
+                              {/* Detected Openings List */}
+                              {application.pageAnalysis.detectedOpenings?.length > 0 && (
+                                <div className="pt-1">
+                                  <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider block mb-1">
+                                    Detected Roles on Page ({application.pageAnalysis.detectedOpenings.length}):
+                                  </span>
+                                  <div className="flex flex-wrap gap-1">
+                                    {application.pageAnalysis.detectedOpenings.slice(0, 8).map((role, idx) => (
+                                      <span
+                                        key={idx}
+                                        className={`px-2 py-0.5 rounded text-[10px] border ${
+                                          role.toLowerCase().includes((job.title || '').toLowerCase())
+                                            ? 'bg-blue-100 border-blue-300 text-blue-900 font-bold'
+                                            : 'bg-slate-50 border-slate-200 text-slate-600'
+                                        }`}
+                                      >
+                                        {role}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Email application instructions */}
+                              {application.pageAnalysis.emailContact?.email && (
+                                <div className="p-2.5 bg-blue-50 rounded-lg border border-blue-200 space-y-1">
+                                  <span className="text-[10px] font-bold text-blue-900 uppercase tracking-wider block">
+                                    Direct Application Email Instructions
+                                  </span>
+                                  <div className="text-xs text-blue-800">
+                                    Send resume to: <strong className="font-mono">{application.pageAnalysis.emailContact.email}</strong>
+                                    {application.pageAnalysis.emailContact.referenceId && (
+                                      <span className="ml-2">with Ref ID: <strong className="font-mono">{application.pageAnalysis.emailContact.referenceId}</strong></span>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
                       {/* Quick Auto-Fill Cheat Sheet for Company Portal Forms (No email/pitch) */}
                       <div className="border border-slate-200 rounded-xl p-4 space-y-3 bg-white">
                         <div className="flex items-center justify-between">
@@ -1916,10 +2102,27 @@ export const ApplicationReviewModal = ({
                   </>
                 )
               ) : isCompanySite ? (
-                <>
-                  <ExternalLink className="w-3.5 h-3.5" />
-                  Open Portal & Mark Applied
-                </>
+                application?.status === 'waiting_for_final_review' || application?.form?.reviewFields?.length > 0 ? (
+                  <>
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    Confirm & Submit on Portal
+                  </>
+                ) : application?.form?.missingQuestions?.length > 0 ? (
+                  <>
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    Submit Answers to Proceed
+                  </>
+                ) : application?.pageAnalysis?.nextRecommendedAction === 'click_opening_apply' ? (
+                  <>
+                    <Sparkles className="w-3.5 h-3.5" />
+                    AI Apply on Company Site
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-3.5 h-3.5" />
+                    AI Apply on Company Site
+                  </>
+                )
               ) : detectedMethod === 'email' ? (
                 <>
                   <Send className="w-3.5 h-3.5" />
