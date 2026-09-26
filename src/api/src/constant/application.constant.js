@@ -17,9 +17,42 @@ export const APPLICATION_STATUS = Object.freeze({
   SENDING: "sending",
   SENT: "sent",
   FAILED: "failed",
+  // Browser application workflow statuses
+  SESSION_LOADING: "session_loading",
+  SESSION_EXPIRED: "session_expired",
+  OPENING_JOB: "opening_job",
+  APPLY_BUTTON_DETECTED: "apply_button_detected",
+  APPLYING: "applying",
+  FORM_DETECTED: "form_detected",
+  INSPECTING_FORM: "inspecting_form",
+  RESOLVING_ANSWERS: "resolving_answers",
+  FILLING_FORM: "filling_form",
+  HUMAN_REQUIRED: "human_required",
+  WAITING_FOR_FINAL_REVIEW: "waiting_for_final_review",
+  SUBMITTING: "submitting",
+  SUBMITTED: "Applied",
 });
 
 export const APPLICATION_STATUSES = APPLICATION_STATUS; // For backward compatibility or if frontend expects this name
+
+export const FORM_ACTIONS = Object.freeze({
+  FILL: "fill",
+  SELECT: "select",
+  CHECK: "check",
+  UNCHECK: "uncheck",
+  UPLOAD: "upload",
+  CLICK: "click",
+  WAIT: "wait",
+});
+
+export const HUMAN_REASONS = Object.freeze({
+  MISSING_INFORMATION: "missingInformation",
+  CAPTCHA: "captcha",
+  OTP: "otp",
+  TWO_FACTOR_AUTH: "2fa",
+  SESSION_EXPIRED: "sessionExpired",
+  VALIDATION_MISMATCH: "validationMismatch",
+});
 
 export const APPLICATION_METHOD = Object.freeze({
   EMAIL: "email",

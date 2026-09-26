@@ -72,3 +72,25 @@ export const deleteApplicationApi = async (id) => {
   });
 };
 
+export const submitMissingAnswersApi = async (id, answers = []) => {
+  return await fetchWithAuth(`/applications/${id}/answers`, {
+    method: 'POST',
+    body: JSON.stringify({ answers }),
+  });
+};
+
+export const saveEditedAnswersApi = async (id, answers = []) => {
+  return await fetchWithAuth(`/applications/${id}/answers`, {
+    method: 'PUT',
+    body: JSON.stringify({ answers }),
+  });
+};
+
+export const confirmFinalApplicationApi = async (id, confirmedAnswers = []) => {
+  return await fetchWithAuth(`/applications/${id}/confirm`, {
+    method: 'POST',
+    body: JSON.stringify({ confirmedAnswers }),
+  });
+};
+
+

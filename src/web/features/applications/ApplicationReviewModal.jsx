@@ -33,6 +33,9 @@ import {
   reviewEmailDraftApi,
   approveAndSendApi,
   updateApplicationStatusApi,
+  submitMissingAnswersApi,
+  confirmFinalApplicationApi,
+  saveEditedAnswersApi,
 } from '../../services/applicationService';
 import { formatDate, getStatusBadgeStyle } from '../../utils/formatters';
 
@@ -58,12 +61,32 @@ export const ApplicationReviewModal = ({
   const [selectedStatus, setSelectedStatus] = useState('Pending');
   const [statusUpdating, setStatusUpdating] = useState(false);
   const [candidateInfo, setCandidateInfo] = useState(null);
+  const [missingAnswers, setMissingAnswers] = useState({});
+  const [reviewAnswers, setReviewAnswers] = useState({});
 
-  // Method detection
-  const detectedMethod =
-    application?.applicationMethod ||
-    job?.applicationMethod ||
-    (job?.hrEmail ? 'email' : job?.applicationUrl?.includes('forms.gle') || job?.applicationUrl?.includes('docs.google.com/forms') ? 'googleForm' : 'email');
+  // Method & source detection
+  const isNaukriSource = job?.source === 'naukri';
+  const rawMethod = (application?.applicationMethod || job?.applicationMethod || '').toLowerCase();
+  const isCompanySite =
+    rawMethod === 'company_site' ||
+    job?.applyButtonSelector === '#company-site-button' ||
+    (isNaukriSource && (rawMethod.includes('company') || rawMethod.includes('external')));
+  
+  const isNaukriDirect =
+    (isNaukriSource && !isCompanySite) ||
+    rawMethod === 'naukri_direct' ||
+    rawMethod === 'naukri' ||
+    job?.applyButtonSelector === '#apply-button';
+
+  const isNaukri = isNaukriDirect || isCompanySite || isNaukriSource;
+
+  const detectedMethod = isNaukriDirect
+    ? 'naukri_direct'
+    : isCompanySite
+    ? 'company_site'
+    : application?.applicationMethod ||
+      job?.applicationMethod ||
+      (job?.hrEmail ? 'email' : job?.applicationUrl?.includes('forms.gle') || job?.applicationUrl?.includes('docs.google.com/forms') ? 'googleForm' : 'email');
 
   useEffect(() => {
     if (!isOpen || !job) return;
@@ -117,6 +140,21 @@ export const ApplicationReviewModal = ({
             const appStat = draftRes.data.application.status || 'Pending';
             setCurrentStatus(appStat);
             setSelectedStatus(appStat);
+
+            if (draftRes.data.application.form?.missingQuestions) {
+              const initMissing = {};
+              draftRes.data.application.form.missingQuestions.forEach((q) => {
+                initMissing[q.questionId] = '';
+              });
+              setMissingAnswers(initMissing);
+            }
+            if (draftRes.data.application.form?.reviewFields) {
+              const initReview = {};
+              draftRes.data.application.form.reviewFields.forEach((f) => {
+                initReview[f.questionId] = f.answer ?? '';
+              });
+              setReviewAnswers(initReview);
+            }
           }
         }
       } catch (err) {
@@ -180,13 +218,118 @@ export const ApplicationReviewModal = ({
 
   const isLocked = ['applied', 'sent', 'interview', 'offer', 'rejected'].includes(currentStatus?.toLowerCase());
 
+  // Checkpoint 1: Submit missing answers handler
+  const handleSubmitMissingAnswers = async () => {
+    if (!application?._id) return;
+    setActionLoading(true);
+    try {
+      const formatted = Object.entries(missingAnswers).map(([questionId, answer]) => ({
+        questionId,
+        answer,
+      }));
+      const res = await submitMissingAnswersApi(application._id, formatted);
+      if (res?.data) {
+        setApplication(res.data);
+        setCurrentStatus(res.data.status || 'processing');
+        setSelectedStatus(res.data.status || 'processing');
+
+        if (res.data.form?.missingQuestions) {
+          const initMissing = {};
+          res.data.form.missingQuestions.forEach((q) => {
+            initMissing[q.questionId] = '';
+          });
+          setMissingAnswers(initMissing);
+        }
+        if (res.data.form?.reviewFields) {
+          const initReview = {};
+          res.data.form.reviewFields.forEach((f) => {
+            initReview[f.questionId] = f.answer ?? '';
+          });
+          setReviewAnswers(initReview);
+        }
+      }
+      showToast('Answers submitted! Resuming application workflow...');
+      if (onApplicationUpdated) onApplicationUpdated();
+    } catch (err) {
+      showToast('Error submitting answers: ' + (err.message || 'Please retry'));
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // Checkpoint 2: Final confirmation handler
+  const handleConfirmFinal = async () => {
+    if (!application?._id) return;
+    setActionLoading(true);
+    try {
+      const formatted = Object.entries(reviewAnswers).map(([questionId, answer]) => ({
+        questionId,
+        answer,
+      }));
+      const res = await confirmFinalApplicationApi(application._id, formatted);
+      if (res?.data) {
+        setApplication(res.data);
+        setCurrentStatus(res.data.status || 'Applied');
+        setSelectedStatus(res.data.status || 'Applied');
+      }
+      showToast('Application verified and submitted successfully on Naukri!');
+      if (onApplicationUpdated) onApplicationUpdated();
+    } catch (err) {
+      showToast('Submission error: ' + (err.message || 'Please retry'));
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   // Submit / Confirm application action
   const handleConfirmApply = async () => {
+    // If on Checkpoint 2 (waiting for final review)
+    if (application?.status === 'waiting_for_final_review' || (application?.form?.reviewFields?.length > 0 && isNaukriDirect)) {
+      return await handleConfirmFinal();
+    }
+
+    // If on Checkpoint 1 (missing answers)
+    if (application?.form?.missingQuestions?.length > 0 && isNaukriDirect) {
+      return await handleSubmitMissingAnswers();
+    }
+
     setActionLoading(true);
     try {
       if (application?._id) {
-        // If it was waiting for review or draft, save email and approve
-        if (detectedMethod === 'email') {
+        // If Naukri 1-Click apply, invoke approveAndSendApi which triggers browser automation!
+        if (isNaukriDirect) {
+          showToast('Starting Naukri 1-Click apply workflow in browser...');
+          const approvedRes = await approveAndSendApi(application._id);
+          if (approvedRes?.data) {
+            setApplication(approvedRes.data);
+            const nextStat = approvedRes.data.status || 'processing';
+            setCurrentStatus(nextStat);
+            setSelectedStatus(nextStat);
+
+            if (approvedRes.data.form?.missingQuestions) {
+              const initMissing = {};
+              approvedRes.data.form.missingQuestions.forEach((q) => {
+                initMissing[q.questionId] = '';
+              });
+              setMissingAnswers(initMissing);
+            }
+            if (approvedRes.data.form?.reviewFields) {
+              const initReview = {};
+              approvedRes.data.form.reviewFields.forEach((f) => {
+                initReview[f.questionId] = f.answer ?? '';
+              });
+              setReviewAnswers(initReview);
+            }
+
+            if (nextStat === 'Applied') {
+              showToast('1-Click application submitted successfully on Naukri!');
+            } else if (nextStat === 'human_required') {
+              showToast('Additional questionnaire answers required below.');
+            } else if (nextStat === 'waiting_for_final_review') {
+              showToast('Questionnaire completed! Review all answers below before final submit.');
+            }
+          }
+        } else if (detectedMethod === 'email') {
           await reviewEmailDraftApi(application._id, {
             recipient,
             subject,
@@ -210,28 +353,37 @@ export const ApplicationReviewModal = ({
           location: job.location,
           sourceUrl: job.sourceUrl || job.applicationUrl,
           applicationMethod: detectedMethod,
-          status: 'Applied',
+          status: isNaukriDirect ? 'waiting_for_review' : 'Applied',
           email: {
             recipient,
             subject,
             body,
-            approved: true,
-            sentAt: new Date().toISOString(),
+            approved: !isNaukriDirect,
+            sentAt: isNaukriDirect ? null : new Date().toISOString(),
           },
         });
         if (res.data) {
           setApplication(res.data);
-          setCurrentStatus('Applied');
+          if (isNaukriDirect) {
+            setCurrentStatus('waiting_for_review');
+            // Immediately start Naukri workflow
+            const approvedRes = await approveAndSendApi(res.data._id);
+            if (approvedRes?.data) {
+              setApplication(approvedRes.data);
+              setCurrentStatus(approvedRes.data.status || 'Applied');
+            }
+          } else {
+            setCurrentStatus('Applied');
+          }
         }
-        showToast('Application successfully recorded as Applied!');
+        showToast('Application successfully initiated!');
       }
 
       if (onApplicationUpdated) {
         onApplicationUpdated();
       }
     } catch (err) {
-      showToast('Application logged with status Applied');
-      setCurrentStatus('Applied');
+      showToast('Application process error: ' + (err.message || 'Please retry'));
       if (onApplicationUpdated) onApplicationUpdated();
     } finally {
       setActionLoading(false);
@@ -457,7 +609,7 @@ export const ApplicationReviewModal = ({
             </button>
           )}
 
-          {(application?.email?.body || application?.status === 'waiting_for_review') && (
+          {!isNaukri && (application?.email?.body || application?.status === 'waiting_for_review') && (
             <button
               onClick={() => setActiveTab('outreach')}
               className={`py-3 px-3 text-xs font-bold border-b-2 transition-colors flex items-center gap-1.5 cursor-pointer ${
@@ -580,22 +732,31 @@ export const ApplicationReviewModal = ({
                   {/* Method Header Banner */}
                   <div className="p-4 rounded-xl border border-slate-200 bg-slate-50 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div className="flex items-center gap-2.5">
-                      {detectedMethod === 'email' && <Mail className="w-5 h-5 text-blue-600" />}
-                      {(detectedMethod === 'googleForm' || detectedMethod === 'websiteForm') && (
+                      {isNaukriDirect && <CheckCircle2 className="w-5 h-5 text-blue-600" />}
+                      {isCompanySite && <Globe className="w-5 h-5 text-purple-600" />}
+                      {!isNaukri && detectedMethod === 'email' && <Mail className="w-5 h-5 text-blue-600" />}
+                      {!isNaukri && (detectedMethod === 'googleForm' || detectedMethod === 'websiteForm') && (
                         <Globe className="w-5 h-5 text-emerald-600" />
                       )}
-                      {detectedMethod === 'phone' && <Phone className="w-5 h-5 text-purple-600" />}
-                      {detectedMethod !== 'email' &&
+                      {!isNaukri && detectedMethod === 'phone' && <Phone className="w-5 h-5 text-purple-600" />}
+                      {!isNaukri &&
+                        detectedMethod !== 'email' &&
                         detectedMethod !== 'googleForm' &&
                         detectedMethod !== 'websiteForm' &&
                         detectedMethod !== 'phone' && <ExternalLink className="w-5 h-5 text-slate-600" />}
                       <div>
                         <p className="text-xs font-bold text-slate-900 uppercase tracking-wider">
                           Application Channel:{' '}
-                          <span className="text-blue-600 capitalize">{detectedMethod}</span>
+                          <span className={isNaukriDirect ? 'text-blue-600' : isCompanySite ? 'text-purple-600' : 'text-slate-800'}>
+                            {isNaukriDirect ? 'Naukri 1-Click Apply' : isCompanySite ? 'Apply on Company Site' : detectedMethod.replace('_', ' ')}
+                          </span>
                         </p>
                         <p className="text-xs text-slate-500 mt-0.5">
-                          {detectedMethod === 'email'
+                          {isNaukriDirect
+                            ? 'Submit application directly on Naukri using your authenticated profile via id="apply-button".'
+                            : isCompanySite
+                            ? 'Submit application on official employer careers site via id="company-site-button".'
+                            : detectedMethod === 'email'
                             ? 'Verify and polish the tailored application email before dispatch.'
                             : detectedMethod === 'googleForm'
                             ? 'Submit application directly via Google Forms. Use quick-copy cheat sheet below.'
@@ -624,10 +785,10 @@ export const ApplicationReviewModal = ({
                         onClick={handleRegenerateDraft}
                         disabled={loading}
                         className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 border border-blue-200 hover:bg-blue-100 text-blue-700 rounded-lg text-xs font-bold transition-colors shadow-2xs cursor-pointer"
-                        title="Read job details, tailor resume, and write tailored outreach email or form responses"
+                        title="Read job details and tailor ATS resume"
                       >
                         <Sparkles className="w-3.5 h-3.5 text-blue-600" />
-                        <span>Tailor & Draft</span>
+                        <span>Tailor Resume</span>
                       </button>
 
                       {/* Status Selector + Submit Button */}
@@ -669,8 +830,450 @@ export const ApplicationReviewModal = ({
                     </div>
                   </div>
 
-                  {/* 1. EMAIL CHANNEL VERIFICATION */}
-                  {detectedMethod === 'email' && (
+                  {/* 1. NAUKRI 1-CLICK APPLY CHANNEL */}
+                  {isNaukriDirect && (
+                    <div className="space-y-4">
+                      {/* Security Challenge / Session Banner */}
+                      {application?.form?.humanReason === 'sessionExpired' && (
+                        <div className="p-4 rounded-xl border border-red-200 bg-red-50 text-red-800 text-xs flex items-start gap-3">
+                          <AlertCircle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
+                          <div>
+                            <span className="font-bold text-red-900 block">Naukri Session Disconnected / Expired</span>
+                            <p className="mt-0.5 text-red-700">
+                              Your authenticated Naukri browser session has expired or is disconnected. Please re-authenticate your Naukri account from Settings or the Naukri Connect modal to proceed.
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
+                      {(application?.form?.humanReason === 'captcha' ||
+                        application?.form?.humanReason === 'otp' ||
+                        application?.form?.humanReason === '2fa') && (
+                        <div className="p-4 rounded-xl border border-amber-300 bg-amber-50 text-amber-900 text-xs flex items-start gap-3">
+                          <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                          <div>
+                            <span className="font-bold text-amber-950 block">
+                              Security Verification Required ({application.form.humanReason.toUpperCase()})
+                            </span>
+                            <p className="mt-0.5 text-amber-800">
+                              Naukri has requested a security check ({application.form.humanReason.toUpperCase()}). Please complete the challenge in your active browser session, then click continue.
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Header Channel Bar */}
+                      <div className="p-4 rounded-xl border border-blue-200 bg-blue-50/70 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <span className="px-2 py-0.5 bg-blue-600 text-white rounded text-[10px] font-black uppercase tracking-wider">
+                              Naukri 1-Click
+                            </span>
+                            <span className="text-xs font-bold text-blue-900">
+                              Direct Portal Apply
+                            </span>
+                            {application?.status && (
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${getStatusBadgeStyle(application.status)}`}>
+                                {application.status.replace(/_/g, ' ')}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-blue-800">
+                            Apply via <code className="font-mono bg-blue-100 px-1 py-0.5 rounded text-blue-900 font-bold">id="apply-button"</code> using your authenticated Naukri profile.
+                          </p>
+                          <p className="text-[11px] text-slate-500 truncate max-w-lg">
+                            {job.applicationUrl || job.sourceUrl}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <a
+                            href={job.applicationUrl || job.sourceUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-colors whitespace-nowrap shadow-xs"
+                          >
+                            Open on Naukri <ExternalLink className="w-3.5 h-3.5" />
+                          </a>
+                        </div>
+                      </div>
+
+                      {/* CHECKPOINT 1: Missing Information / Questions Required By Employer */}
+                      {application?.form?.missingQuestions?.length > 0 && (
+                        <div className="p-5 rounded-xl border border-amber-200 bg-amber-50/40 space-y-4 shadow-xs">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="px-2 py-0.5 bg-amber-600 text-white rounded text-[10px] font-black uppercase tracking-wider">
+                                  Checkpoint 1
+                                </span>
+                                <h3 className="text-sm font-bold text-slate-900">
+                                  Additional Information Required by Employer
+                                </h3>
+                              </div>
+                              <p className="text-xs text-slate-600 mt-1">
+                                The employer questionnaire includes questions that could not be verified from your profile or resume. Please provide honest answers below.
+                              </p>
+                            </div>
+                            <span className="text-xs font-bold text-amber-800 bg-amber-100 px-2.5 py-1 rounded-full shrink-0">
+                              {application.form.missingQuestions.length} Question{application.form.missingQuestions.length > 1 ? 's' : ''}
+                            </span>
+                          </div>
+
+                          <div className="space-y-3.5 pt-1">
+                            {application.form.missingQuestions.map((q) => (
+                              <div key={q.questionId} className="p-3.5 bg-white rounded-xl border border-slate-200 space-y-2">
+                                <label className="block text-xs font-bold text-slate-800">
+                                  {q.question} {q.required && <span className="text-red-500">*</span>}
+                                </label>
+
+                                {q.options && q.options.length > 0 ? (
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                                    {q.options.map((opt) => (
+                                      <label
+                                        key={opt}
+                                        className={`flex items-center gap-2.5 p-2 rounded-lg border text-xs cursor-pointer transition-colors ${
+                                          missingAnswers[q.questionId] === opt
+                                            ? 'border-blue-500 bg-blue-50/60 font-semibold text-blue-900'
+                                            : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                                        }`}
+                                      >
+                                        <input
+                                          type="radio"
+                                          name={q.questionId}
+                                          value={opt}
+                                          checked={missingAnswers[q.questionId] === opt}
+                                          onChange={() =>
+                                            setMissingAnswers((prev) => ({
+                                              ...prev,
+                                              [q.questionId]: opt,
+                                            }))
+                                          }
+                                          className="text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
+                                        />
+                                        <span>{opt}</span>
+                                      </label>
+                                    ))}
+                                  </div>
+                                ) : q.type === 'textarea' ? (
+                                  <textarea
+                                    rows={3}
+                                    value={missingAnswers[q.questionId] || ''}
+                                    onChange={(e) =>
+                                      setMissingAnswers((prev) => ({
+                                        ...prev,
+                                        [q.questionId]: e.target.value,
+                                      }))
+                                    }
+                                    placeholder={q.placeholder || 'Type your answer...'}
+                                    className="w-full text-xs p-2.5 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:outline-hidden"
+                                  />
+                                ) : (
+                                  <input
+                                    type={q.type === 'number' ? 'number' : 'text'}
+                                    value={missingAnswers[q.questionId] || ''}
+                                    onChange={(e) =>
+                                      setMissingAnswers((prev) => ({
+                                        ...prev,
+                                        [q.questionId]: e.target.value,
+                                      }))
+                                    }
+                                    placeholder={q.placeholder || 'Type your answer...'}
+                                    className="w-full text-xs p-2.5 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:outline-hidden"
+                                  />
+                                )}
+                              </div>
+                            ))}
+                          </div>
+
+                          <div className="flex justify-end pt-2">
+                            <Button
+                              size="sm"
+                              loading={actionLoading}
+                              onClick={handleSubmitMissingAnswers}
+                              className="bg-amber-600 hover:bg-amber-700 text-white font-bold gap-1.5 cursor-pointer"
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              Submit Answers & Continue
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* CHECKPOINT 2: Final Application Review */}
+                      {application?.form?.reviewFields?.length > 0 && (
+                        <div className="p-5 rounded-xl border border-blue-200 bg-blue-50/30 space-y-4 shadow-xs">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="px-2 py-0.5 bg-blue-700 text-white rounded text-[10px] font-black uppercase tracking-wider">
+                                  Checkpoint 2
+                                </span>
+                                <h3 className="text-sm font-bold text-slate-900">
+                                  Review Your Complete Application Before Submission
+                                </h3>
+                              </div>
+                              <p className="text-xs text-slate-600 mt-1">
+                                All questionnaire questions are answered. Review every answer below, edit anything if needed, and confirm to submit on Naukri.
+                              </p>
+                            </div>
+                            <span className="text-xs font-bold text-blue-800 bg-blue-100 px-2.5 py-1 rounded-full shrink-0">
+                              {application.form.reviewFields.length} Fields
+                            </span>
+                          </div>
+
+                          <div className="space-y-3 pt-1">
+                            {application.form.reviewFields.map((field) => (
+                              <div key={field.questionId} className="p-3.5 bg-white rounded-xl border border-slate-200 space-y-2">
+                                <div className="flex items-center justify-between gap-2">
+                                  <label className="text-xs font-bold text-slate-800">
+                                    {field.question}
+                                  </label>
+                                  <span
+                                    className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                                      field.source === 'profile'
+                                        ? 'bg-blue-100 text-blue-800'
+                                        : field.source === 'resume'
+                                        ? 'bg-emerald-100 text-emerald-800'
+                                        : field.source === 'ai'
+                                        ? 'bg-amber-100 text-amber-800'
+                                        : 'bg-purple-100 text-purple-800'
+                                    }`}
+                                  >
+                                    {field.source === 'profile'
+                                      ? 'Profile'
+                                      : field.source === 'resume'
+                                      ? 'Resume'
+                                      : field.source === 'ai'
+                                      ? 'AI Grounded'
+                                      : 'User Answered'}
+                                  </span>
+                                </div>
+
+                                {field.options && field.options.length > 0 ? (
+                                  <select
+                                    value={reviewAnswers[field.questionId] ?? field.answer ?? ''}
+                                    onChange={(e) =>
+                                      setReviewAnswers((prev) => ({
+                                        ...prev,
+                                        [field.questionId]: e.target.value,
+                                      }))
+                                    }
+                                    className="w-full text-xs p-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:outline-hidden bg-white"
+                                  >
+                                    {field.options.map((opt) => (
+                                      <option key={opt} value={opt}>
+                                        {opt}
+                                      </option>
+                                    ))}
+                                  </select>
+                                ) : field.type === 'textarea' ? (
+                                  <textarea
+                                    rows={2}
+                                    value={reviewAnswers[field.questionId] ?? field.answer ?? ''}
+                                    onChange={(e) =>
+                                      setReviewAnswers((prev) => ({
+                                        ...prev,
+                                        [field.questionId]: e.target.value,
+                                      }))
+                                    }
+                                    className="w-full text-xs p-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:outline-hidden"
+                                  />
+                                ) : (
+                                  <input
+                                    type="text"
+                                    value={reviewAnswers[field.questionId] ?? field.answer ?? ''}
+                                    onChange={(e) =>
+                                      setReviewAnswers((prev) => ({
+                                        ...prev,
+                                        [field.questionId]: e.target.value,
+                                      }))
+                                    }
+                                    className="w-full text-xs p-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:outline-hidden"
+                                  />
+                                )}
+                              </div>
+                            ))}
+                          </div>
+
+                          <div className="flex justify-end pt-2">
+                            <Button
+                              size="sm"
+                              loading={actionLoading}
+                              onClick={handleConfirmFinal}
+                              className="bg-blue-600 hover:bg-blue-700 text-white font-bold gap-1.5 cursor-pointer shadow-xs"
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              Confirm & Apply on Naukri
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Tailored ATS Resume Summary */}
+                      <div className="p-4 rounded-xl border border-slate-200 bg-white space-y-3">
+                        <div className="flex items-center justify-between">
+                          <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                            <FileText className="w-4 h-4 text-blue-600" />
+                            Tailored ATS Resume Attached
+                          </h3>
+                          <button
+                            type="button"
+                            onClick={handleDownloadPdf}
+                            className="text-xs font-bold text-blue-600 hover:text-blue-800 cursor-pointer flex items-center gap-1"
+                          >
+                            <Download className="w-3.5 h-3.5" /> Download PDF
+                          </button>
+                        </div>
+                        <p className="text-xs text-slate-600 leading-relaxed">
+                          Your resume has been tailored for <span className="font-semibold text-slate-800">{job.title}</span> at <span className="font-semibold text-slate-800">{job.company}</span>. When approved, this application is processed directly on Naukri without external email dispatch.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 2. NAUKRI APPLY ON COMPANY SITE CHANNEL */}
+                  {isCompanySite && (
+                    <div className="space-y-4">
+                      <div className="p-4 rounded-xl border border-purple-200 bg-purple-50/70 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <span className="px-2 py-0.5 bg-purple-600 text-white rounded text-[10px] font-black uppercase tracking-wider">
+                              Company Site Apply
+                            </span>
+                            <span className="text-xs font-bold text-purple-900">
+                              External Portal Redirect
+                            </span>
+                          </div>
+                          <p className="text-xs text-purple-800">
+                            Apply via <code className="font-mono bg-purple-100 px-1 py-0.5 rounded text-purple-900 font-bold">id="company-site-button"</code> (Workday, Taleo, Lever, Greenhouse, etc.).
+                          </p>
+                          <p className="text-[11px] text-slate-500 truncate max-w-lg">
+                            {job.applicationUrl || job.sourceUrl}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <a
+                            href={job.applicationUrl || job.sourceUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1.5 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-xs font-bold transition-colors whitespace-nowrap"
+                          >
+                            Open Company Careers Site <ExternalLink className="w-3.5 h-3.5" />
+                          </a>
+                        </div>
+                      </div>
+
+                      {/* Quick Auto-Fill Cheat Sheet for Company Portal Forms (No email/pitch) */}
+                      <div className="border border-slate-200 rounded-xl p-4 space-y-3 bg-white">
+                        <div className="flex items-center justify-between">
+                          <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                            Quick Auto-Fill Cheat Sheet
+                          </h3>
+                          <span className="text-[11px] text-slate-400">
+                            Click to copy fields into employer portal
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+                          <div className="p-2.5 rounded-lg border border-slate-100 bg-slate-50 flex items-center justify-between">
+                            <div>
+                              <span className="text-slate-400 block text-[10px]">Full Name</span>
+                              <span className="font-semibold text-slate-800">
+                                {candidateInfo?.fullName || 'Karan Gade'}
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                copyToClipboard(
+                                  candidateInfo?.fullName || 'Karan Gade',
+                                  'name'
+                                )
+                              }
+                              className="text-slate-400 hover:text-slate-700 p-1 cursor-pointer"
+                            >
+                              {copiedKey === 'name' ? (
+                                <Check className="w-3.5 h-3.5 text-emerald-600" />
+                              ) : (
+                                <Copy className="w-3.5 h-3.5" />
+                              )}
+                            </button>
+                          </div>
+
+                          <div className="p-2.5 rounded-lg border border-slate-100 bg-slate-50 flex items-center justify-between">
+                            <div>
+                              <span className="text-slate-400 block text-[10px]">Email</span>
+                              <span className="font-semibold text-slate-800 truncate max-w-[170px]">
+                                {candidateInfo?.email || 'gadekaran24@gmail.com'}
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                copyToClipboard(
+                                  candidateInfo?.email || 'gadekaran24@gmail.com',
+                                  'cand_email'
+                                )
+                              }
+                              className="text-slate-400 hover:text-slate-700 p-1 cursor-pointer"
+                            >
+                              {copiedKey === 'cand_email' ? (
+                                <Check className="w-3.5 h-3.5 text-emerald-600" />
+                              ) : (
+                                <Copy className="w-3.5 h-3.5" />
+                              )}
+                            </button>
+                          </div>
+
+                          <div className="p-2.5 rounded-lg border border-slate-100 bg-slate-50 flex items-center justify-between">
+                            <div>
+                              <span className="text-slate-400 block text-[10px]">Role Applied For</span>
+                              <span className="font-semibold text-slate-800">{job.title}</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => copyToClipboard(job.title, 'job_title')}
+                              className="text-slate-400 hover:text-slate-700 p-1 cursor-pointer"
+                            >
+                              {copiedKey === 'job_title' ? (
+                                <Check className="w-3.5 h-3.5 text-emerald-600" />
+                              ) : (
+                                <Copy className="w-3.5 h-3.5" />
+                              )}
+                            </button>
+                          </div>
+
+                          <div className="p-2.5 rounded-lg border border-slate-100 bg-slate-50 flex items-center justify-between">
+                            <div>
+                              <span className="text-slate-400 block text-[10px]">Key Skills</span>
+                              <span className="font-semibold text-slate-800 truncate max-w-[170px]">
+                                {(job.skills || []).slice(0, 4).join(', ') || 'Full Stack'}
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                copyToClipboard(
+                                  (job.skills || []).join(', '),
+                                  'skills_copy'
+                                )
+                              }
+                              className="text-slate-400 hover:text-slate-700 p-1 cursor-pointer"
+                            >
+                              {copiedKey === 'skills_copy' ? (
+                                <Check className="w-3.5 h-3.5 text-emerald-600" />
+                              ) : (
+                                <Copy className="w-3.5 h-3.5" />
+                              )}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 3. EMAIL CHANNEL VERIFICATION (REFERRAL / DIRECT HR) */}
+                  {!isNaukri && detectedMethod === 'email' && (
                     <div className="space-y-4">
                       {/* Recipient & Subject fields */}
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -754,8 +1357,8 @@ export const ApplicationReviewModal = ({
                     </div>
                   )}
 
-                  {/* 2. GOOGLE FORM & WEBSITE FORM CHANNEL VERIFICATION */}
-                  {(detectedMethod === 'googleForm' ||
+                  {/* 4. GOOGLE FORM & WEBSITE FORM CHANNEL VERIFICATION */}
+                  {!isNaukri && (detectedMethod === 'googleForm' ||
                     detectedMethod === 'websiteForm' ||
                     job.applicationUrl) && (
                     <div className="space-y-4">
@@ -915,8 +1518,8 @@ export const ApplicationReviewModal = ({
                     </div>
                   )}
 
-                  {/* 3. PHONE / WHATSAPP CHANNEL VERIFICATION */}
-                  {detectedMethod === 'phone' && (
+                  {/* 5. PHONE / WHATSAPP CHANNEL VERIFICATION */}
+                  {!isNaukri && detectedMethod === 'phone' && (
                     <div className="p-4 rounded-xl border border-purple-200 bg-purple-50/50 space-y-3">
                       <div className="flex items-center justify-between">
                         <div>
@@ -1295,10 +1898,32 @@ export const ApplicationReviewModal = ({
                   <CheckCircle2 className="w-3.5 h-3.5" />
                   Application Locked
                 </>
+              ) : isNaukriDirect ? (
+                application?.status === 'waiting_for_final_review' || application?.form?.reviewFields?.length > 0 ? (
+                  <>
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    Confirm & Apply on Naukri
+                  </>
+                ) : application?.form?.missingQuestions?.length > 0 ? (
+                  <>
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    Submit Answers to Proceed
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    Start 1-Click Apply on Naukri
+                  </>
+                )
+              ) : isCompanySite ? (
+                <>
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  Open Portal & Mark Applied
+                </>
               ) : detectedMethod === 'email' ? (
                 <>
                   <Send className="w-3.5 h-3.5" />
-                  Approve & Apply
+                  Approve & Send Email
                 </>
               ) : (
                 <>

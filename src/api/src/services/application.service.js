@@ -11,11 +11,13 @@ import {
   deleteApplication,
 } from "../repositories/application.repository.js";
 import { Job } from "../model/Job.js";
+import { JobApplication } from "../model/JobApplication.js";
 import { APPLICATION_STATUS, RESUME_PAGE_COUNT, RESUME_TEMPLATES, resolveUserResumeSettings } from "../constant/application.constant.js";
 import { generateResumePdf } from "../pdf/resumePdfService.js";
 import { sendApplicationEmail } from "../integrations/email/emailService.js";
 import { formatAndCleanEmailBody } from "../agent/prompt/applicationEmail.js";
 import { getActiveResumeByUserId } from "../repositories/resume.repository.js";
+import { runNaukriApplication } from "../integrations/applicationPlatforms/naukri/naukriApplication.js";
 import { logError, logJobEvent } from "../utils/logger.js";
 import { appError } from "../utils/errors.js";
 
@@ -168,6 +170,25 @@ export const approveAndSendApplication = async (applicationId, userId) => {
       );
     }
 
+    // Check if application is for a Naukri job
+    const isNaukriJob =
+      application.jobId?.source === 'naukri' ||
+      application.applicationMethod === 'naukri_direct' ||
+      application.applicationMethod === 'naukri' ||
+      application.applicationMethod === 'company_site';
+
+    if (isNaukriJob) {
+      await logJobEvent(
+        'approveAndSendApplication',
+        'NAUKRI_APPROVE',
+        `User approved Naukri application ${applicationId}. Initiating browser application engine...`
+      );
+
+      // Execute browser-based application engine for Naukri
+      await runNaukriApplication({ applicationId, userId });
+      return await findApplicationById(applicationId);
+    }
+
     const recipient = application.email?.recipient;
     const subject = application.email?.subject;
     const body = application.email?.body;
@@ -214,13 +235,138 @@ export const approveAndSendApplication = async (applicationId, userId) => {
   } catch (error) {
     if (applicationId) {
       await updateApplicationStatus(applicationId, APPLICATION_STATUS.FAILED, {
-        logMessage: `Email dispatch failed: ${error.message}`,
+        logMessage: `Application dispatch failed: ${error.message}`,
       }).catch(() => {});
     }
     await logError(
       "applicationService.approveAndSendApplication",
       error.message,
     );
+    throw error;
+  }
+};
+
+/**
+ * Checkpoint 1: Receives user answers for missing questionnaire questions and resumes application
+ * @param {string} applicationId
+ * @param {string} userId
+ * @param {Array<object>} answers - Array of { questionId, answer }
+ * @returns {Promise<object>}
+ */
+export const submitMissingAnswersService = async (applicationId, userId, answers = []) => {
+  try {
+    const application = await findApplicationById(applicationId);
+    if (!application) {
+      throw new appError("Application not found", 404);
+    }
+
+    if (
+      application.userId._id.toString() !== userId &&
+      application.userId.toString() !== userId
+    ) {
+      throw new appError("Unauthorized access to application", 403);
+    }
+
+    await logJobEvent(
+      'submitMissingAnswersService',
+      'RECEIVED',
+      `Received ${answers.length} user answers for application ${applicationId}`
+    );
+
+    // Run Naukri application with userAnswers
+    const res = await runNaukriApplication({
+      applicationId,
+      userId,
+      userAnswers: answers,
+    });
+
+    return await findApplicationById(applicationId);
+  } catch (error) {
+    await logError('applicationService.submitMissingAnswersService', error.message);
+    throw error;
+  }
+};
+
+/**
+ * Checkpoint 2: Receives final user confirmation and triggers final submission on Naukri
+ * @param {string} applicationId
+ * @param {string} userId
+ * @param {object} payload
+ * @param {Array<object>} [payload.confirmedAnswers] - Any edited answers during review
+ * @returns {Promise<object>}
+ */
+export const confirmFinalApplicationService = async (applicationId, userId, payload = {}) => {
+  try {
+    const application = await findApplicationById(applicationId);
+    if (!application) {
+      throw new appError("Application not found", 404);
+    }
+
+    if (
+      application.userId._id.toString() !== userId &&
+      application.userId.toString() !== userId
+    ) {
+      throw new appError("Unauthorized access to application", 403);
+    }
+
+    await logJobEvent(
+      'confirmFinalApplicationService',
+      'CONFIRMED',
+      `User confirmed final application ${applicationId}. Submitting...`
+    );
+
+    // Run Naukri application with confirmSubmission = true
+    const res = await runNaukriApplication({
+      applicationId,
+      userId,
+      confirmSubmission: true,
+      finalEditedAnswers: payload.confirmedAnswers || [],
+    });
+
+    return await findApplicationById(applicationId);
+  } catch (error) {
+    await logError('applicationService.confirmFinalApplicationService', error.message);
+    throw error;
+  }
+};
+
+/**
+ * Saves edited answers during review without submitting yet
+ * @param {string} applicationId
+ * @param {string} userId
+ * @param {Array<object>} answers
+ * @returns {Promise<object>}
+ */
+export const saveEditedAnswersService = async (applicationId, userId, answers = []) => {
+  try {
+    const application = await findApplicationById(applicationId);
+    if (!application) {
+      throw new appError("Application not found", 404);
+    }
+
+    if (
+      application.userId._id.toString() !== userId &&
+      application.userId.toString() !== userId
+    ) {
+      throw new appError("Unauthorized access to application", 403);
+    }
+
+    const currentReviewFields = application.form?.reviewFields || [];
+    answers.forEach((ans) => {
+      const match = currentReviewFields.find((f) => f.questionId === ans.questionId);
+      if (match) {
+        match.answer = ans.answer;
+        match.source = 'user';
+      }
+    });
+
+    await JobApplication.findByIdAndUpdate(applicationId, {
+      'form.reviewFields': currentReviewFields,
+    });
+
+    return await findApplicationById(applicationId);
+  } catch (error) {
+    await logError('applicationService.saveEditedAnswersService', error.message);
     throw error;
   }
 };

@@ -22,6 +22,9 @@ applicationRouter.post("/preview-draft", authMiddleware, applicationController.p
 applicationRouter.get("/job/:jobId", authMiddleware, applicationController.getApplicationByJob);
 applicationRouter.patch("/:id/status", authMiddleware, applicationController.updateStatusDirect);
 applicationRouter.post("/:id/tailor", authMiddleware, applicationController.tailorApplication);
+applicationRouter.post("/:id/answers", authMiddleware, applicationController.submitAnswers);
+applicationRouter.put("/:id/answers", authMiddleware, applicationController.saveAnswers);
+applicationRouter.post("/:id/confirm", authMiddleware, applicationController.confirmFinal);
 
 /**
  * @swagger

@@ -568,6 +568,53 @@ const generateEmailNode = async (state) => {
       return { status: APPLICATION_STATUS.FAILED };
     }
 
+    // Check if this is a Naukri job where direct 1-click or company-site applies instead of email outreach
+    const isNaukri =
+      state.job?.source === "naukri" ||
+      state.job?.applicationMethod === "naukri_direct" ||
+      state.job?.applicationMethod === "company_site" ||
+      state.job?.applicationMethod === "naukri";
+
+    if (isNaukri) {
+      const isCompanySite =
+        state.job?.applicationMethod === "company_site" ||
+        state.job?.applyButtonSelector === "#company-site-button";
+
+      await updateApplicationEmail(state.applicationId, {
+        recipient: "",
+        subject: `Naukri Application: ${state.job?.title || "Position"} at ${state.job?.company || "Company"}`,
+        body: isCompanySite
+          ? "Redirect to official employer career portal via company-site-button. Tailored ATS resume prepared for portal submission."
+          : "1-Click direct in-portal application on Naukri via apply-button. Tailored ATS resume prepared for submission.",
+        approved: false,
+      });
+
+      await updateApplicationStatus(
+        state.applicationId,
+        APPLICATION_STATUS.WAITING_FOR_REVIEW,
+        {
+          error: null,
+          logMessage:
+            "Tailored PDF generated. Application prepared for Naukri review.",
+        },
+      );
+
+      await logJobEvent(
+        "generateEmailNode",
+        "WAITING_FOR_REVIEW",
+        `Naukri application ${state.applicationId} ready for review without external email.`,
+      );
+
+      return {
+        email: {
+          recipient: "",
+          subject: `Naukri Application: ${state.job?.title}`,
+          body: isCompanySite ? "Apply on company site" : "Naukri 1-Click apply",
+        },
+        status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
+      };
+    }
+
     await logJobEvent(
       "generateEmailNode",
       "EMAIL_START",

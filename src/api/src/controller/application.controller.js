@@ -409,6 +409,81 @@ export const previewDraft = async (req, res, next) => {
 };
 
 /**
+ * Checkpoint 1: Submit user answers for missing questionnaire questions
+ */
+export const submitAnswers = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user?.userId;
+    const { answers } = req.body || {};
+
+    const updated = await applicationService.submitMissingAnswersService(
+      id,
+      userId,
+      answers || []
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Answers submitted and application workflow resumed",
+      data: updated,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Checkpoint 2: Final user confirmation and submission
+ */
+export const confirmFinal = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user?.userId;
+    const { confirmedAnswers } = req.body || {};
+
+    const updated = await applicationService.confirmFinalApplicationService(
+      id,
+      userId,
+      { confirmedAnswers: confirmedAnswers || [] }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Application confirmed and submitted successfully",
+      data: updated,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Save edited answers during final review without submitting
+ */
+export const saveAnswers = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user?.userId;
+    const { answers } = req.body || {};
+
+    const updated = await applicationService.saveEditedAnswersService(
+      id,
+      userId,
+      answers || []
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Answers updated successfully",
+      data: updated,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * Delete a job application
  */
 export const deleteApplication = async (req, res, next) => {

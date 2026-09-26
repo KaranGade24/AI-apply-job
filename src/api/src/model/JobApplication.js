@@ -98,6 +98,46 @@ const jobApplicationSchema = new mongoose.Schema(
         default: null,
       },
     },
+    form: {
+      currentStep: { type: Number, default: 1 },
+      totalSteps: { type: Number, default: 1 },
+      missingQuestions: [
+        {
+          questionId: { type: String, required: true },
+          fieldId: { type: String, default: "" },
+          question: { type: String, required: true },
+          type: { type: String, default: "text" },
+          required: { type: Boolean, default: false },
+          options: [{ type: String }],
+          placeholder: { type: String, default: "" },
+        },
+      ],
+      answers: [
+        {
+          questionId: { type: String, required: true },
+          fieldId: { type: String, default: "" },
+          question: { type: String, default: "" },
+          answer: { type: mongoose.Schema.Types.Mixed },
+          source: { type: String, default: "user" }, // 'profile' | 'resume' | 'user' | 'ai' | 'setting'
+          confidence: { type: Number, default: 1 },
+          userConfirmed: { type: Boolean, default: false },
+        },
+      ],
+      reviewFields: [
+        {
+          questionId: { type: String, required: true },
+          fieldId: { type: String, default: "" },
+          question: { type: String, required: true },
+          type: { type: String, default: "text" },
+          answer: { type: mongoose.Schema.Types.Mixed },
+          source: { type: String, default: "profile" },
+          options: [{ type: String }],
+        },
+      ],
+      requiresHuman: { type: Boolean, default: false },
+      humanReason: { type: String, default: null }, // 'missingInformation' | 'captcha' | 'otp' | '2fa' | 'sessionExpired'
+      submittedAt: { type: Date, default: null },
+    },
     workflow: {
       threadId: {
         type: String,
