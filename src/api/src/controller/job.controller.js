@@ -18,7 +18,7 @@ export const discoverJobsController = async (req, res) => {
   });
 
   try {
-    const userId = req.user?.userId;
+    const userId = req.user?.userId || req.user?.id || req.user?._id;
 
     const {
       sources,
@@ -27,6 +27,7 @@ export const discoverJobsController = async (req, res) => {
       experience,
       workMode,
       employmentType,
+      excludeKeywords,
       preferredApplicationMethods,
       preferredMethods,
       postedWithin,
@@ -41,6 +42,7 @@ export const discoverJobsController = async (req, res) => {
       experience,
       workMode,
       employmentType,
+      excludeKeywords,
       preferredApplicationMethods:
         preferredApplicationMethods || preferredMethods,
       postedWithin,

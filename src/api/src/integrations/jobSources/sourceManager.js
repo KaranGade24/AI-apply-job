@@ -1,5 +1,7 @@
 import { discoverJobs, openJobDetails, getJobListingUrls } from '../jobViaReferral/jobViaReferralSource.js';
 import { parseJobCard, parseJobDetails } from '../jobViaReferral/jobViaReferralParser.js';
+import { discoverJobs as discoverNaukriJobs, openJobDetails as openNaukriJobDetails } from './naukri/naukriSource.js';
+import { parseNaukriJobCard, parseNaukriJobDetails } from './naukri/naukriParser.js';
 import { logError } from '../../utils/logger.js';
 
 /**
@@ -26,10 +28,33 @@ export const jobViaReferralConfig = Object.freeze({
 });
 
 /**
+ * Naukri Source Configuration Adapter
+ */
+export const naukriConfig = Object.freeze({
+  name: 'naukri',
+
+  capabilities: Object.freeze({
+    keywords: true,
+    locations: true,
+    experience: true,
+    workMode: true,
+    employmentType: true,
+    postedWithin: true,
+    salary: true
+  }),
+
+  searchJobs: discoverNaukriJobs,
+  getJobDetails: openNaukriJobDetails,
+  parseJobCard: parseNaukriJobCard,
+  parseJobDetails: parseNaukriJobDetails
+});
+
+/**
  * Registry of available job sources
  */
 const jobSources = {
-  jobViaReferral: jobViaReferralConfig
+  jobViaReferral: jobViaReferralConfig,
+  naukri: naukriConfig
 };
 
 /**

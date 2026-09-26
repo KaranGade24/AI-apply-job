@@ -14,6 +14,7 @@ import { Resume } from "../../model/Resume.js";
 import { logError, logResumeEvent, logJobEvent } from "../../utils/logger.js";
 import { calculateScrapeLimit, resolveUserJobSearchSettings, MAX_DISCOVERY_ATTEMPTS } from "../../constant/agent.constant.js";
 import { logSkippedJobService } from "../../services/skippedApplication.service.js";
+import { getDecryptedSessionForUser } from "../../services/naukriSession.service.js";
 
 export { searchConfigSchema };
 
@@ -100,14 +101,34 @@ const discoverJobsNode = async (state) => {
 
     const sourceAdapter = getJobSource(sourceName);
 
+    // If source is Naukri, ensure user has an active authenticated session
+    let restoredStorageState = null;
+    if (sourceName === 'naukri') {
+      const userId = config.userId;
+      if (!userId) {
+        throw new Error('User ID is required to search jobs on Naukri.');
+      }
+      restoredStorageState = await getDecryptedSessionForUser(userId);
+      if (!restoredStorageState) {
+        throw new Error(
+          'NAUKRI_AUTHENTICATION_REQUIRED: Valid authenticated Naukri session not found. Please connect your Naukri account before discovering jobs from Naukri.'
+        );
+      }
+    }
+
     browser = await createBrowser();
-    context = await browser.newContext({
+    const contextOptions = {
       userAgent:
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
       viewport: { width: 1280, height: 800 },
-    });
-    context.setDefaultTimeout(8000);
-    context.setDefaultNavigationTimeout(8000);
+    };
+    if (restoredStorageState) {
+      contextOptions.storageState = restoredStorageState;
+    }
+
+    context = await browser.newContext(contextOptions);
+    context.setDefaultTimeout(15000);
+    context.setDefaultNavigationTimeout(20000);
 
     // Context-level interceptor: abort media, fonts, and third-party trackers across ALL pages/tabs
     await context.route('**/*', (route) => {

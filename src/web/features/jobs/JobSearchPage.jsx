@@ -7,6 +7,8 @@ import { JobCard } from './JobCard';
 import { ApplicationReviewModal } from '../applications/ApplicationReviewModal';
 import { getDiscoveredJobsApi, discoverJobsApi, deleteJobApi } from '../../services/jobService';
 import { createApplicationApi } from '../../services/applicationService';
+import { getNaukriStatusApi } from '../../services/naukriService';
+import { NaukriConnectModal } from '../naukri/NaukriConnectModal';
 import { SettingsContext } from '../../context/SettingsContext';
 
 const AVAILABLE_LOCATIONS = ['Pune', 'Bengaluru', 'Hyderabad', 'Mumbai', 'Remote', 'Delhi NCR', 'Chennai'];
@@ -29,12 +31,25 @@ export const JobSearchPage = () => {
   const [toastMessage, setToastMessage] = useState('');
   const [isLocationDropdownOpen, setIsLocationDropdownOpen] = useState(false);
   const [customLocationInput, setCustomLocationInput] = useState('');
+  const [selectedSources, setSelectedSources] = useState(['naukri', 'jobViaReferral']);
+  const [excludeKeywords, setExcludeKeywords] = useState('Senior, Lead, Manager');
+  const [naukriStatus, setNaukriStatus] = useState(null);
+  const [isNaukriModalOpen, setIsNaukriModalOpen] = useState(false);
 
   const abortControllerRef = useRef(null);
 
   const showToast = (msg) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(''), 3000);
+  };
+
+  const fetchNaukriStatus = async () => {
+    try {
+      const res = await getNaukriStatusApi();
+      if (res.data) setNaukriStatus(res.data);
+    } catch {
+      // ignore
+    }
   };
 
   const fetchJobs = async () => {
@@ -66,6 +81,7 @@ export const JobSearchPage = () => {
 
   useEffect(() => {
     fetchJobs();
+    fetchNaukriStatus();
   }, []);
 
   useEffect(() => {
@@ -98,6 +114,13 @@ export const JobSearchPage = () => {
   };
 
   const handleSearch = async () => {
+    // If Naukri is selected and not connected, prompt user immediately
+    if (selectedSources.includes('naukri') && !naukriStatus?.connected) {
+      setIsNaukriModalOpen(true);
+      showToast('Naukri session is required to search on Naukri. Please connect your account.');
+      return;
+    }
+
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
@@ -110,19 +133,26 @@ export const JobSearchPage = () => {
         ? keyword.split(',').map((k) => k.trim()).filter(Boolean)
         : settings.jobSetting?.keywords || [];
 
+      const parsedExclude = excludeKeywords
+        ? excludeKeywords.split(',').map((k) => k.trim()).filter(Boolean)
+        : [];
+
       const searchConfig = {
         keywords: parsedKeywords,
         locations: selectedLocations.length > 0 ? selectedLocations : (settings.jobSetting?.locations || []),
-        sources: settings.jobSetting?.defaultSources || ['jobViaReferral', 'naukri', 'linkedin'],
+        sources: selectedSources.length > 0 ? selectedSources : ['jobViaReferral'],
         experience: { min: Number(minExp), max: Number(maxExp) },
+        excludeKeywords: parsedExclude,
         maxJobs: Number(scrapeLimit),
       };
 
       const res = await discoverJobsApi(searchConfig, { signal: controller.signal });
       if (res.data?.jobs && res.data.jobs.length > 0) {
         setJobs(res.data.jobs);
+        showToast(`Discovered & matched ${res.data.jobs.length} jobs.`);
       } else if (res.jobs && res.jobs.length > 0) {
         setJobs(res.jobs);
+        showToast(`Discovered & matched ${res.jobs.length} jobs.`);
       } else {
         fetchJobs();
       }
@@ -130,6 +160,13 @@ export const JobSearchPage = () => {
       if (err.name === 'AbortError') {
         console.log('Search operation canceled by user.');
       } else {
+        const errorMsg = err.response?.data?.message || err.message;
+        if (errorMsg?.includes('NAUKRI_AUTHENTICATION_REQUIRED') || errorMsg?.includes('Naukri session')) {
+          setIsNaukriModalOpen(true);
+          showToast('Naukri session expired or required. Please reconnect.');
+        } else {
+          showToast(errorMsg || 'Failed to discover jobs.');
+        }
         fetchJobs();
       }
     } finally {
@@ -337,34 +374,106 @@ export const JobSearchPage = () => {
           </div>
         </div>
 
-        {/* Advanced Filters: Exp and Scrape Limit */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1 border-t border-slate-100 mt-2 pt-3">
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider whitespace-nowrap">Min Exp:</span>
-            <input 
-              type="number" 
-              value={minExp} 
-              onChange={(e) => setMinExp(e.target.value)}
-              className="w-full bg-slate-50 border border-slate-200 rounded-md px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
-            />
+        {/* Job Sources & Advanced Filters */}
+        <div className="pt-3 border-t border-slate-100 space-y-3">
+          {/* Source Selector Row */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-50/70 p-2.5 rounded-lg border border-slate-200/80">
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Job Sources:</span>
+              
+              {/* Naukri Source Pill */}
+              <button
+                type="button"
+                onClick={() => {
+                  if (selectedSources.includes('naukri')) {
+                    setSelectedSources(selectedSources.filter((s) => s !== 'naukri'));
+                  } else {
+                    setSelectedSources([...selectedSources, 'naukri']);
+                  }
+                }}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold transition-all cursor-pointer ${
+                  selectedSources.includes('naukri')
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
+                }`}
+              >
+                <span>Naukri</span>
+                {naukriStatus?.connected ? (
+                  <span className="w-2 h-2 rounded-full bg-emerald-400" title="Connected" />
+                ) : (
+                  <span className="w-2 h-2 rounded-full bg-amber-400" title="Session required" />
+                )}
+              </button>
+
+              {/* JobViaReferral Source Pill */}
+              <button
+                type="button"
+                onClick={() => {
+                  if (selectedSources.includes('jobViaReferral')) {
+                    setSelectedSources(selectedSources.filter((s) => s !== 'jobViaReferral'));
+                  } else {
+                    setSelectedSources([...selectedSources, 'jobViaReferral']);
+                  }
+                }}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold transition-all cursor-pointer ${
+                  selectedSources.includes('jobViaReferral')
+                    ? 'bg-emerald-600 text-white shadow-xs'
+                    : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
+                }`}
+              >
+                <span>Referral Portal</span>
+              </button>
+            </div>
+
+            {/* Quick Naukri Session Manager Trigger */}
+            <button
+              type="button"
+              onClick={() => setIsNaukriModalOpen(true)}
+              className="text-xs font-semibold text-blue-600 hover:text-blue-800 underline flex items-center gap-1 self-start sm:self-auto cursor-pointer"
+            >
+              {naukriStatus?.connected ? '✓ Naukri Session Active (Manage)' : '⚠️ Connect Naukri Session'}
+            </button>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider whitespace-nowrap">Max Exp:</span>
-            <input 
-              type="number" 
-              value={maxExp} 
-              onChange={(e) => setMaxExp(e.target.value)}
-              className="w-full bg-slate-50 border border-slate-200 rounded-md px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
-            />
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider whitespace-nowrap">Scrape Limit:</span>
-            <input 
-              type="number" 
-              value={scrapeLimit} 
-              onChange={(e) => setScrapeLimit(e.target.value)}
-              className="w-full bg-slate-50 border border-slate-200 rounded-md px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
-            />
+
+          {/* Exclude Keywords and Limits */}
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+            <div className="sm:col-span-2 flex items-center gap-2">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider whitespace-nowrap">Exclude Keywords:</span>
+              <input 
+                type="text" 
+                placeholder="Senior, Lead, Manager (comma separated)..."
+                value={excludeKeywords} 
+                onChange={(e) => setExcludeKeywords(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-md px-2.5 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider whitespace-nowrap">Exp Range:</span>
+              <input 
+                type="number" 
+                title="Min Experience"
+                value={minExp} 
+                onChange={(e) => setMinExp(e.target.value)}
+                className="w-1/2 bg-slate-50 border border-slate-200 rounded-md px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+              <span className="text-slate-400 text-xs">-</span>
+              <input 
+                type="number" 
+                title="Max Experience"
+                value={maxExp} 
+                onChange={(e) => setMaxExp(e.target.value)}
+                className="w-1/2 bg-slate-50 border border-slate-200 rounded-md px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider whitespace-nowrap">Scrape Limit:</span>
+              <input 
+                type="number" 
+                value={scrapeLimit} 
+                onChange={(e) => setScrapeLimit(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-md px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+            </div>
           </div>
         </div>
 
@@ -446,6 +555,16 @@ export const JobSearchPage = () => {
           onApplicationUpdated={fetchJobs}
         />
       )}
+
+      {/* Naukri Session Modal */}
+      <NaukriConnectModal
+        isOpen={isNaukriModalOpen}
+        onClose={() => setIsNaukriModalOpen(false)}
+        onStatusChange={(data) => {
+          setNaukriStatus(data);
+          fetchJobs();
+        }}
+      />
     </div>
   );
 };

@@ -62,6 +62,23 @@ export const JobCard = ({ job, onApply, onReview, onDelete, applyingId }) => {
 
         <div className="space-y-1.5 min-w-0">
           <div className="pr-8"> {/* Padding for delete button */}
+            <div className="flex items-center gap-1.5 mb-1">
+              <span
+                className={`px-2 py-0.5 rounded text-[10px] font-extrabold uppercase tracking-wider ${
+                  job.source === 'naukri'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-emerald-600 text-white'
+                }`}
+              >
+                {job.source === 'naukri' ? 'Naukri' : 'Referral'}
+              </span>
+              {job.applicationMethod && (
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-600 uppercase">
+                  {job.applicationMethod === 'naukri' ? 'Naukri Apply' : job.applicationMethod.replace('_', ' ')}
+                </span>
+              )}
+            </div>
+
             <h3 className="text-base font-bold text-slate-900 group-hover:text-blue-600 transition-colors leading-snug">
               {job.title}
             </h3>
@@ -123,6 +140,21 @@ export const JobCard = ({ job, onApply, onReview, onDelete, applyingId }) => {
         </div>
 
         <div className="flex items-center gap-2">
+          {(job.sourceUrl || job.applicationUrl) && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={(e) => {
+                e.stopPropagation();
+                window.open(job.sourceUrl || job.applicationUrl, '_blank', 'noopener,noreferrer');
+              }}
+              className="px-3 text-xs font-semibold flex items-center gap-1 text-slate-600 hover:text-slate-900"
+              title="Open job posting"
+            >
+              <ExternalLink className="w-3.5 h-3.5" /> View
+            </Button>
+          )}
+
           <Button
             size="sm"
             onClick={(e) => {

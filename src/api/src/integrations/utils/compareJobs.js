@@ -58,8 +58,26 @@ export const compareJobWithConfig = (job = {}, searchConfig = {}) => {
     let skipReason = 'OTHER';
 
     const fullText = `${job.title || ''} ${job.description || ''} ${(job.skills || []).join(' ')} ${job.location || ''}`.toLowerCase();
+    const titleText = (job.title || '').toLowerCase();
 
-    // 0. Preferred Application Method Matching
+    // 0a. Exclude Keywords Filter (Step 21)
+    if (Array.isArray(searchConfig.excludeKeywords) && searchConfig.excludeKeywords.length > 0) {
+      for (const exKey of searchConfig.excludeKeywords) {
+        const normalizedEx = exKey.trim().toLowerCase();
+        if (normalizedEx && titleText.includes(normalizedEx)) {
+          failReasons.push(`Excluded keyword "${exKey}" found in job title "${job.title}"`);
+          return {
+            isMatch: false,
+            score: 0,
+            skipReason: 'KEYWORD_MISMATCH',
+            matchReasons,
+            failReasons
+          };
+        }
+      }
+    }
+
+    // 0b. Preferred Application Method Matching
     const preferredMethods = searchConfig.preferredApplicationMethods || searchConfig.preferredMethods || searchConfig.applicationMethods || searchConfig.methods;
     if (Array.isArray(preferredMethods) && preferredMethods.length > 0) {
       let detectedMethod = (job.applicationMethod || '').toLowerCase().trim();
@@ -145,6 +163,26 @@ export const compareJobWithConfig = (job = {}, searchConfig = {}) => {
           matchReasons,
           failReasons
         };
+      }
+    }
+
+    // 2b. Experience Matching (Step 21)
+    if (searchConfig.experience && typeof searchConfig.experience.max === 'number') {
+      const expStr = String(job.experienceRequired || '').toLowerCase();
+      const expMatch = expStr.match(/(\d+)\s*(?:-|to)?\s*(\d+)?\s*(?:yrs|years|year)?/i);
+      if (expMatch) {
+        const jobMinExp = parseInt(expMatch[1], 10);
+        const configuredMax = searchConfig.experience.max;
+        if (!isNaN(jobMinExp) && jobMinExp > configuredMax + 1) {
+          failReasons.push(`Required experience (${job.experienceRequired}) exceeds candidate limit (${configuredMax} yrs)`);
+          return {
+            isMatch: false,
+            score: 0,
+            skipReason: 'EXPERIENCE_MISMATCH',
+            matchReasons,
+            failReasons
+          };
+        }
       }
     }
 

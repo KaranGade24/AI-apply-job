@@ -13,6 +13,7 @@ dotenv.config();
 export const PORT = Number(process.env.PORT || 3000);
 export const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 export const JWT_SECRET = process.env.JWT_SECRET || 'default_fallback_secret';
+export const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || process.env.JWT_SECRET || 'naukri_aes256_encryption_secure_key_32';
 export const MONGO_URI = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/app_database';
 
 // Browser Automation envs
