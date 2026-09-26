@@ -20,8 +20,16 @@ export const discoverJobs = async (page, searchConfig = {}) => {
 
     const maxJobs = searchConfig.maxJobs || 15;
 
-    // 1. Critical Step 16: Verify authentication state before proceeding to discovery
+    // 1. Critical Step 16: Ensure page is on Naukri and verify authentication state
     await logJobEvent('naukriSource.discoverJobs', 'START', 'Verifying Naukri authentication state prior to search...');
+    
+    if (!page.url() || !page.url().includes('naukri.com')) {
+      await page.goto(NAUKRI_URLS.HOME, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(async () => {
+        await page.evaluate(() => window.stop()).catch(() => {});
+      });
+      await page.waitForTimeout(1500);
+    }
+
     const authState = await detectNaukriAuthState(page);
 
     if (!authState.authenticated) {

@@ -113,14 +113,8 @@ export const JobSearchPage = () => {
     showToast('Search canceled and filters reset.');
   };
 
-  const handleSearch = async () => {
-    // If Naukri is selected and not connected, prompt user immediately
-    if (selectedSources.includes('naukri') && !naukriStatus?.connected) {
-      setIsNaukriModalOpen(true);
-      showToast('Naukri session is required to search on Naukri. Please connect your account.');
-      return;
-    }
-
+  // Core job discovery execution
+  const executeJobSearch = async () => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
@@ -154,7 +148,8 @@ export const JobSearchPage = () => {
         setJobs(res.jobs);
         showToast(`Discovered & matched ${res.jobs.length} jobs.`);
       } else {
-        fetchJobs();
+        await fetchJobs();
+        showToast('Search completed.');
       }
     } catch (err) {
       if (err.name === 'AbortError') {
@@ -167,7 +162,7 @@ export const JobSearchPage = () => {
         } else {
           showToast(errorMsg || 'Failed to discover jobs.');
         }
-        fetchJobs();
+        await fetchJobs();
       }
     } finally {
       if (abortControllerRef.current === controller) {
@@ -175,6 +170,36 @@ export const JobSearchPage = () => {
       }
       setSearching(false);
     }
+  };
+
+  const handleSearch = async () => {
+    // 1. If Naukri is selected, verify live whether user is connected
+    if (selectedSources.includes('naukri')) {
+      let isConnected = Boolean(naukriStatus?.connected || naukriStatus?.status === 'connected');
+
+      // Live verification if local state is not yet marked connected
+      if (!isConnected) {
+        try {
+          const res = await getNaukriStatusApi();
+          if (res.data?.connected || res.data?.status === 'connected') {
+            isConnected = true;
+            setNaukriStatus(res.data);
+          }
+        } catch {
+          isConnected = false;
+        }
+      }
+
+      // If NOT connected, open connection window
+      if (!isConnected) {
+        setIsNaukriModalOpen(true);
+        showToast('Naukri connection is required to search on Naukri. Please connect your account.');
+        return;
+      }
+    }
+
+    // 2. If user IS connected (or Naukri not selected), PROCEED FURTHER to search jobs!
+    await executeJobSearch();
   };
 
   const handleApply = (job) => {
@@ -562,7 +587,13 @@ export const JobSearchPage = () => {
         onClose={() => setIsNaukriModalOpen(false)}
         onStatusChange={(data) => {
           setNaukriStatus(data);
-          fetchJobs();
+          if (data?.connected || data?.status === 'connected') {
+            setIsNaukriModalOpen(false);
+            showToast('Naukri session connected! Searching jobs now...');
+            executeJobSearch();
+          } else {
+            fetchJobs();
+          }
         }}
       />
     </div>

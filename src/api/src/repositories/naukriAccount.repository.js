@@ -8,6 +8,7 @@ import { logError } from '../utils/logger.js';
  */
 export const findNaukriAccountByUserId = async (userId) => {
   try {
+    if (!userId) return null;
     return await NaukriAccount.findOne({ userId });
   } catch (error) {
     await logError('naukriAccountRepository.findNaukriAccountByUserId', error.message);
@@ -23,6 +24,7 @@ export const findNaukriAccountByUserId = async (userId) => {
  */
 export const upsertNaukriAccount = async (userId, accountData) => {
   try {
+    if (!userId) throw new Error('Cannot upsert NaukriAccount without valid userId');
     return await NaukriAccount.findOneAndUpdate(
       { userId },
       {

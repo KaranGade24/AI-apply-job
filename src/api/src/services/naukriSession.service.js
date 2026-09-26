@@ -98,6 +98,7 @@ export const connectNaukriService = async (userId) => {
 
       return {
         success: true,
+        connected: true,
         status: NAUKRI_AUTH_STATUS.CONNECTED,
         authenticated: true,
         message: 'Naukri account is connected and session is valid.',
@@ -121,6 +122,7 @@ export const connectNaukriService = async (userId) => {
 
     return {
       success: false,
+      connected: false,
       status: nextStatus,
       authenticated: false,
       message:
@@ -238,6 +240,7 @@ export const saveManualLoginService = async (userId, sessionPayload = {}) => {
 
     return {
       success: true,
+      connected: true,
       status: NAUKRI_AUTH_STATUS.CONNECTED,
       authenticated: true,
       message: 'Naukri account successfully connected and session saved securely.',
