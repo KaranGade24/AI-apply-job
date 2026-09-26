@@ -16,7 +16,9 @@ import { APPLICATION_STATUS, RESUME_PAGE_COUNT, RESUME_TEMPLATES, resolveUserRes
 import { generateResumePdf } from "../pdf/resumePdfService.js";
 import { sendApplicationEmail } from "../integrations/email/emailService.js";
 import { formatAndCleanEmailBody } from "../agent/prompt/applicationEmail.js";
-import { getActiveResumeByUserId } from "../repositories/resume.repository.js";
+import { getActiveResumeByUserId, findOriginalResumeByUserId } from "../repositories/resume.repository.js";
+import { findUserProfileByUserId } from "../repositories/user.repository.js";
+import { getGeminiModel } from "../agent/config/modelConfig.js";
 import { runNaukriApplication } from "../integrations/applicationPlatforms/naukri/naukriApplication.js";
 import { extractPageContent } from "../application/pageAnalysis/pageContentExtractor.js";
 import { classifyPageWithLlm } from "../application/pageAnalysis/pageClassifierLlm.js";
@@ -994,7 +996,7 @@ export const analyzeEmployerPortalService = async (applicationId, userId) => {
           analyzedAt: new Date(),
         },
       },
-      { new: true }
+      { returnDocument: 'after' }
     ).populate("jobId");
 
     await updateApplicationStatus(applicationId, APPLICATION_STATUS.WAITING_FOR_REVIEW, {
@@ -1011,14 +1013,15 @@ export const analyzeEmployerPortalService = async (applicationId, userId) => {
 };
 
 /**
- * Advances the employer portal action based on the AI decision
- * (e.g. clicks the matched role accordion like "Node JS Developer" and its inner "Apply Now" button)
+ * Advances the employer portal action based on the AI decision or selected opening role
+ * (e.g. clicks the matched/selected role accordion like "Node JS Developer" and its inner "Apply Now" button)
  *
  * @param {string} applicationId
  * @param {string} userId
+ * @param {object} [specificRoleOverride] - Optional selected role ({ title, referenceId, targetButtonText })
  * @returns {Promise<object>} Updated application record
  */
-export const advanceEmployerPortalActionService = async (applicationId, userId) => {
+export const advanceEmployerPortalActionService = async (applicationId, userId, specificRoleOverride = null) => {
   let browser = null;
   let context = null;
   let page = null;
@@ -1071,9 +1074,9 @@ export const advanceEmployerPortalActionService = async (applicationId, userId) 
       await activePage.waitForTimeout(3000);
     }
 
-    // Re-verify current page content or execute action
+    // Execute navigation for specific role or AI matched role
     const currentAnalysis = application.pageAnalysis || {};
-    const navResult = await navigatePortalWithAiDecision(activePage, currentAnalysis, context);
+    const navResult = await navigatePortalWithAiDecision(activePage, currentAnalysis, context, specificRoleOverride);
     if (navResult.newPage) {
       activePage = navResult.newPage;
     }
@@ -1093,7 +1096,7 @@ export const advanceEmployerPortalActionService = async (applicationId, userId) 
           analyzedAt: new Date(),
         },
       },
-      { new: true }
+      { returnDocument: 'after' }
     ).populate("jobId");
 
     await updateApplicationStatus(applicationId, APPLICATION_STATUS.WAITING_FOR_REVIEW, {
@@ -1108,4 +1111,281 @@ export const advanceEmployerPortalActionService = async (applicationId, userId) 
     await BrowserManager.closeSafely({ page, context, browser });
   }
 };
+
+/**
+ * Tailors candidate resume and drafts outreach email specifically for a selected role on a career portal
+ *
+ * @param {string} applicationId
+ * @param {string} userId
+ * @param {object} roleDetails - { roleTitle, referenceId, jobDescription, experience, location, recipientEmail, template }
+ * @returns {Promise<object>} Tailored resume details and email draft
+ */
+export const tailorRoleOutreachService = async (applicationId, userId, roleDetails = {}) => {
+  try {
+    const application = await findApplicationById(applicationId);
+    if (!application) {
+      throw new appError("Application not found", 404);
+    }
+
+    const {
+      roleTitle = "Software Developer",
+      referenceId = "",
+      jobDescription = "",
+      experience = "",
+      location = "",
+      recipientEmail = "",
+      template = "ATS Modern",
+    } = roleDetails;
+
+    const [userProfile, activeResume] = await Promise.all([
+      findUserProfileByUserId(userId),
+      getActiveResumeByUserId(userId) || findOriginalResumeByUserId(userId),
+    ]);
+
+    const candidateName = userProfile?.personal?.fullName || userProfile?.name || "Candidate";
+    const candidateSkills = userProfile?.skills || activeResume?.parsedData?.skills || [];
+    const baseExperience = activeResume?.parsedData?.experience || [];
+
+    // Use Gemini model to generate a role-specific tailored resume and email draft
+    const model = await getGeminiModel(userId);
+    const prompt = `You are an AI Executive Career Specialist and ATS Optimizer.
+Candidate Name: "${candidateName}"
+Target Role Title: "${roleTitle}"
+Reference ID / Job Code: "${referenceId}"
+Required Experience: "${experience}"
+Location: "${location}"
+Role Context / Description:
+"""
+${jobDescription || `Hiring for ${roleTitle} with experience ${experience} at ${location}`}
+"""
+
+Candidate Base Profile:
+- Skills: ${JSON.stringify(candidateSkills)}
+- Experience Highlights: ${JSON.stringify(baseExperience.slice(0, 3))}
+
+TASK:
+1. Tailor the candidate's resume JSON data specifically aligned to "${roleTitle}".
+2. Generate a tailored email subject including the Ref ID (e.g., "Application for ${roleTitle} - Ref ID: ${referenceId || 'N/A'} - ${candidateName}").
+3. Compose a compelling, high-converting 3-paragraph outreach email body emphasizing relevant technical competencies.
+
+RETURN STRICT JSON ONLY:
+{
+  "tailoredResumeData": {
+    "personal": {
+      "name": "${candidateName}",
+      "email": "${userProfile?.personal?.email || ''}",
+      "phone": "${userProfile?.personal?.phone || ''}",
+      "location": "${userProfile?.personal?.location || ''}",
+      "links": []
+    },
+    "summary": "Tailored professional summary emphasizing ${roleTitle} qualifications",
+    "skills": ["Tailored skill 1", "Tailored skill 2"],
+    "experience": [
+      {
+        "role": "${roleTitle}",
+        "company": "Recent Experience",
+        "duration": "2022 - Present",
+        "bullets": ["Quantified bullet 1", "Quantified bullet 2"]
+      }
+    ],
+    "projects": [],
+    "education": []
+  },
+  "email": {
+    "recipient": "${recipientEmail || application.email?.recipient || ''}",
+    "subject": "Application for ${roleTitle} - Ref ID: ${referenceId || ''} - ${candidateName}",
+    "body": "Dear Hiring Team,\\n\\nI am writing to express my enthusiastic interest in the ${roleTitle} position (Ref ID: ${referenceId || 'N/A'})...\\n\\nSincerely,\\n${candidateName}"
+  }
+}`;
+
+    const response = await model.invoke(prompt);
+    const content = (response.content || "").trim();
+    const cleaned = content.replace(/^```json/i, "").replace(/^```/, "").replace(/```$/, "").trim();
+    const parsed = JSON.parse(cleaned);
+
+    const tailoredResumeData = parsed.tailoredResumeData || activeResume?.parsedData || {};
+    const emailData = parsed.email || {
+      recipient: recipientEmail || application.email?.recipient || "",
+      subject: `Application for ${roleTitle} - Ref ID: ${referenceId || ""}`,
+      body: `Dear Hiring Team,\n\nI am writing to apply for the ${roleTitle} position (Ref ID: ${referenceId || "N/A"}).\n\nSincerely,\n${candidateName}`,
+    };
+
+    // Generate ATS PDF for this specific role
+    let pdfPath = "";
+    try {
+      pdfPath = await generateResumePdf({
+        resumeData: tailoredResumeData,
+        template: template || "ats",
+        userId,
+      });
+    } catch (err) {
+      await logError("applicationService.tailorRoleOutreachService.pdfGen", err.message);
+    }
+
+    // Save into application roleOutreaches
+    const outreachRecord = {
+      roleTitle,
+      referenceId,
+      email: emailData.recipient,
+      subject: emailData.subject,
+      body: emailData.body,
+      pdfPath,
+      tailoredResumeData,
+      status: "draft",
+    };
+
+    const existingOutreaches = (application.pageAnalysis?.roleOutreaches || []).filter(
+      (r) => r.roleTitle !== roleTitle
+    );
+
+    const updated = await JobApplication.findByIdAndUpdate(
+      applicationId,
+      {
+        $set: {
+          "email.recipient": emailData.recipient,
+          "email.subject": emailData.subject,
+          "email.body": emailData.body,
+          "resume.tailoredResumeData": tailoredResumeData,
+          "resume.pdfPath": pdfPath,
+          "pageAnalysis.roleOutreaches": [...existingOutreaches, outreachRecord],
+        },
+      },
+      { returnDocument: 'after' }
+    ).populate("jobId");
+
+    await logJobEvent(
+      "tailorRoleOutreachService",
+      "TAILORED",
+      `Tailored resume & email for role: "${roleTitle}" (Ref ID: ${referenceId})`
+    );
+
+    return {
+      roleTitle,
+      referenceId,
+      email: emailData,
+      resume: {
+        tailoredResumeData,
+        pdfPath,
+      },
+      application: updated,
+    };
+  } catch (error) {
+    await logError("applicationService.tailorRoleOutreachService", error.message);
+    throw error;
+  }
+};
+
+/**
+ * Sends a direct application email for a specific role or from email instructions
+ *
+ * @param {string} applicationId
+ * @param {string} userId
+ * @param {object} emailPayload - { recipient, subject, body, pdfPath, roleTitle, referenceId }
+ * @returns {Promise<object>}
+ */
+export const sendDirectRoleEmailService = async (applicationId, userId, emailPayload = {}) => {
+  try {
+    const application = await findApplicationById(applicationId);
+    if (!application) {
+      throw new appError("Application not found", 404);
+    }
+
+    const {
+      recipient = application.email?.recipient,
+      subject = application.email?.subject,
+      body = application.email?.body,
+      pdfPath = application.resume?.pdfPath,
+      roleTitle = application.jobId?.title || "Role",
+      referenceId = "",
+    } = emailPayload;
+
+    if (!recipient || !subject || !body) {
+      throw new appError("Recipient, subject, and email body are required", 400);
+    }
+
+    // Send the email with PDF attachment
+    const sendResult = await sendApplicationEmail({
+      recipient,
+      subject,
+      body,
+      pdfPath,
+    });
+
+    const now = new Date();
+
+    // Mark application as Applied
+    const updated = await JobApplication.findByIdAndUpdate(
+      applicationId,
+      {
+        $set: {
+          status: APPLICATION_STATUS.APPLIED,
+          "email.recipient": recipient,
+          "email.subject": subject,
+          "email.body": body,
+          "email.sentAt": now,
+          "email.approved": true,
+          "email.approvedAt": now,
+        },
+        $push: {
+          "workflow.logs": {
+            timestamp: now,
+            event: "EMAIL_SENT_DIRECT",
+            message: `Direct application email sent to ${recipient} for role "${roleTitle}" (Ref: ${referenceId || "N/A"})`,
+          },
+        },
+      },
+      { returnDocument: 'after' }
+    ).populate("jobId");
+
+    await logJobEvent(
+      "sendDirectRoleEmailService",
+      "EMAIL_SENT",
+      `Sent application to ${recipient} (Message ID: ${sendResult?.messageId || "OK"})`
+    );
+
+    return updated;
+  } catch (error) {
+    await logError("applicationService.sendDirectRoleEmailService", error.message);
+    throw error;
+  }
+};
+
+/**
+ * Batch applies to multiple selected roles from a career portal
+ *
+ * @param {string} applicationId
+ * @param {string} userId
+ * @param {Array<object>} selectedRoles
+ * @returns {Promise<object>}
+ */
+export const applySelectedRolesBatchService = async (applicationId, userId, selectedRoles = []) => {
+  try {
+    if (!selectedRoles || selectedRoles.length === 0) {
+      throw new appError("No roles selected for batch application", 400);
+    }
+
+    const results = [];
+    for (const role of selectedRoles) {
+      const tailored = await tailorRoleOutreachService(applicationId, userId, {
+        roleTitle: role.title,
+        referenceId: role.referenceId,
+        jobDescription: role.descriptionSnippet || role.title,
+        experience: role.experience,
+        location: role.location,
+        recipientEmail: role.email,
+      });
+      results.push(tailored);
+    }
+
+    return {
+      success: true,
+      processedCount: results.length,
+      roles: results,
+    };
+  } catch (error) {
+    await logError("applicationService.applySelectedRolesBatchService", error.message);
+    throw error;
+  }
+};
+
 

@@ -504,19 +504,83 @@ export const analyzePortal = async (req, res, next) => {
 };
 
 /**
- * Advance employer portal action (e.g. click matched role accordion / inner Apply Now)
+ * Advance employer portal action (e.g. click matched or selected role accordion / inner Apply Now)
  */
 export const advancePortalAction = async (req, res, next) => {
   try {
     const { id } = req.params;
     const userId = req.user?.userId;
+    const { specificRole } = req.body || {};
 
-    const updated = await applicationService.advanceEmployerPortalActionService(id, userId);
+    const updated = await applicationService.advanceEmployerPortalActionService(id, userId, specificRole || null);
 
     return res.status(200).json({
       success: true,
       message: "Portal action executed successfully",
       data: updated,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Tailor resume and draft outreach email for a specific selected opening role
+ */
+export const tailorRoleOutreach = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user?.userId;
+    const roleDetails = req.body || {};
+
+    const result = await applicationService.tailorRoleOutreachService(id, userId, roleDetails);
+
+    return res.status(200).json({
+      success: true,
+      message: `Resume tailored and email drafted for ${roleDetails.roleTitle || 'selected role'}`,
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Send direct application email with tailored resume PDF attachment
+ */
+export const sendDirectRoleEmail = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user?.userId;
+    const emailPayload = req.body || {};
+
+    const updated = await applicationService.sendDirectRoleEmailService(id, userId, emailPayload);
+
+    return res.status(200).json({
+      success: true,
+      message: "Application email sent successfully with tailored resume",
+      data: updated,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Batch apply to multiple selected opening roles
+ */
+export const applySelectedRolesBatch = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user?.userId;
+    const { selectedRoles } = req.body || {};
+
+    const result = await applicationService.applySelectedRolesBatchService(id, userId, selectedRoles || []);
+
+    return res.status(200).json({
+      success: true,
+      message: `Successfully processed ${result.processedCount} selected roles`,
+      data: result,
     });
   } catch (error) {
     next(error);

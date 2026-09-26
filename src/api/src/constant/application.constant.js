@@ -36,6 +36,8 @@ export const APPLICATION_STATUS = Object.freeze({
 
 export const PORTAL_PAGE_TYPES = Object.freeze({
   JOB_LISTINGS_ACCORDION: "job_listings_accordion",
+  MULTI_OPENINGS: "multi_openings",
+  FORM_CLOSED: "form_closed",
   JOB_DESCRIPTION_PAGE: "job_description_page",
   APPLICATION_FORM: "application_form",
   EMAIL_INSTRUCTIONS: "email_instructions",

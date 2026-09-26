@@ -1,31 +1,35 @@
 import { logJobEvent, logError } from '../../utils/logger.js';
 
 /**
- * Executes navigation and interaction on the employer careers portal based on the AI LLM analysis.
+ * Executes navigation and interaction on the employer careers portal based on the AI LLM analysis
+ * or a specific role selected by the candidate.
  * Handles accordions, opening cards, inner "Apply Now" buttons, and popups.
  *
  * @param {import('playwright').Page} page
  * @param {object} analysis - The structured analysis output from classifyPageWithLlm
  * @param {object} [context] - Browser context to handle any new tabs opened
+ * @param {object} [specificRoleOverride] - Optional specific role selected by user ({ title, referenceId, targetButtonText })
  * @returns {Promise<{ success: boolean, newPage?: import('playwright').Page, navigated: boolean, message: string }>}
  */
-export const navigatePortalWithAiDecision = async (page, analysis, context = null) => {
+export const navigatePortalWithAiDecision = async (page, analysis, context = null, specificRoleOverride = null) => {
   try {
     if (!page || page.isClosed()) {
       return { success: false, navigated: false, message: 'Page is closed or not available' };
     }
 
-    const { nextRecommendedAction, matchedRole, pageType } = analysis;
+    const effectiveRole = specificRoleOverride || analysis?.matchedRole || {};
+    const nextRecommendedAction = specificRoleOverride ? 'click_opening_apply' : (analysis?.nextRecommendedAction || 'click_opening_apply');
+    const pageType = analysis?.pageType || 'job_listings_accordion';
 
     await logJobEvent(
       'pageNavigator',
       'NAVIGATE_START',
-      `Executing AI action: "${nextRecommendedAction}" for role: "${matchedRole?.title || 'Unknown'}"`
+      `Executing action: "${nextRecommendedAction}" for role: "${effectiveRole.title || 'Unknown'}" (Ref ID: ${effectiveRole.referenceId || 'N/A'})`
     );
 
     // 1. Action: Click Opening Accordion / Role Card and then click its inner "Apply Now"
     if (nextRecommendedAction === 'click_opening_apply' || pageType === 'job_listings_accordion') {
-      const roleTitle = matchedRole?.title || '';
+      const roleTitle = effectiveRole.title || '';
       let targetElement = null;
 
       // Step A: Locate the matching role element / accordion header
@@ -33,7 +37,7 @@ export const navigatePortalWithAiDecision = async (page, analysis, context = nul
         const titleLocators = [
           page.locator(`text="${roleTitle}"`).first(),
           page.locator(`:has-text("${roleTitle}")`).first(),
-          page.locator(`h1, h2, h3, h4, button, a`).filter({ hasText: roleTitle }).first(),
+          page.locator(`h1, h2, h3, h4, h5, button, a, div[class*="title" i], div[class*="header" i]`).filter({ hasText: roleTitle }).first(),
         ];
 
         for (const loc of titleLocators) {
@@ -49,11 +53,11 @@ export const navigatePortalWithAiDecision = async (page, analysis, context = nul
       if (targetElement) {
         await logJobEvent('pageNavigator', 'CLICK_ROLE', `Expanding role card: "${roleTitle}"`);
         await targetElement.click().catch(() => {});
-        await page.waitForTimeout(1000);
+        await page.waitForTimeout(1200);
       }
 
       // Step B: Locate the inner "Apply Now" or "Apply" button
-      const buttonText = matchedRole?.targetButtonText || 'Apply Now';
+      const buttonText = effectiveRole.targetButtonText || 'Apply Now';
       const applyBtnLocators = [
         // Inside parent container of matched role
         targetElement
@@ -63,11 +67,18 @@ export const navigatePortalWithAiDecision = async (page, analysis, context = nul
               .locator(`button:has-text("${buttonText}"), a:has-text("${buttonText}"), [role="button"]:has-text("${buttonText}")`)
               .first()
           : null,
+        targetElement
+          ? targetElement
+              .locator('..')
+              .locator(`button:has-text("${buttonText}"), a:has-text("${buttonText}"), [role="button"]:has-text("${buttonText}")`)
+              .first()
+          : null,
         page.locator(`button:has-text("${buttonText}")`).first(),
         page.locator(`a:has-text("${buttonText}")`).first(),
         page.locator(`[role="button"]:has-text("${buttonText}")`).first(),
         page.locator(`text="${buttonText}"`).first(),
         page.locator(`button:has-text("Apply")`).first(),
+        page.locator(`a:has-text("Apply")`).first(),
       ].filter(Boolean);
 
       let clicked = false;
@@ -76,7 +87,7 @@ export const navigatePortalWithAiDecision = async (page, analysis, context = nul
       for (const btnLoc of applyBtnLocators) {
         const visible = await btnLoc.isVisible().catch(() => false);
         if (visible) {
-          await logJobEvent('pageNavigator', 'CLICK_APPLY', `Clicking inner button: "${buttonText}"`);
+          await logJobEvent('pageNavigator', 'CLICK_APPLY', `Clicking inner button: "${buttonText}" for ${roleTitle}`);
 
           // Prepare to capture any new page / popup if company site uses target="_blank"
           let newPagePromise = null;
@@ -113,7 +124,7 @@ export const navigatePortalWithAiDecision = async (page, analysis, context = nul
       return {
         success: false,
         navigated: false,
-        message: `Could not locate inner "${buttonText}" button after expanding role.`,
+        message: `Expanded "${roleTitle}", but could not locate inner "${buttonText}" button.`,
       };
     }
 

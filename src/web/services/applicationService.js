@@ -99,9 +99,31 @@ export const analyzePortalApi = async (id) => {
   });
 };
 
-export const advancePortalActionApi = async (id) => {
+export const advancePortalActionApi = async (id, specificRole = null) => {
   return await fetchWithAuth(`/applications/${id}/advance-portal`, {
     method: 'POST',
+    body: JSON.stringify({ specificRole }),
+  });
+};
+
+export const tailorRoleOutreachApi = async (id, roleDetails = {}) => {
+  return await fetchWithAuth(`/applications/${id}/tailor-role`, {
+    method: 'POST',
+    body: JSON.stringify(roleDetails),
+  });
+};
+
+export const sendDirectRoleEmailApi = async (id, emailPayload = {}) => {
+  return await fetchWithAuth(`/applications/${id}/send-email-direct`, {
+    method: 'POST',
+    body: JSON.stringify(emailPayload),
+  });
+};
+
+export const applySelectedRolesBatchApi = async (id, selectedRoles = []) => {
+  return await fetchWithAuth(`/applications/${id}/apply-roles-batch`, {
+    method: 'POST',
+    body: JSON.stringify({ selectedRoles }),
   });
 };
 

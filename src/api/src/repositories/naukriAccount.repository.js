@@ -34,7 +34,7 @@ export const upsertNaukriAccount = async (userId, accountData) => {
           source: 'naukri'
         }
       },
-      { new: true, upsert: true, setDefaultsOnInsert: true }
+      { returnDocument: 'after', upsert: true, setDefaultsOnInsert: true }
     );
   } catch (error) {
     await logError('naukriAccountRepository.upsertNaukriAccount', error.message);
@@ -58,7 +58,7 @@ export const updateNaukriAccountStatus = async (userId, status, lastValidatedAt 
           lastValidatedAt
         }
       },
-      { new: true }
+      { returnDocument: 'after' }
     );
   } catch (error) {
     await logError('naukriAccountRepository.updateNaukriAccountStatus', error.message);
@@ -88,7 +88,7 @@ export const deleteNaukriAccountByUserId = async (userId) => {
           lastValidatedAt: null
         }
       },
-      { new: true }
+      { returnDocument: 'after' }
     );
   } catch (error) {
     await logError('naukriAccountRepository.deleteNaukriAccountByUserId', error.message);

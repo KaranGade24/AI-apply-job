@@ -38,6 +38,9 @@ import {
   saveEditedAnswersApi,
   analyzePortalApi,
   advancePortalActionApi,
+  tailorRoleOutreachApi,
+  sendDirectRoleEmailApi,
+  applySelectedRolesBatchApi,
 } from '../../services/applicationService';
 import { formatDate, getStatusBadgeStyle } from '../../utils/formatters';
 
@@ -67,6 +70,15 @@ export const ApplicationReviewModal = ({
   const [reviewAnswers, setReviewAnswers] = useState({});
   const [analyzingPortal, setAnalyzingPortal] = useState(false);
   const [advancingPortal, setAdvancingPortal] = useState(false);
+
+  // Multi-role & Direct Email Outreach state
+  const [tailoringRoleId, setTailoringRoleId] = useState(null);
+  const [sendingDirectEmail, setSendingDirectEmail] = useState(false);
+  const [selectedRolesBatch, setSelectedRolesBatch] = useState([]);
+  const [activeRoleDraft, setActiveRoleDraft] = useState(null);
+  const [roleDraftModalOpen, setRoleDraftModalOpen] = useState(false);
+  const [batchApplying, setBatchApplying] = useState(false);
+  const [selectedOpeningFilter, setSelectedOpeningFilter] = useState('');
 
   // Method & source detection
   const isNaukriSource = job?.source === 'naukri';
@@ -308,13 +320,17 @@ export const ApplicationReviewModal = ({
     }
   };
 
-  // Advance employer portal action (expand matched role & click inner Apply Now)
-  const handleAdvancePortalAction = async () => {
+  // Advance employer portal action (expand matched or selected role & click inner Apply Now)
+  const handleAdvancePortalAction = async (specificRole = null) => {
     if (!application?._id) return;
     setAdvancingPortal(true);
     try {
-      showToast('AI expanding matched role & clicking inner Apply Now button in browser...');
-      const res = await advancePortalActionApi(application._id);
+      showToast(
+        specificRole
+          ? `AI expanding "${specificRole.title}" & clicking Apply Now in browser...`
+          : 'AI expanding matched role & clicking inner Apply Now button in browser...'
+      );
+      const res = await advancePortalActionApi(application._id, specificRole);
       if (res?.data) {
         setApplication(res.data);
         if (res.data.status) {
@@ -328,6 +344,100 @@ export const ApplicationReviewModal = ({
       showToast('Failed to advance portal action: ' + (err.message || 'Please retry'));
     } finally {
       setAdvancingPortal(false);
+    }
+  };
+
+  // Generate tailored resume and email draft for a specific opening role
+  const handleTailorRoleOutreach = async (role) => {
+    if (!application?._id) return;
+    const roleTitle = role.title || 'Selected Role';
+    setTailoringRoleId(roleTitle);
+    try {
+      showToast(`Generating tailored resume and email draft for "${roleTitle}"...`);
+      const res = await tailorRoleOutreachApi(application._id, {
+        roleTitle: role.title,
+        referenceId: role.referenceId,
+        jobDescription: role.descriptionSnippet || role.title,
+        experience: role.experience,
+        location: role.location,
+        recipientEmail: role.email || application.pageAnalysis?.emailContact?.email,
+      });
+
+      if (res?.data) {
+        setActiveRoleDraft(res.data);
+        setRoleDraftModalOpen(true);
+        if (res.data.application) {
+          setApplication(res.data.application);
+        }
+        showToast(`Tailored resume & email generated for ${roleTitle}!`);
+      }
+      if (onApplicationUpdated) onApplicationUpdated();
+    } catch (err) {
+      showToast('Failed to tailor role: ' + (err.message || 'Please retry'));
+    } finally {
+      setTailoringRoleId(null);
+    }
+  };
+
+  // Send direct email for a role with tailored resume PDF attached
+  const handleSendRoleDirectEmail = async () => {
+    if (!application?._id || !activeRoleDraft) return;
+    setSendingDirectEmail(true);
+    try {
+      showToast(`Sending application email to ${activeRoleDraft.email.recipient}...`);
+      const res = await sendDirectRoleEmailApi(application._id, {
+        recipient: activeRoleDraft.email.recipient,
+        subject: activeRoleDraft.email.subject,
+        body: activeRoleDraft.email.body,
+        pdfPath: activeRoleDraft.resume?.pdfPath,
+        roleTitle: activeRoleDraft.roleTitle,
+        referenceId: activeRoleDraft.referenceId,
+      });
+
+      if (res?.data) {
+        setApplication(res.data);
+        setCurrentStatus('Applied');
+        setSelectedStatus('Applied');
+        setRoleDraftModalOpen(false);
+        showToast(`Application successfully emailed to ${activeRoleDraft.email.recipient}!`);
+      }
+      if (onApplicationUpdated) onApplicationUpdated();
+    } catch (err) {
+      showToast('Failed to send email: ' + (err.message || 'Please retry'));
+    } finally {
+      setSendingDirectEmail(false);
+    }
+  };
+
+  // Toggle selection for batch application
+  const toggleBatchRole = (role) => {
+    const roleId = role.id || role.title;
+    setSelectedRolesBatch((prev) => {
+      const exists = prev.some((r) => (r.id || r.title) === roleId);
+      if (exists) {
+        return prev.filter((r) => (r.id || r.title) !== roleId);
+      } else {
+        return [...prev, role];
+      }
+    });
+  };
+
+  // Batch apply to all selected roles
+  const handleBatchApplySelectedRoles = async () => {
+    if (!application?._id || selectedRolesBatch.length === 0) return;
+    setBatchApplying(true);
+    try {
+      showToast(`AI generating tailored resumes and processing ${selectedRolesBatch.length} selected roles...`);
+      const res = await applySelectedRolesBatchApi(application._id, selectedRolesBatch);
+      if (res?.data) {
+        showToast(`Successfully prepared tailored applications for ${res.data.processedCount} roles!`);
+        setSelectedRolesBatch([]);
+      }
+      if (onApplicationUpdated) onApplicationUpdated();
+    } catch (err) {
+      showToast('Batch application error: ' + (err.message || 'Please retry'));
+    } finally {
+      setBatchApplying(false);
     }
   };
 
@@ -1230,13 +1340,17 @@ export const ApplicationReviewModal = ({
                                   AI Page & Portal Intelligence
                                 </span>
                                 {application?.pageAnalysis?.pageType && (
-                                  <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider bg-indigo-100 text-indigo-800">
-                                    {application.pageAnalysis.pageType.replace(/_/g, ' ')}
+                                  <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider ${
+                                    application.pageAnalysis.isFormClosed || application.pageAnalysis.pageType === 'form_closed'
+                                      ? 'bg-rose-100 text-rose-800'
+                                      : 'bg-indigo-100 text-indigo-800'
+                                  }`}>
+                                    {application.pageAnalysis.isFormClosed ? 'FORM CLOSED / EXPIRED' : application.pageAnalysis.pageType.replace(/_/g, ' ')}
                                   </span>
                                 )}
                               </div>
                               <p className="text-[11px] text-slate-500">
-                                Analyzes rendered employer pages (accordions, job directories, forms, ref IDs) and decides actions
+                                Real-time AI analysis of rendered careers portal, multi-role openings, Google Forms status & email instructions
                               </p>
                             </div>
                           </div>
@@ -1253,94 +1367,266 @@ export const ApplicationReviewModal = ({
                           </Button>
                         </div>
 
+                        {/* Closed Form / Dead Google Form Detection Alert Banner */}
+                        {application?.pageAnalysis?.isFormClosed && (
+                          <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl space-y-2 text-xs">
+                            <div className="flex items-center gap-2 text-rose-800 font-bold">
+                              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                              <span>
+                                Application Form Closed / Inactive: {application.pageAnalysis.closedFormTitle || 'External Form'}
+                              </span>
+                            </div>
+                            <p className="text-rose-700 text-[11px] leading-relaxed">
+                              {application.pageAnalysis.closedFormMessage ||
+                                'The Google Form is no longer accepting responses. Direct email application to the recruiter with the required Reference ID is strongly recommended.'}
+                            </p>
+                            {application.pageAnalysis?.emailContact?.email && (
+                              <div className="pt-1 flex items-center justify-between gap-2">
+                                <span className="text-[11px] text-rose-900 font-semibold">
+                                  Recruiter Contact: <code className="font-mono bg-white px-1.5 py-0.5 rounded border border-rose-200">{application.pageAnalysis.emailContact.email}</code>
+                                </span>
+                                <Button
+                                  size="xs"
+                                  loading={tailoringRoleId === 'form_closed_email'}
+                                  onClick={() =>
+                                    handleTailorRoleOutreach({
+                                      title: job.title || 'Software Developer',
+                                      referenceId: application.pageAnalysis.emailContact.referenceId || application.pageAnalysis.matchedRole?.referenceId,
+                                      email: application.pageAnalysis.emailContact.email,
+                                      descriptionSnippet: job.description || job.title,
+                                    })
+                                  }
+                                  className="bg-rose-600 hover:bg-rose-700 text-white font-bold gap-1 cursor-pointer"
+                                >
+                                  <Mail className="w-3 h-3" />
+                                  <span>Generate Resume & Email Draft</span>
+                                </Button>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
                         {/* Display Analysis Results if available */}
                         {application?.pageAnalysis && (
                           <div className="space-y-3 pt-1 text-xs">
-                            <div className="p-3 bg-white rounded-lg border border-indigo-100 space-y-2">
+                            <div className="p-3 bg-white rounded-lg border border-indigo-100 space-y-3">
                               <p className="text-slate-700 leading-relaxed font-medium">
                                 {application.pageAnalysis.summary}
                               </p>
 
                               {/* Matched Opening Details (like "Node JS Developer", Reference Id: IN-NJ-01, Exp: 1-3 Years, Loc: Pune) */}
                               {application.pageAnalysis.matchedRole?.title && (
-                                <div className="p-2.5 bg-amber-50/70 rounded-lg border border-amber-200/80 space-y-1.5">
+                                <div className="p-3 bg-amber-50/70 rounded-xl border border-amber-200/80 space-y-2">
                                   <div className="flex items-center justify-between">
                                     <span className="text-[10px] font-bold text-amber-800 uppercase tracking-wider">
-                                      AI Matched Opening
+                                      AI Matched Opening for Candidate
                                     </span>
                                     {application.pageAnalysis.matchedRole.referenceId && (
-                                      <span className="px-1.5 py-0.5 bg-amber-200/70 text-amber-900 rounded font-mono text-[10px] font-bold">
+                                      <span className="px-2 py-0.5 bg-amber-200/80 text-amber-900 rounded font-mono text-[10px] font-bold">
                                         Ref ID: {application.pageAnalysis.matchedRole.referenceId}
                                       </span>
                                     )}
                                   </div>
-                                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-slate-800 font-semibold">
+                                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-slate-800 font-bold text-sm">
                                     <span>{application.pageAnalysis.matchedRole.title}</span>
                                     {application.pageAnalysis.matchedRole.experience && (
-                                      <span className="text-[11px] text-slate-500 font-normal">
+                                      <span className="text-xs text-slate-600 font-normal">
                                         • Exp: {application.pageAnalysis.matchedRole.experience}
                                       </span>
                                     )}
                                     {application.pageAnalysis.matchedRole.location && (
-                                      <span className="text-[11px] text-slate-500 font-normal">
+                                      <span className="text-xs text-slate-600 font-normal">
                                         • Loc: {application.pageAnalysis.matchedRole.location}
                                       </span>
                                     )}
                                   </div>
 
-                                  {application.pageAnalysis.nextRecommendedAction === 'click_opening_apply' && (
-                                    <div className="pt-1.5 flex items-center justify-between">
-                                      <span className="text-[11px] text-amber-900">
-                                        Target action: Click "{application.pageAnalysis.matchedRole.targetButtonText || 'Apply Now'}"
-                                      </span>
+                                  <div className="pt-1 flex flex-wrap items-center justify-between gap-2 border-t border-amber-200/50">
+                                    <span className="text-[11px] text-amber-900 font-medium">
+                                      Target Role Actions:
+                                    </span>
+                                    <div className="flex items-center gap-2">
+                                      <Button
+                                        size="xs"
+                                        loading={tailoringRoleId === application.pageAnalysis.matchedRole.title}
+                                        onClick={() =>
+                                          handleTailorRoleOutreach({
+                                            title: application.pageAnalysis.matchedRole.title,
+                                            referenceId: application.pageAnalysis.matchedRole.referenceId,
+                                            experience: application.pageAnalysis.matchedRole.experience,
+                                            location: application.pageAnalysis.matchedRole.location,
+                                            email: application.pageAnalysis.emailContact?.email,
+                                          })
+                                        }
+                                        className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold gap-1 shadow-xs cursor-pointer"
+                                      >
+                                        <Sparkles className="w-3 h-3" />
+                                        <span>⚡ Tailor Resume & Email</span>
+                                      </Button>
+
                                       <Button
                                         size="xs"
                                         loading={advancingPortal}
-                                        onClick={handleAdvancePortalAction}
+                                        onClick={() => handleAdvancePortalAction(application.pageAnalysis.matchedRole)}
                                         className="bg-amber-600 hover:bg-amber-700 text-white font-bold gap-1 shadow-xs cursor-pointer"
                                       >
                                         <ArrowRight className="w-3 h-3" />
                                         <span>Expand & Click Apply Now</span>
                                       </Button>
                                     </div>
-                                  )}
-                                </div>
-                              )}
-
-                              {/* Detected Openings List */}
-                              {application.pageAnalysis.detectedOpenings?.length > 0 && (
-                                <div className="pt-1">
-                                  <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider block mb-1">
-                                    Detected Roles on Page ({application.pageAnalysis.detectedOpenings.length}):
-                                  </span>
-                                  <div className="flex flex-wrap gap-1">
-                                    {application.pageAnalysis.detectedOpenings.slice(0, 8).map((role, idx) => (
-                                      <span
-                                        key={idx}
-                                        className={`px-2 py-0.5 rounded text-[10px] border ${
-                                          role.toLowerCase().includes((job.title || '').toLowerCase())
-                                            ? 'bg-blue-100 border-blue-300 text-blue-900 font-bold'
-                                            : 'bg-slate-50 border-slate-200 text-slate-600'
-                                        }`}
-                                      >
-                                        {role}
-                                      </span>
-                                    ))}
                                   </div>
                                 </div>
                               )}
 
-                              {/* Email application instructions */}
-                              {application.pageAnalysis.emailContact?.email && (
-                                <div className="p-2.5 bg-blue-50 rounded-lg border border-blue-200 space-y-1">
-                                  <span className="text-[10px] font-bold text-blue-900 uppercase tracking-wider block">
-                                    Direct Application Email Instructions
-                                  </span>
-                                  <div className="text-xs text-blue-800">
-                                    Send resume to: <strong className="font-mono">{application.pageAnalysis.emailContact.email}</strong>
-                                    {application.pageAnalysis.emailContact.referenceId && (
-                                      <span className="ml-2">with Ref ID: <strong className="font-mono">{application.pageAnalysis.emailContact.referenceId}</strong></span>
+                              {/* Multi-Openings Explorer & Selector */}
+                              {((application.pageAnalysis.openingsList && application.pageAnalysis.openingsList.length > 0) ||
+                                (application.pageAnalysis.detectedOpenings && application.pageAnalysis.detectedOpenings.length > 0)) && (
+                                <div className="space-y-2.5 pt-2 border-t border-slate-100">
+                                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                    <div>
+                                      <span className="text-xs font-bold text-slate-900 block">
+                                        All Openings Detected on Careers Portal ({application.pageAnalysis.openingsList?.length || application.pageAnalysis.detectedOpenings?.length || 0})
+                                      </span>
+                                      <p className="text-[11px] text-slate-500">
+                                        Click any role to generate a role-specific tailored resume and draft an email with its exact Ref ID
+                                      </p>
+                                    </div>
+
+                                    {selectedRolesBatch.length > 0 && (
+                                      <Button
+                                        size="xs"
+                                        loading={batchApplying}
+                                        onClick={handleBatchApplySelectedRoles}
+                                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold gap-1.5 cursor-pointer shrink-0"
+                                      >
+                                        <Sparkles className="w-3 h-3" />
+                                        <span>Apply to Selected ({selectedRolesBatch.length})</span>
+                                      </Button>
                                     )}
+                                  </div>
+
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-72 overflow-y-auto p-1 bg-slate-50/70 rounded-xl border border-slate-200">
+                                    {(application.pageAnalysis.openingsList && application.pageAnalysis.openingsList.length > 0
+                                      ? application.pageAnalysis.openingsList
+                                      : (application.pageAnalysis.detectedOpenings || []).map((t, i) => ({ id: `role-${i}`, title: t }))
+                                    ).map((role, idx) => {
+                                      const isSelected = selectedRolesBatch.some((r) => (r.id || r.title) === (role.id || role.title));
+                                      const isTargetMatch = role.title?.toLowerCase().includes((job.title || '').toLowerCase());
+                                      const isTailoringThis = tailoringRoleId === role.title;
+
+                                      return (
+                                        <div
+                                          key={role.id || idx}
+                                          className={`p-3 rounded-lg border transition-all flex flex-col justify-between gap-2 ${
+                                            isSelected
+                                              ? 'bg-emerald-50/80 border-emerald-300 shadow-xs'
+                                              : isTargetMatch
+                                              ? 'bg-blue-50/60 border-blue-200'
+                                              : 'bg-white border-slate-200 hover:border-indigo-300'
+                                          }`}
+                                        >
+                                          <div>
+                                            <div className="flex items-start justify-between gap-2">
+                                              <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-900 text-xs">
+                                                <input
+                                                  type="checkbox"
+                                                  checked={isSelected}
+                                                  onChange={() => toggleBatchRole(role)}
+                                                  className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 w-3.5 h-3.5"
+                                                />
+                                                <span>{role.title}</span>
+                                              </label>
+                                              {role.referenceId && (
+                                                <span className="px-1.5 py-0.5 bg-slate-100 text-slate-700 rounded font-mono text-[9px] font-bold shrink-0">
+                                                  {role.referenceId}
+                                                </span>
+                                              )}
+                                            </div>
+
+                                            {(role.experience || role.location) && (
+                                              <div className="flex items-center gap-2 mt-1 text-[10px] text-slate-500">
+                                                {role.experience && <span>Exp: {role.experience}</span>}
+                                                {role.location && <span>• Loc: {role.location}</span>}
+                                              </div>
+                                            )}
+
+                                            {role.descriptionSnippet && (
+                                              <p className="text-[10px] text-slate-500 line-clamp-2 mt-1">
+                                                {role.descriptionSnippet}
+                                              </p>
+                                            )}
+                                          </div>
+
+                                          <div className="flex items-center gap-1.5 pt-1 border-t border-slate-100">
+                                            <Button
+                                              size="xs"
+                                              variant="outline"
+                                              loading={isTailoringThis}
+                                              onClick={() => handleTailorRoleOutreach(role)}
+                                              className="flex-1 text-[10px] h-7 gap-1 text-indigo-700 border-indigo-200 hover:bg-indigo-50 font-bold cursor-pointer"
+                                            >
+                                              <Sparkles className="w-3 h-3 text-indigo-600" />
+                                              <span>Tailor & Draft</span>
+                                            </Button>
+
+                                            <Button
+                                              size="xs"
+                                              loading={advancingPortal}
+                                              onClick={() => handleAdvancePortalAction(role)}
+                                              className="flex-1 text-[10px] h-7 gap-1 bg-slate-800 hover:bg-slate-900 text-white font-bold cursor-pointer"
+                                            >
+                                              <ArrowRight className="w-3 h-3" />
+                                              <span>Apply (Web)</span>
+                                            </Button>
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Direct Application Email Instructions */}
+                              {application.pageAnalysis.emailContact?.email && (
+                                <div className="p-3 bg-linear-to-r from-blue-50 to-indigo-50/60 rounded-xl border border-blue-200 space-y-2">
+                                  <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-1.5">
+                                      <Mail className="w-4 h-4 text-blue-700" />
+                                      <span className="text-xs font-bold text-blue-900">
+                                        Direct Application Email Instructions
+                                      </span>
+                                    </div>
+                                    {application.pageAnalysis.emailContact.referenceId && (
+                                      <span className="px-2 py-0.5 bg-blue-100 text-blue-900 rounded font-mono text-[10px] font-bold">
+                                        Required Ref ID: {application.pageAnalysis.emailContact.referenceId}
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  <div className="text-xs text-blue-800">
+                                    Send tailored resume to: <strong className="font-mono bg-white px-1.5 py-0.5 rounded border border-blue-200">{application.pageAnalysis.emailContact.email}</strong>
+                                    {application.pageAnalysis.emailContact.referenceId && (
+                                      <span className="ml-2">with Ref ID in Subject</span>
+                                    )}
+                                  </div>
+
+                                  <div className="pt-1 flex items-center justify-end">
+                                    <Button
+                                      size="xs"
+                                      loading={tailoringRoleId === 'direct_email'}
+                                      onClick={() =>
+                                        handleTailorRoleOutreach({
+                                          title: job.title || 'Software Developer',
+                                          referenceId: application.pageAnalysis.emailContact.referenceId,
+                                          email: application.pageAnalysis.emailContact.email,
+                                          descriptionSnippet: job.description || job.title,
+                                        })
+                                      }
+                                      className="bg-blue-600 hover:bg-blue-700 text-white font-bold gap-1 cursor-pointer"
+                                    >
+                                      <Mail className="w-3 h-3" />
+                                      <span>⚡ Generate Tailored Resume & Email</span>
+                                    </Button>
                                   </div>
                                 </div>
                               )}
@@ -2138,6 +2424,149 @@ export const ApplicationReviewModal = ({
           </div>
         </div>
       </div>
+
+      {/* Role Outreach & Direct Email Sender Drawer / Modal */}
+      {roleDraftModalOpen && activeRoleDraft && (
+        <div className="fixed inset-0 z-60 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-200">
+            {/* Header */}
+            <div className="p-4 bg-linear-to-r from-indigo-900 to-slate-900 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="p-1.5 bg-indigo-500/30 rounded-lg">
+                  <Sparkles className="w-4 h-4 text-indigo-300" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-bold text-sm">Tailored Application Draft</h3>
+                    {activeRoleDraft.referenceId && (
+                      <span className="px-1.5 py-0.5 bg-indigo-500/40 text-indigo-200 rounded font-mono text-[10px] font-bold">
+                        Ref ID: {activeRoleDraft.referenceId}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-slate-300">{activeRoleDraft.roleTitle}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRoleDraftModalOpen(false)}
+                className="p-1 text-slate-400 hover:text-white rounded-lg hover:bg-white/10 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="p-5 space-y-4 overflow-y-auto text-xs flex-1">
+              {/* Recruiter Email & Subject */}
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                    Recruiter / Hiring Contact Email
+                  </label>
+                  <input
+                    type="email"
+                    value={activeRoleDraft.email.recipient}
+                    onChange={(e) =>
+                      setActiveRoleDraft((prev) => ({
+                        ...prev,
+                        email: { ...prev.email, recipient: e.target.value },
+                      }))
+                    }
+                    placeholder="e.g. Recruitment@Rajyugsolutions.com"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                    Email Subject Line (Includes Ref ID)
+                  </label>
+                  <input
+                    type="text"
+                    value={activeRoleDraft.email.subject}
+                    onChange={(e) =>
+                      setActiveRoleDraft((prev) => ({
+                        ...prev,
+                        email: { ...prev.email, subject: e.target.value },
+                      }))
+                    }
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-semibold focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                    Personalized Pitch / Email Body
+                  </label>
+                  <textarea
+                    rows={8}
+                    value={activeRoleDraft.email.body}
+                    onChange={(e) =>
+                      setActiveRoleDraft((prev) => ({
+                        ...prev,
+                        email: { ...prev.email, body: e.target.value },
+                      }))
+                    }
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs leading-relaxed focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              {/* Tailored Resume PDF Attachment Badge */}
+              <div className="p-3 bg-indigo-50/70 border border-indigo-200 rounded-xl flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 bg-indigo-600 text-white rounded-lg">
+                    <FileText className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span className="font-bold text-slate-900 block text-xs">
+                      Role-Tailored ATS Resume Attached
+                    </span>
+                    <span className="text-[10px] text-indigo-700">
+                      Auto-tailored for {activeRoleDraft.roleTitle} (Ref: {activeRoleDraft.referenceId || 'N/A'})
+                    </span>
+                  </div>
+                </div>
+
+                {application?._id && (
+                  <a
+                    href={`/api/applications/${application._id}/download-pdf`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 px-3 py-1.5 bg-white border border-indigo-300 hover:bg-indigo-50 text-indigo-700 rounded-lg font-bold text-[11px] transition-colors"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Download PDF</span>
+                  </a>
+                )}
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 border-t border-slate-200 bg-slate-50 flex items-center justify-between gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setRoleDraftModalOpen(false)}
+                className="cursor-pointer"
+              >
+                Cancel
+              </Button>
+
+              <Button
+                size="sm"
+                loading={sendingDirectEmail}
+                onClick={handleSendRoleDirectEmail}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold gap-1.5 px-5 cursor-pointer shadow-sm"
+              >
+                <Send className="w-3.5 h-3.5" />
+                <span>Send Application Email Now</span>
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

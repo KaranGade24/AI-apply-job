@@ -27,6 +27,9 @@ applicationRouter.put("/:id/answers", authMiddleware, applicationController.save
 applicationRouter.post("/:id/confirm", authMiddleware, applicationController.confirmFinal);
 applicationRouter.post("/:id/analyze-portal", authMiddleware, applicationController.analyzePortal);
 applicationRouter.post("/:id/advance-portal", authMiddleware, applicationController.advancePortalAction);
+applicationRouter.post("/:id/tailor-role", authMiddleware, applicationController.tailorRoleOutreach);
+applicationRouter.post("/:id/send-email-direct", authMiddleware, applicationController.sendDirectRoleEmail);
+applicationRouter.post("/:id/apply-roles-batch", authMiddleware, applicationController.applySelectedRolesBatch);
 
 /**
  * @swagger
