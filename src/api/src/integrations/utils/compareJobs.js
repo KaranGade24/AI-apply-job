@@ -100,19 +100,33 @@ export const compareJobWithConfig = (job = {}, searchConfig = {}) => {
       const targetDetected = normalizeStr(detectedMethod);
       const normalizedPreferred = preferredMethods.map(normalizeStr);
 
-      const isMethodSupported = normalizedPreferred.some(pref => {
+      const isMethodSupported = normalizedPreferred.some((pref) => {
         if (pref === targetDetected) return true;
         if (pref === 'any' || pref === 'all') return true;
         if ((pref === 'phone' || pref === 'phonenumber' || pref === 'call') && targetDetected === 'phone') return true;
         if ((pref === 'googleform' || pref === 'gform') && targetDetected === 'googleform') return true;
-        if ((pref === 'websiteform' || pref === 'siteform' || pref === 'portal') && 
-            (targetDetected === 'websiteform' || targetDetected === 'naukri' || targetDetected === 'direct' || targetDetected === 'companysite' || targetDetected === 'external')) return true;
-        if ((pref === 'naukri' || pref === 'direct' || pref === 'naukridirect' || pref === 'quickapply' || pref === 'apply') && 
-            (targetDetected === 'naukri' || targetDetected === 'direct' || targetDetected === 'websiteform' || targetDetected === 'companysite' || targetDetected === 'external')) return true;
+        if (
+          (pref === 'naukridirect' || pref === 'naukri' || pref === 'direct' || pref === 'quickapply') &&
+          (targetDetected === 'naukridirect' || targetDetected === 'naukri' || targetDetected === 'direct')
+        ) {
+          return true;
+        }
+        if (
+          (pref === 'companysite' || pref === 'external' || pref === 'company') &&
+          (targetDetected === 'companysite' || targetDetected === 'external' || targetDetected === 'company')
+        ) {
+          return true;
+        }
+        if (
+          (pref === 'websiteform' || pref === 'siteform' || pref === 'portal') &&
+          (targetDetected === 'websiteform' || targetDetected === 'naukri' || targetDetected === 'naukridirect' || targetDetected === 'companysite' || targetDetected === 'external')
+        ) {
+          return true;
+        }
         if (pref === 'email' && targetDetected === 'email') return true;
         if (pref === 'unknown' && targetDetected === 'unknown') return true;
         return false;
-      }) || targetDetected === 'naukri' || job.source === 'naukri';
+      });
 
       if (!isMethodSupported) {
         failReasons.push(`Application method '${detectedMethod}' is not included in user preferred methods [${preferredMethods.join(', ')}]`);

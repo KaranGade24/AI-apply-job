@@ -123,10 +123,19 @@ export const JobSearchPage = () => {
       const searchConfig = {
         keywords: parsedKeywords,
         locations: selectedLocations.length > 0 ? selectedLocations : (settings.jobSetting?.locations || []),
-        sources: selectedSources.length > 0 ? selectedSources : ['jobViaReferral'],
+        sources: selectedSources.length > 0 ? selectedSources : ['naukri', 'jobViaReferral'],
         experience: { min: Number(minExp), max: Number(maxExp) },
         excludeKeywords: parsedExclude,
         maxJobs: Number(scrapeLimit),
+        preferredApplicationMethods: settings.jobSetting?.preferredApplicationMethods || [
+          'email',
+          'googleForm',
+          'websiteForm',
+          'phone',
+          'unknown',
+          'naukri_direct',
+          'company_site',
+        ],
       };
 
       const res = await discoverJobsApi(searchConfig, { signal: controller.signal });

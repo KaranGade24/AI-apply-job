@@ -20,7 +20,7 @@ const settingSchema = new mongoose.Schema(
       headline: { type: String },
     },
     jobSetting: {
-      defaultSources: { type: [String], default: ["jobViaReferral", "naukri", "linkedin"] },
+      defaultSources: { type: [String], default: ["jobViaReferral", "naukri"] },
       keywords: { type: [String], default: [] },
       locations: { type: [String], default: [] },
       minExp: { type: Number, default: 0 },
@@ -34,7 +34,15 @@ const settingSchema = new mongoose.Schema(
       searchMode: { type: String, default: "byQuery" },
       preferredApplicationMethods: {
         type: [String],
-        default: ["email", "googleForm", "websiteForm", "phone", "unknown"],
+        default: [
+          "email",
+          "googleForm",
+          "websiteForm",
+          "phone",
+          "unknown",
+          "naukri_direct",
+          "company_site",
+        ],
       },
     },
     applicationSetting: {

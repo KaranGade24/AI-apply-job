@@ -6,6 +6,7 @@ import { getExistingSourceUrls } from '../../../repositories/job.repository.js';
 
 /**
  * Searches and scrapes real, live jobs from Naukri using an authenticated Playwright session
+ * Detects both Naukri 1-Click Apply (#apply-button) and Company Site Apply (#company-site-button)
  * @param {import('playwright').Page} page - Authenticated Playwright page instance
  * @param {object} searchConfig
  * @returns {Promise<Array<object>>} List of normalized real job objects
@@ -76,6 +77,18 @@ export const discoverJobs = async (page, searchConfig = {}) => {
                 const sal = item.placeholders?.find((p) => p.type === 'salary')?.label || 'Not Disclosed';
                 const tags = item.tagsAndSkills ? item.tagsAndSkills.split(',').map((s) => s.trim()) : (item.keySkills || []);
 
+                // Detect whether job is Company Site Apply or Naukri 1-Click Direct Apply
+                const isCompanySite = Boolean(
+                  item.isApplyOnCompanySite === true ||
+                  item.applyType === 'OFFSITE' ||
+                  item.applyType === 'EXTERNAL' ||
+                  item.staticUrl?.includes('company-site') ||
+                  item.companySiteUrl
+                );
+
+                const applicationMethod = isCompanySite ? 'company_site' : 'naukri_direct';
+                const applyButtonSelector = isCompanySite ? '#company-site-button' : '#apply-button';
+
                 capturedApiJobs.push({
                   title,
                   company,
@@ -87,9 +100,9 @@ export const discoverJobs = async (page, searchConfig = {}) => {
                   employmentType: 'fullTime',
                   description: item.jobDescription || item.snippet || `${title} at ${company} in ${loc}. Experience required: ${expReq}.`,
                   sourceUrl: jdUrl,
-                  applicationUrl: jdUrl,
-                  applicationMethod: 'naukri',
-                  applyButtonSelector: '#apply-button',
+                  applicationUrl: item.companySiteUrl || jdUrl,
+                  applicationMethod,
+                  applyButtonSelector,
                   source: 'naukri',
                   discoveredAt: new Date().toISOString()
                 });
@@ -128,7 +141,7 @@ export const discoverJobs = async (page, searchConfig = {}) => {
           { timeout: 8000 }
         ).catch(() => {});
 
-        // Scroll page down to trigger hydration and additional card loading
+        // Scroll page down to trigger hydration and card loading
         await page.evaluate(() => window.scrollBy(0, 800)).catch(() => {});
         await page.waitForTimeout(2000);
 
@@ -143,7 +156,7 @@ export const discoverJobs = async (page, searchConfig = {}) => {
           break;
         }
 
-        // Direct DOM Extraction of live job cards
+        // Direct DOM Extraction of live job cards with 1-click apply vs company-site detection
         const domJobs = await page.evaluate(() => {
           const items = [];
           const localSeen = new Set();
@@ -171,6 +184,17 @@ export const discoverJobs = async (page, searchConfig = {}) => {
               const expText = (expEl?.textContent || '').trim() || '0-2 Yrs';
               const salText = (salEl?.textContent || '').trim() || 'Not Disclosed';
 
+              const cardText = (card.textContent || '').toLowerCase();
+              const isCompanySite = Boolean(
+                card.querySelector('#company-site-button, button#company-site-button, .company-site-button, [class*="company-site"]') ||
+                cardText.includes('company site') ||
+                cardText.includes('apply on company') ||
+                href.includes('company-site')
+              );
+
+              const applicationMethod = isCompanySite ? 'company_site' : 'naukri_direct';
+              const applyButtonSelector = isCompanySite ? '#company-site-button' : '#apply-button';
+
               items.push({
                 title,
                 company: company || 'Naukri Verified Employer',
@@ -184,8 +208,8 @@ export const discoverJobs = async (page, searchConfig = {}) => {
                 source: 'naukri',
                 sourceUrl: href,
                 applicationUrl: href,
-                applicationMethod: 'naukri',
-                applyButtonSelector: '#apply-button',
+                applicationMethod,
+                applyButtonSelector,
                 discoveredAt: new Date().toISOString()
               });
             }
@@ -205,6 +229,7 @@ export const discoverJobs = async (page, searchConfig = {}) => {
                 !localSeen.has(href)
               ) {
                 localSeen.add(href);
+                const isCompanySite = href.includes('company-site');
                 items.push({
                   title,
                   company: 'Naukri Verified Employer',
@@ -218,8 +243,8 @@ export const discoverJobs = async (page, searchConfig = {}) => {
                   source: 'naukri',
                   sourceUrl: href,
                   applicationUrl: href,
-                  applicationMethod: 'naukri',
-                  applyButtonSelector: '#apply-button',
+                  applicationMethod: isCompanySite ? 'company_site' : 'naukri_direct',
+                  applyButtonSelector: isCompanySite ? '#company-site-button' : '#apply-button',
                   discoveredAt: new Date().toISOString()
                 });
               }

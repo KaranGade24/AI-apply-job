@@ -1,5 +1,5 @@
 import React, { useState, useContext } from 'react';
-import { Save, CheckCircle2 } from 'lucide-react';
+import { Save, CheckCircle2, Globe2, Briefcase } from 'lucide-react';
 import { Card } from '../../../components/ui/Card';
 import { Input } from '../../../components/ui/Input';
 import { Button } from '../../../components/ui/Button';
@@ -18,7 +18,15 @@ export const JobSettingTab = () => {
   const [maxJobsToSearch, setMaxJobsToSearch] = useState(settings.jobSetting?.maxJobsToSearch ?? 20);
   const [searchMode, setSearchMode] = useState(settings.jobSetting?.searchMode || 'byQuery');
   const [preferredMethods, setPreferredMethods] = useState(
-    settings.jobSetting?.preferredApplicationMethods || ['email', 'googleForm', 'phone', 'unknown']
+    settings.jobSetting?.preferredApplicationMethods || [
+      'email',
+      'googleForm',
+      'websiteForm',
+      'phone',
+      'unknown',
+      'naukri_direct',
+      'company_site',
+    ]
   );
   const [savedMsg, setSavedMsg] = useState('');
 
@@ -128,33 +136,90 @@ export const JobSettingTab = () => {
         </Card>
 
         {/* Preferred Application Methods */}
-        <Card className="p-6 space-y-4">
+        <Card className="p-6 space-y-5">
           <div>
             <h2 className="text-base font-bold text-slate-900">Preferred Application Methods</h2>
-            <p className="text-xs text-slate-500 mt-0.5">Filter discovered jobs by your preferred contact/application channel.</p>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Filter discovered jobs by your preferred contact and application channel.
+            </p>
           </div>
 
-          <div className="space-y-3 pt-2">
-            {[
-              { id: 'email', label: 'By Email (direct email application)' },
-              { id: 'googleForm', label: 'By Google Form (docs.google.com/forms)' },
-              { id: 'websiteForm', label: 'By Website Form (Direct careers page)' },
-              { id: 'phone', label: 'By Phone Number / Call' },
-              { id: 'unknown', label: 'Unknown / Generic Link' },
-            ].map(({ id, label }) => (
-              <label
-                key={id}
-                className="flex items-center gap-3 p-3 rounded-xl border border-slate-200 bg-slate-50/50 hover:bg-slate-100/80 cursor-pointer text-xs font-semibold text-slate-800"
-              >
+          {/* Naukri Specific Methods */}
+          <div className="space-y-2.5">
+            <div className="flex items-center gap-2">
+              <span className="px-2 py-0.5 bg-blue-600 text-white rounded text-[10px] font-black uppercase tracking-wider">
+                Naukri Portal Channels
+              </span>
+              <span className="text-xs text-slate-400 font-medium">Naukri.com apply types</span>
+            </div>
+
+            <div className="space-y-2">
+              <label className="flex items-start gap-3 p-3 rounded-xl border border-blue-200 bg-blue-50/40 hover:bg-blue-50/80 cursor-pointer text-xs font-semibold text-slate-800 transition-colors">
                 <input
                   type="checkbox"
-                  checked={preferredMethods.includes(id)}
-                  onChange={() => toggleMethod(id)}
-                  className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 w-4 h-4"
+                  checked={preferredMethods.includes('naukri_direct') || preferredMethods.includes('naukri')}
+                  onChange={() => toggleMethod('naukri_direct')}
+                  className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 w-4 h-4 mt-0.5"
                 />
-                <span>{label}</span>
+                <div>
+                  <span className="font-bold text-blue-900">Naukri 1-Click Apply</span>
+                  <p className="text-[11px] text-slate-500 font-normal mt-0.5">
+                    Direct in-portal application on Naukri via <code className="text-blue-700 font-mono bg-blue-100/70 px-1 py-0.5 rounded">id="apply-button"</code> using your authenticated Naukri profile.
+                  </p>
+                </div>
               </label>
-            ))}
+
+              <label className="flex items-start gap-3 p-3 rounded-xl border border-purple-200 bg-purple-50/40 hover:bg-purple-50/80 cursor-pointer text-xs font-semibold text-slate-800 transition-colors">
+                <input
+                  type="checkbox"
+                  checked={preferredMethods.includes('company_site')}
+                  onChange={() => toggleMethod('company_site')}
+                  className="rounded border-slate-300 text-purple-600 focus:ring-purple-500 w-4 h-4 mt-0.5"
+                />
+                <div>
+                  <span className="font-bold text-purple-900">Apply on Company Site</span>
+                  <p className="text-[11px] text-slate-500 font-normal mt-0.5">
+                    External employer portal redirect via <code className="text-purple-700 font-mono bg-purple-100/70 px-1 py-0.5 rounded">id="company-site-button"</code> (Workday, Taleo, Greenhouse, Lever, etc.).
+                  </p>
+                </div>
+              </label>
+            </div>
+          </div>
+
+          {/* Referral & Direct Channels */}
+          <div className="space-y-2.5 pt-2 border-t border-slate-100">
+            <div className="flex items-center gap-2">
+              <span className="px-2 py-0.5 bg-emerald-600 text-white rounded text-[10px] font-black uppercase tracking-wider">
+                Referral & Direct Channels
+              </span>
+              <span className="text-xs text-slate-400 font-medium">JobViaReferral & standard listings</span>
+            </div>
+
+            <div className="space-y-2">
+              {[
+                { id: 'email', label: 'By Email (direct email application)', desc: 'Direct resume and cover letter dispatch to hiring HR emails.' },
+                { id: 'googleForm', label: 'By Google Form (docs.google.com/forms)', desc: 'Applications submitted via Google Form links.' },
+                { id: 'websiteForm', label: 'By Website Form (Direct careers page)', desc: 'Official employer website forms and applicant portals.' },
+                { id: 'phone', label: 'By Phone Number / Call', desc: 'Recruiter or hiring contact phone numbers.' },
+                { id: 'unknown', label: 'Unknown / Generic Link', desc: 'Generic referral posts with custom external links.' },
+              ].map(({ id, label, desc }) => (
+                <label
+                  key={id}
+                  className="flex items-start gap-3 p-2.5 rounded-xl border border-slate-200 bg-slate-50/50 hover:bg-slate-100/80 cursor-pointer text-xs font-semibold text-slate-800 transition-colors"
+                >
+                  <input
+                    type="checkbox"
+                    checked={preferredMethods.includes(id)}
+                    onChange={() => toggleMethod(id)}
+                    className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 w-4 h-4 mt-0.5"
+                  />
+                  <div>
+                    <span>{label}</span>
+                    <p className="text-[11px] text-slate-500 font-normal mt-0.5">{desc}</p>
+                  </div>
+                </label>
+              ))}
+            </div>
           </div>
         </Card>
       </div>

@@ -73,8 +73,24 @@ export const JobCard = ({ job, onApply, onReview, onDelete, applyingId }) => {
                 {job.source === 'naukri' ? 'Naukri' : 'Referral'}
               </span>
               {job.applicationMethod && (
-                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-600 uppercase">
-                  {job.applicationMethod === 'naukri' ? 'Naukri Apply' : job.applicationMethod.replace('_', ' ')}
+                <span
+                  className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                    job.applicationMethod === 'naukri_direct' || job.applicationMethod === 'naukri'
+                      ? 'bg-blue-100 text-blue-800'
+                      : job.applicationMethod === 'company_site'
+                      ? 'bg-purple-100 text-purple-800'
+                      : job.applicationMethod === 'email'
+                      ? 'bg-emerald-100 text-emerald-800'
+                      : job.applicationMethod === 'googleForm'
+                      ? 'bg-amber-100 text-amber-800'
+                      : 'bg-slate-100 text-slate-700'
+                  }`}
+                >
+                  {job.applicationMethod === 'naukri_direct' || job.applicationMethod === 'naukri'
+                    ? 'Naukri 1-Click'
+                    : job.applicationMethod === 'company_site'
+                    ? 'Company Site'
+                    : job.applicationMethod.replace('_', ' ')}
                 </span>
               )}
             </div>

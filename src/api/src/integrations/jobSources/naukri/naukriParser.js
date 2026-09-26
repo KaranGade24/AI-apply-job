@@ -97,29 +97,33 @@ export const parseNaukriJobDetails = async (page, sourceUrl) => {
         workMode = 'workFromOffice';
       }
 
-      // 6. Application Method and Apply URL Detection (Steps 24 & 25)
-      let applicationMethod = 'naukri';
+      // 6. Application Method and Apply URL Detection
+      let applicationMethod = 'naukri_direct';
+      let applyButtonSelector = '#apply-button';
       let applicationUrl = url;
 
       // Check for Company Site apply button
       const companySiteBtn = document.querySelector(
-        'button:has-text("Apply on company site"), a:has-text("Apply on company site"), a.company-site-button, button.company-site-button, [class*="company-site"]'
+        '#company-site-button, button#company-site-button, button:has-text("Apply on company site"), a:has-text("Apply on company site"), a.company-site-button, button.company-site-button, [class*="company-site"]'
       );
       const externalLink = document.querySelector('a[href*="redirect"], a[href*="apply"], a.external-apply');
 
       if (companySiteBtn) {
         applicationMethod = 'company_site';
+        applyButtonSelector = '#company-site-button';
         if (companySiteBtn.tagName.toLowerCase() === 'a' && companySiteBtn.href) {
           applicationUrl = companySiteBtn.href;
         }
       } else if (externalLink && externalLink.href && !externalLink.href.includes('naukri.com')) {
-        applicationMethod = 'external';
+        applicationMethod = 'company_site';
+        applyButtonSelector = '#company-site-button';
         applicationUrl = externalLink.href;
       } else {
         // Standard Naukri 1-click apply button
-        const applyBtn = document.querySelector('#apply-button, button:has-text("Apply"), .apply-button');
+        const applyBtn = document.querySelector('#apply-button, button#apply-button, button:has-text("Apply"), .apply-button');
         if (applyBtn) {
-          applicationMethod = 'naukri';
+          applicationMethod = 'naukri_direct';
+          applyButtonSelector = '#apply-button';
           applicationUrl = url;
         }
       }
@@ -140,6 +144,7 @@ export const parseNaukriJobDetails = async (page, sourceUrl) => {
         sourceUrl: url,
         applicationUrl: applicationUrl || url,
         applicationMethod,
+        applyButtonSelector,
         discoveredAt: new Date().toISOString()
       };
     }, sourceUrl);
