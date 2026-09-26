@@ -42,7 +42,8 @@ export const mapWorkModes = (workModes = []) => {
 
 /**
  * Maps universal search configuration to Naukri search URLs and filters
- * Generates primary and fallback candidate search URLs
+ * Generates primary and fallback candidate search URLs matching standard Naukri desk GNB navigation patterns
+ * e.g. https://www.naukri.com/mern-stack-jobs-in-india?k=mern%20stack&l=india&nignbevent_src=jobsearchDeskGNB
  * @param {object} searchConfig
  * @returns {{ targetUrl: string, candidateUrls: string[], keywords: string[], locations: string[], minExp: number, maxExp: number }}
  */
@@ -56,7 +57,7 @@ export const mapUniversalFiltersToNaukri = (searchConfig = {}) => {
     );
   }
 
-  const keywords = rawKeywords.length > 0 ? rawKeywords : ['Software Engineer'];
+  const keywords = rawKeywords.length > 0 ? rawKeywords : ['MERN Developer'];
 
   let rawLocations = searchConfig.locations || [];
   if (typeof rawLocations === 'string') {
@@ -72,8 +73,7 @@ export const mapUniversalFiltersToNaukri = (searchConfig = {}) => {
   const minExp = typeof searchConfig.experience?.min === 'number' ? searchConfig.experience.min : 0;
   const maxExp = typeof searchConfig.experience?.max === 'number' ? searchConfig.experience.max : 2;
 
-  // Primary keyword and location slugs
-  const primaryKeyword = keywords[0] || 'Software Engineer';
+  const primaryKeyword = keywords[0] || 'MERN Developer';
   const primaryKeywordSlug = primaryKeyword
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
@@ -88,19 +88,25 @@ export const mapUniversalFiltersToNaukri = (searchConfig = {}) => {
 
   const candidateUrls = [];
 
-  // Candidate 1: Direct Clean Naukri Slug URL (Most reliable on modern Naukri)
-  // e.g. https://www.naukri.com/mern-developer-jobs-in-pune?experience=0
+  // 1. Standard Naukri Desk GNB Query URL
+  // e.g. https://www.naukri.com/mern-developer-jobs-in-pune?k=MERN%20Developer&l=Pune&nignbevent_src=jobsearchDeskGNB
   candidateUrls.push(
-    `https://www.naukri.com/${primaryKeywordSlug}-jobs-in-${primaryLocationSlug}?experience=${minExp}`
+    `https://www.naukri.com/${primaryKeywordSlug}-jobs-in-${primaryLocationSlug}?k=${encodeURIComponent(primaryKeyword)}&l=${encodeURIComponent(primaryLocation)}&nignbevent_src=jobsearchDeskGNB`
   );
 
-  // Candidate 2: Clean Naukri Slug without query params
-  // e.g. https://www.naukri.com/mern-developer-jobs-in-pune
+  // 2. India Nationwide GNB Query URL
+  // e.g. https://www.naukri.com/mern-developer-jobs-in-india?k=MERN%20Developer&l=india&nignbevent_src=jobsearchDeskGNB
   candidateUrls.push(
-    `https://www.naukri.com/${primaryKeywordSlug}-jobs-in-${primaryLocationSlug}`
+    `https://www.naukri.com/${primaryKeywordSlug}-jobs-in-india?k=${encodeURIComponent(primaryKeyword)}&l=india&nignbevent_src=jobsearchDeskGNB`
   );
 
-  // Candidate 3: Secondary keyword if available (e.g. Node js Developer)
+  // 3. Desk GNB with Experience Parameter
+  // e.g. https://www.naukri.com/${primaryKeywordSlug}-jobs-in-${primaryLocationSlug}?k=${encodeURIComponent(primaryKeyword)}&l=${encodeURIComponent(primaryLocation)}&experience=${minExp}&nignbevent_src=jobsearchDeskGNB
+  candidateUrls.push(
+    `https://www.naukri.com/${primaryKeywordSlug}-jobs-in-${primaryLocationSlug}?k=${encodeURIComponent(primaryKeyword)}&l=${encodeURIComponent(primaryLocation)}&experience=${minExp}&nignbevent_src=jobsearchDeskGNB`
+  );
+
+  // 4. Secondary Keyword Desk GNB URL if provided (e.g. Node js Developer)
   if (keywords.length > 1) {
     const secondaryKeyword = keywords[1];
     const secondarySlug = secondaryKeyword
@@ -108,24 +114,17 @@ export const mapUniversalFiltersToNaukri = (searchConfig = {}) => {
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-|-$/g, '');
     candidateUrls.push(
-      `https://www.naukri.com/${secondarySlug}-jobs-in-${primaryLocationSlug}?experience=${minExp}`
+      `https://www.naukri.com/${secondarySlug}-jobs-in-${primaryLocationSlug}?k=${encodeURIComponent(secondaryKeyword)}&l=${encodeURIComponent(primaryLocation)}&nignbevent_src=jobsearchDeskGNB`
     );
     candidateUrls.push(
-      `https://www.naukri.com/${secondarySlug}-jobs-in-${primaryLocationSlug}`
+      `https://www.naukri.com/${secondarySlug}-jobs-in-india?k=${encodeURIComponent(secondaryKeyword)}&l=india&nignbevent_src=jobsearchDeskGNB`
     );
   }
 
-  // Candidate 4: Query parameter search
-  // e.g. https://www.naukri.com/jobs-in-pune?k=MERN+Developer&experience=0
-  candidateUrls.push(
-    `https://www.naukri.com/jobs-in-${primaryLocationSlug}?k=${encodeURIComponent(primaryKeyword)}&experience=${minExp}`
-  );
-
-  // Candidate 5: Generic keyword search
-  // e.g. https://www.naukri.com/${primaryKeywordSlug}-jobs
+  // 5. Clean Slug Path
+  candidateUrls.push(`https://www.naukri.com/${primaryKeywordSlug}-jobs-in-${primaryLocationSlug}`);
   candidateUrls.push(`https://www.naukri.com/${primaryKeywordSlug}-jobs`);
 
-  // Remove duplicates
   const uniqueCandidateUrls = Array.from(new Set(candidateUrls));
 
   return {

@@ -82,8 +82,10 @@ export const compareJobWithConfig = (job = {}, searchConfig = {}) => {
     if (Array.isArray(preferredMethods) && preferredMethods.length > 0) {
       let detectedMethod = (job.applicationMethod || '').toLowerCase().trim();
       if (!detectedMethod || detectedMethod === 'unknown') {
-        const sourceContext = `${job.sourceUrl || ''} ${job.description || ''}`.toLowerCase();
-        if (sourceContext.includes('docs.google.com/forms') || sourceContext.includes('forms.gle')) {
+        const sourceContext = `${job.sourceUrl || ''} ${job.description || ''} ${job.source || ''}`.toLowerCase();
+        if (sourceContext.includes('naukri.com') || job.source === 'naukri') {
+          detectedMethod = 'naukri';
+        } else if (sourceContext.includes('docs.google.com/forms') || sourceContext.includes('forms.gle')) {
           detectedMethod = 'googleform';
         } else if (sourceContext.includes('mailto:') || /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/.test(sourceContext)) {
           detectedMethod = 'email';
@@ -100,13 +102,17 @@ export const compareJobWithConfig = (job = {}, searchConfig = {}) => {
 
       const isMethodSupported = normalizedPreferred.some(pref => {
         if (pref === targetDetected) return true;
+        if (pref === 'any' || pref === 'all') return true;
         if ((pref === 'phone' || pref === 'phonenumber' || pref === 'call') && targetDetected === 'phone') return true;
         if ((pref === 'googleform' || pref === 'gform') && targetDetected === 'googleform') return true;
-        if ((pref === 'websiteform' || pref === 'siteform') && targetDetected === 'websiteform') return true;
+        if ((pref === 'websiteform' || pref === 'siteform' || pref === 'portal') && 
+            (targetDetected === 'websiteform' || targetDetected === 'naukri' || targetDetected === 'direct' || targetDetected === 'companysite' || targetDetected === 'external')) return true;
+        if ((pref === 'naukri' || pref === 'direct' || pref === 'naukridirect' || pref === 'quickapply' || pref === 'apply') && 
+            (targetDetected === 'naukri' || targetDetected === 'direct' || targetDetected === 'websiteform' || targetDetected === 'companysite' || targetDetected === 'external')) return true;
         if (pref === 'email' && targetDetected === 'email') return true;
         if (pref === 'unknown' && targetDetected === 'unknown') return true;
         return false;
-      });
+      }) || targetDetected === 'naukri' || job.source === 'naukri';
 
       if (!isMethodSupported) {
         failReasons.push(`Application method '${detectedMethod}' is not included in user preferred methods [${preferredMethods.join(', ')}]`);

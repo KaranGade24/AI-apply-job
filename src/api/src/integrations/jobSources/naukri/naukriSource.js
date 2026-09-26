@@ -105,6 +105,7 @@ export const discoverJobs = async (page, searchConfig = {}) => {
                       sourceUrl: url,
                       applicationUrl: url,
                       applicationMethod: 'naukri',
+                      applyButtonSelector: '#apply-button',
                       source: 'naukri',
                       discoveredAt: new Date().toISOString()
                     };
@@ -192,6 +193,7 @@ export const discoverJobs = async (page, searchConfig = {}) => {
                   sourceUrl: href,
                   applicationUrl: href,
                   applicationMethod: 'naukri',
+                  applyButtonSelector: '#apply-button',
                   discoveredAt: new Date().toISOString()
                 });
               }
@@ -219,6 +221,7 @@ export const discoverJobs = async (page, searchConfig = {}) => {
                     sourceUrl: href,
                     applicationUrl: href,
                     applicationMethod: 'naukri',
+                    applyButtonSelector: '#apply-button',
                     discoveredAt: new Date().toISOString()
                   });
                 }
@@ -277,10 +280,11 @@ export const discoverJobs = async (page, searchConfig = {}) => {
           skills: comp.skills,
           workMode: comp.city.includes('Remote') ? 'remote' : comp.city.includes('Hybrid') ? 'hybrid' : 'workFromOffice',
           employmentType: 'fullTime',
-          description: `Immediate requirement for ${title} at ${comp.name}. Looking for strong hands-on expertise in ${comp.skills.slice(0, 3).join(', ')} with solid problem-solving abilities and agile workflows.`,
+          description: `Immediate requirement for ${title} at ${comp.name}. Role involves ${keywords.join(', ')} development with hands-on expertise in ${comp.skills.join(', ')}. Strong problem-solving abilities and agile workflows.`,
           sourceUrl,
           applicationUrl: sourceUrl,
           applicationMethod: 'naukri',
+          applyButtonSelector: '#apply-button',
           source: 'naukri',
           discoveredAt: new Date().toISOString()
         };
