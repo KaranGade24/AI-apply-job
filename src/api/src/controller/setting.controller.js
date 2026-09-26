@@ -6,7 +6,7 @@ import { appError } from "../utils/errors.js";
 
 export const getSettingsHandler = async (req, res, next) => {
   try {
-    const userId = req.user?.userId || req.query?.userId;
+    const userId = req.user?.userId;
     const settings = await getUserSettingsService(userId);
     return res.status(200).json({
       status: "success",
