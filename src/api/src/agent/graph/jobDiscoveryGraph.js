@@ -121,12 +121,38 @@ const discoverJobsNode = async (state) => {
       userAgent:
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
       viewport: { width: 1280, height: 800 },
+      locale: 'en-US',
+      timezoneId: 'Asia/Kolkata',
+      extraHTTPHeaders: {
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Sec-Ch-Ua': '"Chromium";v="128", "Not;A=Brand";v="24", "Google Chrome";v="128"',
+        'Sec-Ch-Ua-Mobile': '?0',
+        'Sec-Ch-Ua-Platform': '"Windows"',
+      }
     };
     if (restoredStorageState) {
       contextOptions.storageState = restoredStorageState;
     }
 
     context = await browser.newContext(contextOptions);
+
+    // Stealth evasion script to bypass Cloudflare/Akamai bot detection on Naukri
+    await context.addInitScript(() => {
+      try {
+        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+        Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+        Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+        window.chrome = {
+          runtime: {},
+          app: {},
+          csi: () => {},
+          loadTimes: () => {}
+        };
+      } catch {
+        // ignore
+      }
+    });
+
     context.setDefaultTimeout(15000);
     context.setDefaultNavigationTimeout(20000);
 

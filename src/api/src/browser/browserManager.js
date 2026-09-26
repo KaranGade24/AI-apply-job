@@ -53,6 +53,23 @@ export class BrowserManager {
 
       const context = await browser.newContext(contextOptions);
 
+      // Add stealth evasion script to bypass Cloudflare/Akamai bot detection
+      await context.addInitScript(() => {
+        try {
+          Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+          Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+          Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+          window.chrome = {
+            runtime: {},
+            app: {},
+            csi: () => {},
+            loadTimes: () => {}
+          };
+        } catch {
+          // ignore
+        }
+      });
+
       context.setDefaultTimeout(options.timeout || 15000);
       context.setDefaultNavigationTimeout(options.navigationTimeout || 20000);
 
