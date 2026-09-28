@@ -30,6 +30,7 @@ import { appError } from '../../../utils/errors.js';
 import {
   injectGoogleSessionIntoContext,
   detectGoogleAuthState,
+  getDecryptedGoogleSession,
 } from '../../../services/googleSession.service.js';
 import { handleGoogleFormApplication } from '../../../application/methods/googleFormApplicationMethod.js';
 
@@ -118,14 +119,28 @@ export const runNaukriApplication = async ({
       };
     }
 
-    // 3. Launch Playwright context with restored session
+    // 3. Launch Playwright context with restored session (combining Naukri & Google sessions)
+    const googleSession = await getDecryptedGoogleSession(userId);
+    let combinedStorageState = sessionState;
+    if (googleSession?.cookies?.length > 0) {
+      combinedStorageState = {
+        cookies: [
+          ...(sessionState?.cookies || []),
+          ...(googleSession.cookies || []),
+        ],
+        origins: [
+          ...(sessionState?.origins || []),
+          ...(googleSession.origins || []),
+        ],
+      };
+    }
+
     browser = await BrowserManager.launch();
     context = await BrowserManager.createContext(browser, {
-      storageState: sessionState,
+      storageState: combinedStorageState,
     });
 
-    // Automatically inject authenticated Google session into context
-    // This ensures any employer Google Form links or popups will be authenticated!
+    // Automatically inject authenticated Google session into context as backup
     await injectGoogleSessionIntoContext(context, userId);
 
     page = await context.newPage();

@@ -127,37 +127,100 @@ export const injectGoogleSessionIntoContext = async (context, userId) => {
       return false;
     }
 
+    // Sanitize cookies strictly conforming to Chromium CDP Storage.setCookies and RFC 6265bis
     const validCookies = session.cookies
       .filter((c) => c && c.name && c.value)
       .map((c) => {
-        let domain = c.domain || '.google.com';
-        if (!domain.startsWith('.') && !domain.includes('localhost')) {
-          domain = `.${domain}`;
-        }
-        return {
+        const isHostCookie = c.name.startsWith('__Host-');
+        const isSecureCookie = c.name.startsWith('__Secure-');
+        const isNoneSameSite = c.sameSite === 'None';
+
+        // Base cookie object
+        const cookie = {
           name: c.name,
           value: c.value,
-          domain,
           path: c.path || '/',
-          sameSite: c.sameSite === 'Strict' || c.sameSite === 'None' ? c.sameSite : 'Lax',
-          secure: c.secure !== false,
-          httpOnly: Boolean(c.httpOnly),
-          ...(typeof c.expires === 'number' && c.expires > 0 ? { expires: c.expires } : {}),
         };
+
+        // RFC 6265bis: __Host- cookies MUST NOT have domain set, and must have path: '/' and secure: true
+        if (isHostCookie) {
+          const host = (c.domain || 'accounts.google.com').replace(/^\./, '');
+          cookie.url = `https://${host}${cookie.path}`;
+          cookie.secure = true;
+        } else {
+          if (c.domain) {
+            cookie.domain = c.domain;
+          } else {
+            cookie.domain = '.google.com';
+          }
+          cookie.secure = isSecureCookie || isNoneSameSite || c.secure !== false;
+        }
+
+        // Chromium CDP: sameSite must be strictly 'Strict', 'Lax', or 'None'
+        if (c.sameSite === 'Strict' || c.sameSite === 'Lax' || c.sameSite === 'None') {
+          cookie.sameSite = c.sameSite;
+          if (cookie.sameSite === 'None') {
+            cookie.secure = true;
+          }
+        }
+
+        if (c.httpOnly !== undefined) {
+          cookie.httpOnly = Boolean(c.httpOnly);
+        }
+
+        // Chromium CDP: expires must be a positive integer timestamp (seconds) or omitted for session cookies
+        if (typeof c.expires === 'number' && c.expires > 0 && Number.isFinite(c.expires)) {
+          cookie.expires = Math.round(c.expires);
+        }
+
+        return cookie;
       });
 
-    if (validCookies.length > 0) {
+    if (validCookies.length === 0) return false;
+
+    // First attempt bulk addition
+    let successfullyAdded = 0;
+    try {
       await context.addCookies(validCookies);
+      successfullyAdded = validCookies.length;
+    } catch {
+      // If CDP throws 'Invalid cookie fields' on batch, add cookies individually with fallback
+      for (const cookie of validCookies) {
+        try {
+          await context.addCookies([cookie]);
+          successfullyAdded++;
+        } catch {
+          // If still fails with domain, try adding with url fallback
+          try {
+            const host = (cookie.domain || 'google.com').replace(/^\./, '');
+            const urlCookie = {
+              name: cookie.name,
+              value: cookie.value,
+              url: `https://${host}${cookie.path || '/'}`,
+              secure: true,
+              ...(cookie.httpOnly ? { httpOnly: true } : {}),
+            };
+            await context.addCookies([urlCookie]);
+            successfullyAdded++;
+          } catch {
+            // Non-critical cookie failed CDP validation; proceed with other cookies
+          }
+        }
+      }
+    }
+
+    if (successfullyAdded > 0) {
       await logJobEvent(
         'googleSessionService',
         'GOOGLE_SESSION_INJECTED',
-        `Successfully injected ${validCookies.length} Google session cookies into browser context for User: ${userId}`
+        `Successfully injected ${successfullyAdded}/${validCookies.length} Google session cookies into browser context for User: ${userId}`
       );
       return true;
     }
 
     return false;
   } catch (error) {
+    // Non-blocking log - never interrupt the main workflow
     await logError('googleSessionService.injectGoogleSessionIntoContext', error.message);
     return false;
   }

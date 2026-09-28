@@ -29,7 +29,10 @@ import { findNaukriAccountByUserId } from "../repositories/naukriAccount.reposit
 import { decryptValue } from "../utils/encryption.js";
 import { logError, logJobEvent } from "../utils/logger.js";
 import { appError } from "../utils/errors.js";
-import { injectGoogleSessionIntoContext } from "./googleSession.service.js";
+import {
+  injectGoogleSessionIntoContext,
+  getDecryptedGoogleSession,
+} from "./googleSession.service.js";
 
 /**
  * Checks if an application's status is "Locked" (already applied or further in the funnel),
@@ -1055,10 +1058,25 @@ export const analyzeEmployerPortalService = async (applicationId, userId) => {
       }
     }
 
+    const googleSession = await getDecryptedGoogleSession(userId);
+    let combinedStorageState = sessionState;
+    if (googleSession?.cookies?.length > 0) {
+      combinedStorageState = {
+        cookies: [
+          ...(sessionState?.cookies || []),
+          ...(googleSession.cookies || []),
+        ],
+        origins: [
+          ...(sessionState?.origins || []),
+          ...(googleSession.origins || []),
+        ],
+      };
+    }
+
     browser = await BrowserManager.launch();
     context = await BrowserManager.createContext(
       browser,
-      sessionState ? { storageState: sessionState } : {}
+      combinedStorageState ? { storageState: combinedStorageState } : {}
     );
     await injectGoogleSessionIntoContext(context, userId);
     page = await context.newPage();
@@ -1186,10 +1204,25 @@ export const advanceEmployerPortalActionService = async (applicationId, userId, 
       } catch (err) {}
     }
 
+    const googleSession = await getDecryptedGoogleSession(userId);
+    let combinedStorageState = sessionState;
+    if (googleSession?.cookies?.length > 0) {
+      combinedStorageState = {
+        cookies: [
+          ...(sessionState?.cookies || []),
+          ...(googleSession.cookies || []),
+        ],
+        origins: [
+          ...(sessionState?.origins || []),
+          ...(googleSession.origins || []),
+        ],
+      };
+    }
+
     browser = await BrowserManager.launch();
     context = await BrowserManager.createContext(
       browser,
-      sessionState ? { storageState: sessionState } : {}
+      combinedStorageState ? { storageState: combinedStorageState } : {}
     );
     await injectGoogleSessionIntoContext(context, userId);
     page = await context.newPage();
