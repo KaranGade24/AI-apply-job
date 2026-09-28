@@ -20,6 +20,7 @@ import { getActiveResumeByUserId, findOriginalResumeByUserId } from "../reposito
 import { findUserProfileByUserId } from "../repositories/user.repository.js";
 import { getGeminiModel } from "../agent/config/modelConfig.js";
 import { runNaukriApplication } from "../integrations/applicationPlatforms/naukri/naukriApplication.js";
+import { runGoogleFormApplication } from "../application/methods/googleFormApplicationMethod.js";
 import { extractPageContent } from "../application/pageAnalysis/pageContentExtractor.js";
 import { classifyPageWithLlm } from "../application/pageAnalysis/pageClassifierLlm.js";
 import { navigatePortalWithAiDecision } from "../application/pageAnalysis/pageNavigator.js";
@@ -1469,5 +1470,61 @@ export const applySelectedRolesBatchService = async (applicationId, userId, sele
     throw error;
   }
 };
+
+/**
+ * Retries Google Form application (e.g. after user connects Google session)
+ * @param {string} applicationId
+ * @param {string} userId
+ * @returns {Promise<object>}
+ */
+export const retryGoogleFormApplicationService = async (applicationId, userId) => {
+  try {
+    const application = await findApplicationById(applicationId);
+    if (!application) {
+      throw new appError("Application not found", 404);
+    }
+
+    if (!isUserAuthorized(application.userId, userId)) {
+      throw new appError("Unauthorized access to application", 403);
+    }
+
+    const job = application.jobId || {};
+    const googleFormUrl =
+      application.googleFormResult?.googleFormUrl ||
+      job.applicationUrl ||
+      job.sourceUrl;
+
+    if (!googleFormUrl) {
+      throw new appError("Google Form URL not found for this application", 400);
+    }
+
+    await logJobEvent(
+      'retryGoogleFormApplicationService',
+      'RETRY_START',
+      `Retrying Google Form application ${applicationId} on ${googleFormUrl}`
+    );
+
+    const activeResume = await getActiveResumeByUserId(userId);
+
+    const result = await runGoogleFormApplication({
+      applicationId,
+      googleFormUrl,
+      candidateInfo: application.resume?.tailoredResumeData || activeResume?.parsedData,
+      jobDetails: job,
+      userId,
+      resumePdfPath: application.resume?.pdfPath || null,
+    });
+
+    const updated = await findApplicationById(applicationId);
+    return {
+      application: updated,
+      formResult: result,
+    };
+  } catch (error) {
+    await logError('applicationService.retryGoogleFormApplicationService', error.message);
+    throw error;
+  }
+};
+
 
 

@@ -13,6 +13,7 @@ import applicationRouter from './src/router/application.router.js';
 import skippedApplicationRouter from './src/router/skippedApplication.router.js';
 import settingRouter from './src/router/setting.router.js';
 import naukriSessionRouter from './src/router/naukriSession.router.js';
+import googleSessionRouter from './src/router/googleSession.router.js';
 import { flexibleJsonParser } from './src/middlewares/customJsonParser.middleware.js';
 import { jsonSyntaxErrorHandler } from './src/middlewares/jsonError.middleware.js';
 import { swaggerOptions } from './src/config/swagger.js';
@@ -81,6 +82,7 @@ app.use('/api/applications', applicationRouter);
 app.use('/api/skipped-applications', skippedApplicationRouter);
 app.use('/api/settings', settingRouter);
 app.use('/api/job-sources/naukri', naukriSessionRouter);
+app.use('/api/google-session', googleSessionRouter);
 
 // 404 Handler for undefined API endpoints
 app.use((req, res, next) => {

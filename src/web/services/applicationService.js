@@ -134,5 +134,12 @@ export const applySelectedRolesBatchApi = async (id, selectedRoles = []) => {
   });
 };
 
+export const retryGoogleFormApi = async (id) => {
+  return await fetchWithAuth(`/applications/${id}/retry-google-form`, {
+    method: 'POST',
+  });
+};
+
+
 
 

@@ -5,6 +5,7 @@ import { classifyPageWithLlm } from '../pageAnalysis/pageClassifierLlm.js';
 import { inspectForm } from '../form/formInspector.js';
 import { isGoogleFormUrl } from '../googleForm/googleFormFiller.js';
 import { APPLICATION_STATUS } from '../../constant/application.constant.js';
+import { getDecryptedGoogleSession } from '../../services/googleSession.service.js';
 
 /**
  * UnknownPageHandler — Full browser-based AI agent for unknown application URLs.
@@ -44,10 +45,13 @@ export const analyzeUnknownPage = async ({ url, job, userId, sessionState = null
       `Analyzing unknown page: ${url}`
     );
 
+    const effectiveStorageState =
+      sessionState || (userId ? await getDecryptedGoogleSession(userId) : null);
+
     browser = await BrowserManager.launch();
     context = await BrowserManager.createContext(
       browser,
-      sessionState ? { storageState: sessionState } : {}
+      effectiveStorageState ? { storageState: effectiveStorageState } : {}
     );
     page = await context.newPage();
 

@@ -785,6 +785,19 @@ const googleFormApplicationNode = async (state) => {
       resumePdfPath: state.resumePdfPath || null,
     });
 
+    if (formResult.loginRequired) {
+      await logJobEvent(
+        "googleFormApplicationNode",
+        "LOGIN_REQUIRED",
+        `Google Form requires Google Account sign-in: ${formResult.loginUrl || googleFormUrl}`,
+      );
+
+      return {
+        googleFormResult: formResult,
+        status: APPLICATION_STATUS.GOOGLE_LOGIN_REQUIRED,
+      };
+    }
+
     if (formResult.formClosed) {
       // Google Form is closed — fall back to email if possible
       await logJobEvent(
@@ -817,6 +830,8 @@ const googleFormApplicationNode = async (state) => {
         hasResumeField: formResult.hasResumeField || false,
         submitted: formResult.submitted || false,
         formClosed: formResult.formClosed || false,
+        loginRequired: formResult.loginRequired || false,
+        loginUrl: formResult.loginUrl || "",
         errors: formResult.errors || [],
         submittedAt: formResult.submitted ? new Date() : null,
       });

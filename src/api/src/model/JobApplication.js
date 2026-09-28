@@ -214,6 +214,8 @@ const jobApplicationSchema = new mongoose.Schema(
       hasResumeField: { type: Boolean, default: false },
       submitted: { type: Boolean, default: false },
       formClosed: { type: Boolean, default: false },
+      loginRequired: { type: Boolean, default: false },
+      loginUrl: { type: String, default: "" },
       errors: [{ type: String }],
       submittedAt: { type: Date, default: null },
     },

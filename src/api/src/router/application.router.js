@@ -31,6 +31,7 @@ applicationRouter.post("/:id/advance-portal", authMiddleware, applicationControl
 applicationRouter.post("/:id/tailor-role", authMiddleware, applicationController.tailorRoleOutreach);
 applicationRouter.post("/:id/send-email-direct", authMiddleware, applicationController.sendDirectRoleEmail);
 applicationRouter.post("/:id/apply-roles-batch", authMiddleware, applicationController.applySelectedRolesBatch);
+applicationRouter.post("/:id/retry-google-form", authMiddleware, applicationController.retryGoogleForm);
 
 /**
  * @swagger

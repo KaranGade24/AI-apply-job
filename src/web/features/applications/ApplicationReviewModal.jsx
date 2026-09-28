@@ -42,7 +42,9 @@ import {
   tailorRoleOutreachApi,
   sendDirectRoleEmailApi,
   applySelectedRolesBatchApi,
+  retryGoogleFormApi,
 } from '../../services/applicationService';
+import { GoogleSessionModal } from '../google/GoogleSessionModal';
 import { formatDate, getStatusBadgeStyle } from '../../utils/formatters';
 
 export const ApplicationReviewModal = ({
@@ -73,6 +75,8 @@ export const ApplicationReviewModal = ({
   const [advancingPortal, setAdvancingPortal] = useState(false);
   const [refillingForm, setRefillingForm] = useState(false);
   const [savingAnswers, setSavingAnswers] = useState(false);
+  const [googleModalOpen, setGoogleModalOpen] = useState(false);
+  const [retryingGoogleForm, setRetryingGoogleForm] = useState(false);
 
   // Multi-role & Direct Email Outreach state
   const [tailoringRoleId, setTailoringRoleId] = useState(null);
@@ -349,6 +353,29 @@ export const ApplicationReviewModal = ({
       showToast('Refill error: ' + (err.message || 'Please retry'));
     } finally {
       setRefillingForm(false);
+    }
+  };
+
+  // Retries Google Form filling (e.g. after Google session connected)
+  const handleRetryGoogleForm = async () => {
+    if (!application?._id) return;
+    setRetryingGoogleForm(true);
+    try {
+      showToast('AI opening Google Form with authenticated session...');
+      const res = await retryGoogleFormApi(application._id);
+      if (res?.data) {
+        setApplication(res.data);
+        if (res.data.status) {
+          setCurrentStatus(res.data.status);
+          setSelectedStatus(res.data.status);
+        }
+      }
+      showToast(res?.message || 'Google Form operation completed!');
+      if (onApplicationUpdated) onApplicationUpdated();
+    } catch (err) {
+      showToast('Google Form error: ' + (err.message || 'Please retry'));
+    } finally {
+      setRetryingGoogleForm(false);
     }
   };
 
@@ -1008,6 +1035,21 @@ export const ApplicationReviewModal = ({
                       >
                         <Sparkles className="w-3.5 h-3.5 text-blue-600" />
                         <span>Tailor Resume</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setGoogleModalOpen(true)}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 rounded-lg text-xs font-semibold transition-colors shadow-2xs cursor-pointer"
+                        title="Connect or manage Google session for protected Google Forms"
+                      >
+                        <svg className="w-3.5 h-3.5" viewBox="0 0 24 24">
+                          <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                          <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                          <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                          <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+                        </svg>
+                        <span>Google Session</span>
                       </button>
 
                       {/* Status Selector + Submit Button */}
@@ -1938,6 +1980,103 @@ export const ApplicationReviewModal = ({
                     detectedMethod === 'websiteForm' ||
                     job.applicationUrl) && (
                     <div className="space-y-4">
+                      {/* Google Sign-In Required Alert Banner */}
+                      {(application?.googleFormResult?.loginRequired || currentStatus === 'google_login_required') && (
+                        <div className="p-4 rounded-xl border border-blue-200 bg-linear-to-r from-blue-50/80 to-indigo-50/70 space-y-3 shadow-xs">
+                          <div className="flex items-start gap-3">
+                            <div className="w-9 h-9 rounded-xl bg-white border border-blue-200 flex items-center justify-center shrink-0 shadow-2xs mt-0.5">
+                              <svg className="w-5 h-5" viewBox="0 0 24 24">
+                                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+                              </svg>
+                            </div>
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-2">
+                                <span className="px-2 py-0.5 bg-blue-700 text-white rounded text-[10px] font-black uppercase tracking-wider">
+                                  Google Authentication Required
+                                </span>
+                                <h4 className="text-xs font-bold text-slate-900">
+                                  Sign In to Continue to Google Forms
+                                </h4>
+                              </div>
+                              <p className="text-xs text-slate-600 leading-relaxed">
+                                This Google Form requires Google Account sign-in (e.g. for resume file attachment or limited responses). Connect your Google session cookies so AI can auto-fill and submit the form, or open the form directly in your browser.
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-blue-200/60">
+                            <div className="flex items-center gap-2">
+                              <Button
+                                size="xs"
+                                onClick={() => setGoogleModalOpen(true)}
+                                className="bg-blue-600 hover:bg-blue-700 text-white font-bold gap-1 cursor-pointer shadow-2xs"
+                              >
+                                <KeyRound className="w-3.5 h-3.5" />
+                                <span>Connect Google Session</span>
+                              </Button>
+
+                              <Button
+                                size="xs"
+                                variant="outline"
+                                loading={retryingGoogleForm}
+                                onClick={handleRetryGoogleForm}
+                                className="text-blue-700 border-blue-300 hover:bg-blue-100/60 font-bold gap-1 cursor-pointer"
+                              >
+                                <RefreshCw className={`w-3.5 h-3.5 ${retryingGoogleForm ? 'animate-spin' : ''}`} />
+                                <span>Retry Auto-Fill</span>
+                              </Button>
+                            </div>
+
+                            <a
+                              href={application?.googleFormResult?.loginUrl || job.applicationUrl || job.sourceUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center gap-1 px-3 py-1.5 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-bold transition-colors cursor-pointer"
+                            >
+                              <span>Open Form in Browser</span>
+                              <ExternalLink className="w-3.5 h-3.5" />
+                            </a>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Google Form Successful Submission Banner */}
+                      {application?.googleFormResult?.submitted && (
+                        <div className="p-4 rounded-xl border border-emerald-200 bg-emerald-50/70 space-y-2">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+                              <span className="text-xs font-bold text-emerald-900">
+                                Google Form Submitted Successfully by AI!
+                              </span>
+                            </div>
+                            <span className="px-2.5 py-0.5 bg-emerald-200 text-emerald-900 rounded-full font-bold text-[10px]">
+                              {application.googleFormResult.filledCount || 0} Fields Filled
+                            </span>
+                          </div>
+                          <p className="text-xs text-emerald-700 leading-relaxed">
+                            All detected questions were answered and submitted to the employer's Google Form.
+                            {application.googleFormResult.hasResumeField && ' Your tailored ATS resume was uploaded successfully.'}
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Closed Google Form Banner */}
+                      {application?.googleFormResult?.formClosed && (
+                        <div className="p-3.5 rounded-xl border border-rose-200 bg-rose-50 text-xs text-rose-800 space-y-1">
+                          <div className="flex items-center gap-2 font-bold">
+                            <AlertCircle className="w-4 h-4 text-rose-600" />
+                            <span>Google Form Closed</span>
+                          </div>
+                          <p className="text-[11px] text-rose-700">
+                            This Google Form is no longer accepting responses. Consider applying directly via email if recruiter contact is available.
+                          </p>
+                        </div>
+                      )}
+
                       {/* Direct External Link */}
                       <div className="p-4 rounded-xl border border-blue-200 bg-blue-50/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                         <div>
@@ -1946,18 +2085,32 @@ export const ApplicationReviewModal = ({
                               ? 'Google Form Application Link'
                               : 'Official Application URL'}
                           </p>
-                          <p className="text-xs text-blue-700 mt-0.5 truncate max-w-lg">
+                          <p className="text-xs text-blue-700 mt-0.5 truncate max-w-lg font-mono">
                             {job.applicationUrl || job.sourceUrl}
                           </p>
                         </div>
-                        <a
-                          href={job.applicationUrl || job.sourceUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-colors whitespace-nowrap"
-                        >
-                          Open Form <ExternalLink className="w-3.5 h-3.5" />
-                        </a>
+                        <div className="flex items-center gap-2">
+                          {detectedMethod === 'googleForm' && (
+                            <Button
+                              size="xs"
+                              variant="outline"
+                              loading={retryingGoogleForm}
+                              onClick={handleRetryGoogleForm}
+                              className="text-blue-700 border-blue-300 hover:bg-blue-100/60 font-bold gap-1 cursor-pointer"
+                            >
+                              <RefreshCw className={`w-3.5 h-3.5 ${retryingGoogleForm ? 'animate-spin' : ''}`} />
+                              <span>Re-fill Form</span>
+                            </Button>
+                          )}
+                          <a
+                            href={job.applicationUrl || job.sourceUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-colors whitespace-nowrap"
+                          >
+                            Open Form <ExternalLink className="w-3.5 h-3.5" />
+                          </a>
+                        </div>
                       </div>
 
                       {/* Quick Auto-Fill Cheat Sheet for Form Completion */}
@@ -2095,22 +2248,82 @@ export const ApplicationReviewModal = ({
                   )}
 
                   {/* 5. PHONE / WHATSAPP CHANNEL VERIFICATION */}
-                  {!isNaukri && detectedMethod === 'phone' && (
-                    <div className="p-4 rounded-xl border border-purple-200 bg-purple-50/50 space-y-3">
-                      <div className="flex items-center justify-between">
+                  {!isNaukri && (detectedMethod === 'phone' || application?.phoneApplication) && (
+                    <div className="space-y-4">
+                      <div className="p-4 rounded-xl border border-purple-200 bg-purple-50/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                         <div>
-                          <p className="text-xs font-bold text-purple-900">Direct Contact Number</p>
-                          <p className="text-sm font-bold text-purple-800 mt-0.5">
-                            {job.contactNumber || 'Contact provided in job posting'}
+                          <div className="flex items-center gap-2">
+                            <span className="px-2 py-0.5 bg-purple-700 text-white rounded text-[10px] font-black uppercase tracking-wider">
+                              Phone Application
+                            </span>
+                            <span className="text-xs font-bold text-purple-900">Direct Recruiter Contact</span>
+                          </div>
+                          <p className="text-sm font-bold text-purple-800 mt-1">
+                            {application?.phoneApplication?.phoneNumber || job.phone || job.contactNumber || 'Contact number in posting'}
                           </p>
+                          {application?.phoneApplication?.bestTimeToCall && (
+                            <p className="text-[11px] text-purple-700 mt-0.5">
+                              Recommended time: <strong>{application.phoneApplication.bestTimeToCall}</strong>
+                            </p>
+                          )}
                         </div>
-                        {job.contactNumber && (
+                        {(application?.phoneApplication?.phoneNumber || job.phone || job.contactNumber) && (
                           <a
-                            href={`tel:${job.contactNumber}`}
-                            className="px-3.5 py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-lg transition-colors"
+                            href={`tel:${application?.phoneApplication?.phoneNumber || job.phone || job.contactNumber}`}
+                            className="inline-flex items-center gap-1.5 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-lg transition-colors whitespace-nowrap shadow-xs"
                           >
-                            Call Now
+                            <Phone className="w-3.5 h-3.5" />
+                            <span>Call Recruiter</span>
                           </a>
+                        )}
+                      </div>
+
+                      {/* Phone Call Script Card */}
+                      <div className="p-4 bg-white rounded-xl border border-slate-200 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                            <Sparkles className="w-3.5 h-3.5 text-purple-600" />
+                            <span>AI Word-for-Word Call Script</span>
+                          </h4>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              copyToClipboard(
+                                application?.phoneApplication?.callScript || body,
+                                'phone_script'
+                              )
+                            }
+                            className="text-purple-600 hover:text-purple-700 text-xs font-bold flex items-center gap-1 cursor-pointer"
+                          >
+                            {copiedKey === 'phone_script' ? (
+                              <Check className="w-3.5 h-3.5 text-emerald-600" />
+                            ) : (
+                              <Copy className="w-3.5 h-3.5" />
+                            )}
+                            <span>Copy Script</span>
+                          </button>
+                        </div>
+
+                        <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-700 leading-relaxed font-mono whitespace-pre-wrap">
+                          {application?.phoneApplication?.callScript ||
+                            `Hello, my name is ${candidateInfo?.fullName || 'Candidate'}. I am calling regarding the ${job.title} role at ${job.company}. I have strong experience in ${(job.skills || []).slice(0, 3).join(', ')} and would love to discuss how I can add immediate value to your team.`}
+                        </div>
+
+                        {/* Talking Points */}
+                        {application?.phoneApplication?.talkingPoints?.length > 0 && (
+                          <div className="space-y-1.5 pt-1">
+                            <span className="text-[11px] font-bold text-slate-600 uppercase tracking-wider">
+                              Key Talking Points:
+                            </span>
+                            <ul className="space-y-1 text-xs text-slate-700">
+                              {application.phoneApplication.talkingPoints.map((point, idx) => (
+                                <li key={idx} className="flex items-start gap-2">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-purple-500 mt-1.5 shrink-0" />
+                                  <span>{point}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
                         )}
                       </div>
                     </div>
@@ -2671,6 +2884,13 @@ export const ApplicationReviewModal = ({
           </div>
         </div>
       )}
+
+      {/* Google Session & Authentication Modal */}
+      <GoogleSessionModal
+        isOpen={googleModalOpen}
+        onClose={() => setGoogleModalOpen(false)}
+        onSessionSaved={() => handleRetryGoogleForm()}
+      />
     </div>
   );
 };

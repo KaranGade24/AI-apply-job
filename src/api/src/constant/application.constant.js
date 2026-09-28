@@ -23,6 +23,7 @@ export const APPLICATION_STATUS = Object.freeze({
   // Google Form application method statuses
   GOOGLE_FORM_FILLING: "google_form_filling",
   GOOGLE_FORM_SUBMITTED: "google_form_submitted",
+  GOOGLE_LOGIN_REQUIRED: "google_login_required",
   // Browser / unknown page analysis statuses
   ANALYZING_PORTAL: "analyzing_portal",
   SESSION_LOADING: "session_loading",

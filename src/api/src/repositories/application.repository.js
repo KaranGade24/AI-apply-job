@@ -331,6 +331,8 @@ export const updateApplicationGoogleForm = async (id, googleFormData = {}) => {
           "googleFormResult.hasResumeField": googleFormData.hasResumeField ?? false,
           "googleFormResult.submitted": googleFormData.submitted ?? false,
           "googleFormResult.formClosed": googleFormData.formClosed ?? false,
+          "googleFormResult.loginRequired": googleFormData.loginRequired ?? false,
+          "googleFormResult.loginUrl": googleFormData.loginUrl || "",
           "googleFormResult.errors": googleFormData.errors || [],
           "googleFormResult.submittedAt": googleFormData.submittedAt || (googleFormData.submitted ? new Date() : null),
         },

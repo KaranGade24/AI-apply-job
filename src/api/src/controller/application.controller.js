@@ -613,6 +613,27 @@ export const applySelectedRolesBatch = async (req, res, next) => {
 };
 
 /**
+ * Retry Google Form application (e.g. after user connects Google session)
+ */
+export const retryGoogleForm = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user?.userId;
+
+    const result = await applicationService.retryGoogleFormApplicationService(id, userId);
+
+    return res.status(200).json({
+      success: true,
+      message: result.formResult?.message || "Google Form retry completed",
+      data: result.application,
+      formResult: result.formResult,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * Delete a job application
  */
 export const deleteApplication = async (req, res, next) => {
