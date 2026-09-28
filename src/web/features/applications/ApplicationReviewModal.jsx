@@ -14,6 +14,7 @@ import {
   Clock,
   CheckCircle2,
   AlertCircle,
+  AlertTriangle,
   Globe,
   Phone,
   RefreshCw,
@@ -60,6 +61,8 @@ export const ApplicationReviewModal = ({
   const [actionLoading, setActionLoading] = useState(false);
   const [copiedKey, setCopiedKey] = useState(null);
   const [toastMsg, setToastMsg] = useState('');
+  const [toastType, setToastType] = useState('info'); // 'info' | 'success' | 'error'
+  const [actionError, setActionError] = useState('');
 
   // Application and draft state
   const [application, setApplication] = useState(initialApplication);
@@ -227,9 +230,22 @@ export const ApplicationReviewModal = ({
 
   if (!isOpen || !job) return null;
 
-  const showToast = (msg) => {
+  const showToast = (msg, type = 'info') => {
+    let determined = type;
+    if (type === 'info') {
+      const lower = (msg || '').toLowerCase();
+      if (lower.includes('error') || lower.includes('failed') || lower.includes('could not')) {
+        determined = 'error';
+      } else if (lower.includes('success') || lower.includes('applied') || lower.includes('saved')) {
+        determined = 'success';
+      }
+    }
     setToastMsg(msg);
-    setTimeout(() => setToastMsg(''), 3500);
+    setToastType(determined);
+    setTimeout(() => {
+      setToastMsg('');
+      setToastType('info');
+    }, 4500);
   };
 
   const copyToClipboard = (text, key) => {
@@ -852,8 +868,23 @@ export const ApplicationReviewModal = ({
 
         {/* Toast Notification */}
         {toastMsg && (
-          <div className="bg-emerald-600 text-white text-xs font-semibold px-4 py-2 text-center animate-in fade-in">
-            {toastMsg}
+          <div
+            className={`text-white text-xs font-semibold px-4 py-2 text-center flex items-center justify-center gap-2 animate-in fade-in ${
+              toastType === 'error'
+                ? 'bg-rose-600'
+                : toastType === 'success'
+                ? 'bg-emerald-600'
+                : 'bg-blue-600'
+            }`}
+          >
+            {toastType === 'error' ? (
+              <AlertCircle className="w-4 h-4 shrink-0" />
+            ) : toastType === 'success' ? (
+              <CheckCircle2 className="w-4 h-4 shrink-0" />
+            ) : (
+              <Sparkles className="w-4 h-4 shrink-0" />
+            )}
+            <span>{toastMsg}</span>
           </div>
         )}
 
