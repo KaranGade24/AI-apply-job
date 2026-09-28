@@ -1415,18 +1415,18 @@ export const ApplicationReviewModal = ({
                           <p className="text-xs text-purple-800">
                             Apply via <code className="font-mono bg-purple-100 px-1 py-0.5 rounded text-purple-900 font-bold">id="company-site-button"</code> (Workday, Taleo, Lever, Greenhouse, etc.).
                           </p>
-                          <p className="text-[11px] text-slate-500 truncate max-w-lg">
-                            {job.applicationUrl || job.sourceUrl}
+                          <p className="text-[11px] text-slate-500 truncate max-w-lg font-mono">
+                            {application?.pageAnalysis?.currentUrl || job.applicationUrl || job.sourceUrl}
                           </p>
                         </div>
                         <div className="flex items-center gap-2">
                           <a
-                            href={job.applicationUrl || job.sourceUrl}
+                            href={application?.pageAnalysis?.currentUrl || job.applicationUrl || job.sourceUrl}
                             target="_blank"
                             rel="noreferrer"
                             className="inline-flex items-center gap-1.5 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-xs font-bold transition-colors whitespace-nowrap"
                           >
-                            Open Company Careers Site <ExternalLink className="w-3.5 h-3.5" />
+                            Open Application / Careers Portal <ExternalLink className="w-3.5 h-3.5" />
                           </a>
                         </div>
                       </div>

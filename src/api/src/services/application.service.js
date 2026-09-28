@@ -953,8 +953,16 @@ export const analyzeEmployerPortalService = async (applicationId, userId) => {
     }
 
     const job = application.jobId || {};
-    const jobUrl = job.applicationUrl || job.sourceUrl;
-    if (!jobUrl) {
+    // Prioritize the actual application link if already discovered and external to Naukri
+    const currentPortalUrl = application.pageAnalysis?.currentUrl;
+    const isCurrentPortalExternal =
+      currentPortalUrl && !currentPortalUrl.includes("naukri.com/job-listings");
+
+    const targetUrl = isCurrentPortalExternal
+      ? currentPortalUrl
+      : job.applicationUrl || job.sourceUrl;
+
+    if (!targetUrl) {
       throw new appError("Job application URL is missing", 400);
     }
 
@@ -978,40 +986,58 @@ export const analyzeEmployerPortalService = async (applicationId, userId) => {
     page = await context.newPage();
 
     await updateApplicationStatus(applicationId, APPLICATION_STATUS.ANALYZING_PORTAL, {
-      logMessage: `Opening and analyzing employer portal for "${job.title}"...`,
+      logMessage: `Opening and analyzing actual application portal: ${targetUrl}...`,
     });
 
-    await page.goto(jobUrl, { waitUntil: "domcontentloaded", timeout: 25000 }).catch(async () => {
+    await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 25000 }).catch(async () => {
       await page.evaluate(() => window.stop()).catch(() => {});
     });
     await page.waitForTimeout(2000);
 
     // If on Naukri job page with #company-site-button, click it to reach the actual company portal
     let activePage = page;
-    const companySiteBtn = page
-      .locator(
-        '#company-site-button, button:has-text("Apply on company site"), a:has-text("Apply on company site")'
-      )
-      .first();
-    const hasCompanySiteBtn = await companySiteBtn.isVisible().catch(() => false);
+    const isNaukriListingPage = activePage.url().includes("naukri.com/job-listings");
+    if (isNaukriListingPage) {
+      const companySiteBtn = page
+        .locator(
+          '#company-site-button, button:has-text("Apply on company site"), a:has-text("Apply on company site")'
+        )
+        .first();
+      const hasCompanySiteBtn = await companySiteBtn.isVisible().catch(() => false);
 
-    if (hasCompanySiteBtn) {
-      await logJobEvent(
-        "analyzeEmployerPortalService",
-        "NAVIGATE_EXTERNAL",
-        "Clicking #company-site-button to navigate to employer careers site"
-      );
-      const newPagePromise = context.waitForEvent("page", { timeout: 6000 }).catch(() => null);
-      await companySiteBtn.click().catch(() => {});
-      const popup = await newPagePromise;
-      if (popup) {
-        await popup.waitForLoadState("domcontentloaded").catch(() => {});
-        activePage = popup;
+      if (hasCompanySiteBtn) {
+        await logJobEvent(
+          "analyzeEmployerPortalService",
+          "NAVIGATE_EXTERNAL",
+          "Clicking #company-site-button to navigate to employer careers site"
+        );
+        const newPagePromise = context.waitForEvent("page", { timeout: 6000 }).catch(() => null);
+        await companySiteBtn.click().catch(() => {});
+        const popup = await newPagePromise;
+        if (popup) {
+          await popup.waitForLoadState("domcontentloaded").catch(() => {});
+          activePage = popup;
+        }
+        await activePage.waitForTimeout(3000);
       }
-      await activePage.waitForTimeout(3000);
     }
 
-    // Extract rendered page content
+    const actualApplicationUrl = activePage.url();
+
+    // Permanently save the resolved actual application link in Job record if valid
+    const jobId = job._id || application.jobId;
+    if (
+      jobId &&
+      actualApplicationUrl &&
+      !actualApplicationUrl.includes("about:blank") &&
+      !actualApplicationUrl.includes("naukri.com/job-listings")
+    ) {
+      await Job.findByIdAndUpdate(jobId, {
+        applicationUrl: actualApplicationUrl,
+      }).catch(() => {});
+    }
+
+    // Extract rendered page content from the actual application / career page
     const extracted = await extractPageContent(activePage);
 
     // Send to Gemini AI LLM for semantic classification and next action decision
@@ -1023,15 +1049,15 @@ export const analyzeEmployerPortalService = async (applicationId, userId) => {
         pageAnalysis: {
           ...analysis,
           pageTitle: extracted.title,
-          currentUrl: activePage.url(),
+          currentUrl: actualApplicationUrl,
           analyzedAt: new Date(),
         },
       },
-      { returnDocument: 'after' }
+      { returnDocument: "after" }
     ).populate("jobId");
 
     await updateApplicationStatus(applicationId, APPLICATION_STATUS.WAITING_FOR_REVIEW, {
-      logMessage: `AI analyzed page: ${analysis.pageType}. ${analysis.summary}`,
+      logMessage: `AI analyzed actual page: ${analysis.pageType} (${actualApplicationUrl}). ${analysis.summary}`,
     });
 
     return updated;
@@ -1064,7 +1090,14 @@ export const advanceEmployerPortalActionService = async (applicationId, userId, 
     }
 
     const job = application.jobId || {};
-    const portalUrl = application.pageAnalysis?.currentUrl || job.applicationUrl || job.sourceUrl;
+    // Prioritize the actual application link if already discovered and external to Naukri
+    const currentPortalUrl = application.pageAnalysis?.currentUrl;
+    const isCurrentPortalExternal =
+      currentPortalUrl && !currentPortalUrl.includes("naukri.com/job-listings");
+
+    const portalUrl = isCurrentPortalExternal
+      ? currentPortalUrl
+      : job.applicationUrl || job.sourceUrl;
 
     const naukriAccount = await findNaukriAccountByUserId(userId);
     let sessionState = null;
@@ -1089,20 +1122,23 @@ export const advanceEmployerPortalActionService = async (applicationId, userId, 
 
     // If still on Naukri job page with company site button
     let activePage = page;
-    const companySiteBtn = page
-      .locator(
-        '#company-site-button, button:has-text("Apply on company site"), a:has-text("Apply on company site")'
-      )
-      .first();
-    if (await companySiteBtn.isVisible().catch(() => false)) {
-      const newPagePromise = context.waitForEvent("page", { timeout: 6000 }).catch(() => null);
-      await companySiteBtn.click().catch(() => {});
-      const popup = await newPagePromise;
-      if (popup) {
-        await popup.waitForLoadState("domcontentloaded").catch(() => {});
-        activePage = popup;
+    const isNaukriListingPage = activePage.url().includes("naukri.com/job-listings");
+    if (isNaukriListingPage) {
+      const companySiteBtn = page
+        .locator(
+          '#company-site-button, button:has-text("Apply on company site"), a:has-text("Apply on company site")'
+        )
+        .first();
+      if (await companySiteBtn.isVisible().catch(() => false)) {
+        const newPagePromise = context.waitForEvent("page", { timeout: 6000 }).catch(() => null);
+        await companySiteBtn.click().catch(() => {});
+        const popup = await newPagePromise;
+        if (popup) {
+          await popup.waitForLoadState("domcontentloaded").catch(() => {});
+          activePage = popup;
+        }
+        await activePage.waitForTimeout(3000);
       }
-      await activePage.waitForTimeout(3000);
     }
 
     // Execute navigation for specific role or AI matched role
@@ -1112,6 +1148,21 @@ export const advanceEmployerPortalActionService = async (applicationId, userId, 
       activePage = navResult.newPage;
     }
     await activePage.waitForTimeout(2500);
+
+    const actualApplicationUrl = activePage.url();
+
+    // Permanently save the resolved actual application link in Job record
+    const jobId = job._id || application.jobId;
+    if (
+      jobId &&
+      actualApplicationUrl &&
+      !actualApplicationUrl.includes("about:blank") &&
+      !actualApplicationUrl.includes("naukri.com/job-listings")
+    ) {
+      await Job.findByIdAndUpdate(jobId, {
+        applicationUrl: actualApplicationUrl,
+      }).catch(() => {});
+    }
 
     // Re-inspect the new state after clicking the matched role's Apply button
     const postExtracted = await extractPageContent(activePage);
@@ -1123,15 +1174,15 @@ export const advanceEmployerPortalActionService = async (applicationId, userId, 
         pageAnalysis: {
           ...postAnalysis,
           pageTitle: postExtracted.title,
-          currentUrl: activePage.url(),
+          currentUrl: actualApplicationUrl,
           analyzedAt: new Date(),
         },
       },
-      { returnDocument: 'after' }
+      { returnDocument: "after" }
     ).populate("jobId");
 
     await updateApplicationStatus(applicationId, APPLICATION_STATUS.WAITING_FOR_REVIEW, {
-      logMessage: `Advanced portal action: ${navResult.message}. New state: ${postAnalysis.pageType}`,
+      logMessage: `Advanced portal action: ${navResult.message}. New state: ${postAnalysis.pageType} (${actualApplicationUrl})`,
     });
 
     return updated;
