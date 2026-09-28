@@ -17,7 +17,8 @@ export const createBrowser = async () => {
   return chromium.launch({
     headless: isHeadless,
     slowMo: BROWSER_SLOW_MO,
-    args: [...BROWSER_LAUNCH_ARGS]
+    args: [...BROWSER_LAUNCH_ARGS],
+    ignoreDefaultArgs: ['--enable-automation']
   });
 };
 

@@ -1,4 +1,6 @@
+import { chromium } from 'playwright';
 import { BrowserManager } from '../browser/browserManager.js';
+import { BROWSER_LAUNCH_ARGS } from '../constant/browser.constant.js';
 import {
   findGoogleAccountByUserId,
   upsertGoogleAccount,
@@ -199,6 +201,25 @@ export const saveGoogleSessionService = async (userId, payload = {}) => {
       );
     }
 
+    // Normalize cookies to ensure valid structure for Playwright
+    if (storageStateToLoad.cookies && Array.isArray(storageStateToLoad.cookies)) {
+      storageStateToLoad.cookies = storageStateToLoad.cookies.map((c) => {
+        let domain = c.domain || '.google.com';
+        if (!domain.startsWith('.') && !domain.includes('localhost')) {
+          domain = `.${domain}`;
+        }
+        return {
+          name: c.name,
+          value: c.value,
+          domain,
+          path: c.path || '/',
+          sameSite: c.sameSite === 'Strict' || c.sameSite === 'None' ? c.sameSite : 'Lax',
+          secure: c.secure !== false,
+          httpOnly: c.httpOnly || false,
+        };
+      });
+    }
+
     await logJobEvent(
       'googleSessionService',
       'VALIDATE_SESSION',
@@ -212,8 +233,8 @@ export const saveGoogleSessionService = async (userId, payload = {}) => {
     });
     page = await context.newPage();
 
-    // Verify session on Google My Account / Google Forms
-    await page.goto(GOOGLE_URLS.MY_ACCOUNT, {
+    // Verify session on Google Forms directly
+    await page.goto(GOOGLE_URLS.FORMS_BASE, {
       waitUntil: 'domcontentloaded',
       timeout: 20000,
     }).catch(async () => {
@@ -230,7 +251,7 @@ export const saveGoogleSessionService = async (userId, payload = {}) => {
         'Google session test was redirected to sign-in screen.'
       );
       throw new appError(
-        'The provided Google session is expired or not logged in. Please log in to Google in your browser, copy fresh cookies, and try again.',
+        'The provided Google session is expired or not logged in. Please verify your session and try again, or sign in directly with your email & password.',
         401
       );
     }
@@ -312,3 +333,341 @@ export const disconnectGoogleSessionService = async (userId) => {
     throw error;
   }
 };
+
+/**
+ * Automates 1-time Google account login via Playwright to capture and save session cookies
+ * into MongoDB with AES-256-GCM encryption. Zero permanent password storage.
+ *
+ * @param {string} userId - User ID
+ * @param {object} credentials - { email, password, otpCode }
+ * @returns {Promise<object>} Status result
+ */
+export const loginWithGoogleCredentialsService = async (
+  userId,
+  { email, password, otpCode } = {}
+) => {
+  let browser = null;
+  let context = null;
+  let page = null;
+
+  try {
+    if (!userId) {
+      throw new appError('User ID is required', 400);
+    }
+    if (!email || !password) {
+      throw new appError('Please provide both your Google email and password.', 400);
+    }
+
+    const cleanEmail = email.trim();
+    const cleanPassword = password.trim();
+
+    await logJobEvent(
+      'googleSessionService',
+      'LOGIN_START',
+      `Starting automated Google sign-in for User: ${userId} (${cleanEmail})`
+    );
+
+    browser = await BrowserManager.launch();
+    context = await BrowserManager.createContext(browser, {
+      blockHeavyResources: false,
+    });
+    page = await context.newPage();
+
+    // 1. Navigate to Google Sign-in with destination set to Google Forms
+    await page.goto(GOOGLE_URLS.FORMS_LOGIN, {
+      waitUntil: 'domcontentloaded',
+      timeout: 25000,
+    }).catch(async () => {
+      await page.evaluate(() => window.stop()).catch(() => {});
+    });
+    await page.waitForTimeout(1500);
+
+    // 2. Fill in Email
+    const emailInput = page.locator('#identifierId, input[type="email"], input[name="identifier"]').first();
+    const isEmailVisible = await emailInput.isVisible().catch(() => false);
+    if (!isEmailVisible) {
+      throw new appError('Google sign-in page did not load correctly. Please try again.', 500);
+    }
+
+    await emailInput.click();
+    await emailInput.fill(cleanEmail);
+    await page.waitForTimeout(500);
+
+    // Click Next on Email
+    const emailNext = page.locator('#identifierNext, button:has-text("Next"), div[role="button"]:has-text("Next")').first();
+    await emailNext.click();
+    await page.waitForTimeout(2500);
+
+    // Check for email error
+    const pageTextAfterEmail = await page.evaluate(() => document.body?.innerText || '').catch(() => '');
+    if (
+      pageTextAfterEmail.includes("Couldn't find your Google Account") ||
+      pageTextAfterEmail.includes("Enter a valid email")
+    ) {
+      throw new appError("Couldn't find your Google Account. Please check your email address.", 400);
+    }
+
+    // 3. Fill in Password
+    const passwordInput = page.locator('input[type="password"], input[name="Passwd"], input[name="password"]').first();
+    const isPasswordVisible = await passwordInput.waitFor({ state: 'visible', timeout: 12000 }).then(() => true).catch(() => false);
+
+    if (!isPasswordVisible) {
+      if (pageTextAfterEmail.includes('verify') || pageTextAfterEmail.includes('captcha')) {
+        throw new appError('Google requested a security verification or captcha. Please check credentials or try again.', 400);
+      }
+      throw new appError('Password field did not appear. Please verify your email and try again.', 400);
+    }
+
+    await passwordInput.click();
+    await passwordInput.fill(cleanPassword);
+    await page.waitForTimeout(500);
+
+    // Click Next on Password
+    const passwordNext = page.locator('#passwordNext, button:has-text("Next"), div[role="button"]:has-text("Next")').first();
+    await passwordNext.click();
+    await page.waitForTimeout(3000);
+
+    // Check for wrong password
+    const pageTextAfterPassword = await page.evaluate(() => document.body?.innerText || '').catch(() => '');
+    if (
+      pageTextAfterPassword.includes('Wrong password') ||
+      pageTextAfterPassword.includes('Wrong password. Try again')
+    ) {
+      throw new appError('Wrong password. Try again or check your Google Account credentials.', 401);
+    }
+
+    // 4. Check for 2-Step Verification / Phone prompt
+    const is2faPrompt =
+      pageTextAfterPassword.includes('Check your phone') ||
+      pageTextAfterPassword.includes('Google sent a notification') ||
+      pageTextAfterPassword.includes('Tap Yes') ||
+      pageTextAfterPassword.includes('2-Step Verification') ||
+      pageTextAfterPassword.includes('two-step');
+
+    if (is2faPrompt) {
+      await logJobEvent(
+        'googleSessionService',
+        '2FA_DETECTED',
+        '2-Step Verification prompt detected. Waiting up to 45 seconds for user approval on phone...'
+      );
+
+      // Extract 2-digit number if shown
+      const numberMatch = pageTextAfterPassword.match(/\b([0-9]{2})\b/);
+      const promptNumber = numberMatch ? numberMatch[1] : '';
+
+      // Wait up to 45 seconds for user to tap Yes on their phone
+      const approvalSucceeded = await page.waitForURL(
+        (url) => !url.href.includes('signin') && !url.href.includes('challenge'),
+        { timeout: 45000 }
+      ).then(() => true).catch(() => false);
+
+      if (!approvalSucceeded) {
+        throw new appError(
+          `Google 2-Step Verification prompt was sent to your phone${promptNumber ? ` (Select number: ${promptNumber})` : ''}. Please tap Yes on your phone to complete sign-in.`,
+          401
+        );
+      }
+    }
+
+    // Wait for redirect to docs.google.com or accounts dashboard
+    await page.waitForTimeout(2500);
+
+    // 5. Verify authentication state
+    const authState = await detectGoogleAuthState(page);
+
+    if (authState.isSignInRequired) {
+      throw new appError('Google sign-in could not be completed. Please check your credentials.', 401);
+    }
+
+    // 6. Capture full authenticated storageState
+    const freshStorageState = await BrowserManager.captureStorageState(context);
+
+    // 7. Encrypt with AES-256-GCM and store in MongoDB
+    const encryptedState = encryptValue(JSON.stringify(freshStorageState));
+
+    const updated = await upsertGoogleAccount(userId, {
+      encryptedStorageState: encryptedState,
+      status: GOOGLE_AUTH_STATUS.CONNECTED,
+      userEmail: cleanEmail,
+      lastValidatedAt: new Date(),
+    });
+
+    await logJobEvent(
+      'googleSessionService',
+      'LOGIN_SUCCESS',
+      `Google account successfully authenticated & session stored for ${cleanEmail}`
+    );
+
+    return {
+      success: true,
+      connected: true,
+      status: GOOGLE_AUTH_STATUS.CONNECTED,
+      userEmail: cleanEmail,
+      lastValidatedAt: updated.lastValidatedAt,
+      message: `Google Account (${cleanEmail}) connected successfully! Session saved in DB and ready for auto-filling Google Forms.`,
+    };
+  } catch (error) {
+    if (error.isOperational) throw error;
+    await logError('googleSessionService.loginWithGoogleCredentialsService', error.message);
+    throw new appError(error.message || 'Google login failed.', error.statusCode || 500);
+  } finally {
+    await BrowserManager.closeSafely({ page, context, browser });
+  }
+};
+
+/**
+ * Opens a Playwright browser window navigated to Google Login.
+ * The user manually logs into their Google Account in that window.
+ * The service polls in the background, automatically detects successful login,
+ * captures all authenticated cookies / storageState into MongoDB,
+ * and automatically closes the browser window.
+ *
+ * @param {string} userId - Current user ID
+ * @returns {Promise<object>} Status result
+ */
+export const launchGoogleInteractiveLoginService = async (userId) => {
+  let browser = null;
+  let context = null;
+  let page = null;
+
+  try {
+    if (!userId) {
+      throw new appError('User ID is required', 400);
+    }
+
+    await logJobEvent(
+      'googleSessionService',
+      'INTERACTIVE_LOGIN_START',
+      `Launching Playwright browser window for manual Google login for User: ${userId}`
+    );
+
+    // On desktop environments (macOS, Windows, or Linux with DISPLAY), launch with visible window
+    const isHeadless = process.platform === 'linux' && !process.env.DISPLAY;
+
+    browser = await chromium.launch({
+      headless: isHeadless,
+      args: [...BROWSER_LAUNCH_ARGS],
+      ignoreDefaultArgs: ['--enable-automation'],
+    });
+
+    context = await browser.newContext({
+      viewport: { width: 1280, height: 800 },
+      userAgent:
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    });
+
+    page = await context.newPage();
+
+    // Navigate to Google Sign-in with destination set to Google Forms
+    await page.goto(GOOGLE_URLS.FORMS_LOGIN, {
+      waitUntil: 'domcontentloaded',
+      timeout: 30000,
+    }).catch(async () => {
+      await page.evaluate(() => window.stop()).catch(() => {});
+    });
+
+    // Poll for user to complete manual login (timeout: 180 seconds / 3 minutes)
+    const startTime = Date.now();
+    const timeoutMs = 180000;
+    let authenticated = false;
+    let detectedEmail = '';
+
+    while (Date.now() - startTime < timeoutMs) {
+      if (page.isClosed() || !browser.isConnected()) {
+        break;
+      }
+
+      await page.waitForTimeout(1500).catch(() => {});
+
+      if (page.isClosed() || !browser.isConnected()) break;
+
+      const currentUrl = page.url() || '';
+      const lowerUrl = currentUrl.toLowerCase();
+
+      // Check cookies for Google authentication
+      const cookies = await context.cookies().catch(() => []);
+      const hasSid = cookies.some(
+        (c) => (c.name === 'SID' || c.name === '__Secure-1PSID') && c.domain?.includes('google')
+      );
+      const hasSapisid = cookies.some(
+        (c) =>
+          (c.name === 'SAPISID' || c.name === '__Secure-1PAPISID' || c.name === '__Secure-3PAPISID') &&
+          c.domain?.includes('google')
+      );
+
+      const isFormsOrAccount =
+        lowerUrl.includes('docs.google.com/forms') ||
+        lowerUrl.includes('myaccount.google.com');
+
+      const isStillOnSignin =
+        lowerUrl.includes('accounts.google.com/signin') ||
+        lowerUrl.includes('accounts.google.com/servicelogin') ||
+        lowerUrl.includes('accounts.google.com/v3/signin') ||
+        lowerUrl.includes('accounts.google.com/challenge');
+
+      if ((hasSid && hasSapisid) || (isFormsOrAccount && !isStillOnSignin)) {
+        authenticated = true;
+        // Attempt to extract logged in email
+        detectedEmail = await page.evaluate(() => {
+          const emailEl =
+            document.querySelector('[data-email]') ||
+            document.querySelector('.gb_d') ||
+            document.querySelector('.gb_E');
+          return emailEl?.getAttribute('data-email') || emailEl?.textContent?.trim() || '';
+        }).catch(() => '');
+
+        if (!detectedEmail) {
+          const match = (await page.evaluate(() => document.body?.innerText || '').catch(() => ''))
+            .match(/[a-zA-Z0-9._%+-]+@gmail\.com/i);
+          if (match) detectedEmail = match[0];
+        }
+        break;
+      }
+    }
+
+    if (!authenticated) {
+      throw new appError(
+        'Google login timed out or window was closed before completing login. Please try again.',
+        400
+      );
+    }
+
+    // Capture storageState (cookies & localStorage)
+    const freshStorageState = await context.storageState();
+
+    // Encrypt with AES-256-GCM
+    const encryptedState = encryptValue(JSON.stringify(freshStorageState));
+
+    // Save in MongoDB
+    const updated = await upsertGoogleAccount(userId, {
+      encryptedStorageState: encryptedState,
+      status: GOOGLE_AUTH_STATUS.CONNECTED,
+      userEmail: detectedEmail || '',
+      lastValidatedAt: new Date(),
+    });
+
+    await logJobEvent(
+      'googleSessionService',
+      'INTERACTIVE_LOGIN_SUCCESS',
+      `Manual Google sign-in detected! Session cookies captured, encrypted, and saved to MongoDB for User: ${userId}`
+    );
+
+    return {
+      success: true,
+      connected: true,
+      status: GOOGLE_AUTH_STATUS.CONNECTED,
+      userEmail: updated.userEmail || detectedEmail || 'Google Account',
+      lastValidatedAt: updated.lastValidatedAt,
+      message: 'Google Account successfully logged in! Session cookies saved in database and window closed.',
+    };
+  } catch (error) {
+    if (error.isOperational) throw error;
+    await logError('googleSessionService.launchGoogleInteractiveLoginService', error.message);
+    throw new appError(error.message || 'Interactive Google login failed.', error.statusCode || 500);
+  } finally {
+    // Automatically close the browser window proper!
+    await BrowserManager.closeSafely({ page, context, browser });
+  }
+};
+
+

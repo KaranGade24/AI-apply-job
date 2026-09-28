@@ -13,6 +13,7 @@ export const GOOGLE_URLS = Object.freeze({
   SIGNIN: 'https://accounts.google.com/signin',
   MY_ACCOUNT: 'https://myaccount.google.com',
   FORMS_BASE: 'https://docs.google.com/forms',
+  FORMS_LOGIN: 'https://accounts.google.com/ServiceLogin?service=wise&passive=1209600&continue=https://docs.google.com/forms/',
 });
 
 export const GOOGLE_SELECTORS = Object.freeze({
