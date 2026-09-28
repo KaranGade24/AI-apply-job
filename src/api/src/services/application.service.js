@@ -176,25 +176,18 @@ export const approveAndSendApplication = async (applicationId, userId) => {
       throw new appError("Unauthorized access to job application", 403);
     }
 
-    if (isApplicationLocked(application.status)) {
-      throw new appError(
-        `Cannot approve or send an application that is already in '${application.status}' status.`,
-        400,
-      );
-    }
-
-    const allowedStatuses = [
-      APPLICATION_STATUS.PENDING,
-      APPLICATION_STATUS.WAITING_FOR_REVIEW,
-      APPLICATION_STATUS.APPROVED,
-      'pending',
-      'waiting_for_review',
-      'approved',
+    const terminalStatuses = [
+      APPLICATION_STATUS.INTERVIEW,
+      APPLICATION_STATUS.OFFER,
+      APPLICATION_STATUS.REJECTED,
+      'Interview',
+      'Offer',
+      'Rejected',
     ];
 
-    if (!allowedStatuses.includes(application.status)) {
+    if (terminalStatuses.includes(application.status)) {
       throw new appError(
-        `Cannot approve application in '${application.status}' status. Must be pending, waiting_for_review, or approved`,
+        `Cannot approve or re-submit an application in '${application.status}' status.`,
         400,
       );
     }

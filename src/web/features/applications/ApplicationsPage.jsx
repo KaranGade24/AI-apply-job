@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { MoreVertical, ExternalLink, Eye, Sparkles, Check, RefreshCw, X, Trash2 } from 'lucide-react';
+import { MoreVertical, ExternalLink, Eye, Sparkles, Check, RefreshCw, X, Trash2, AlertCircle } from 'lucide-react';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { ApplicationReviewModal } from './ApplicationReviewModal';
@@ -9,7 +9,7 @@ import {
   tailorApplicationApi,
   deleteApplicationApi,
 } from '../../services/applicationService';
-import { formatDate, getStatusBadgeStyle } from '../../utils/formatters';
+import { formatDate, getStatusBadgeStyle, formatStatusLabel } from '../../utils/formatters';
 
 export const ApplicationsPage = () => {
   const [applications, setApplications] = useState([]);
@@ -127,10 +127,16 @@ export const ApplicationsPage = () => {
     }
   };
 
+  const isActionRequired = (status) => {
+    const s = String(status || '').toLowerCase();
+    return ['human_required', 'failed', 'google_login_required', 'waiting_for_final_review', 'unsupported_method', 'session_expired'].includes(s);
+  };
+
   const filterTabs = [
     { id: 'All', label: 'All' },
-    { id: 'pending', label: 'Pending' },
+    { id: 'action_required', label: 'Action Required / Retry' },
     { id: 'waiting_for_review', label: 'Waiting Review' },
+    { id: 'pending', label: 'Pending' },
     { id: 'Applied', label: 'Applied' },
     { id: 'Interview', label: 'Interview' },
     { id: 'Offer', label: 'Offer' },
@@ -139,8 +145,15 @@ export const ApplicationsPage = () => {
 
   const counts = {
     All: applications.length,
-    pending: applications.filter((a) => a.status?.toLowerCase() === 'pending').length,
-    waiting_for_review: applications.filter((a) => a.status === 'waiting_for_review').length,
+    action_required: applications.filter((a) => isActionRequired(a.status)).length,
+    waiting_for_review: applications.filter(
+      (a) =>
+        a.status === 'waiting_for_review' ||
+        a.status === 'waiting_for_final_review' ||
+        a.status === 'human_required' ||
+        a.status === 'resolving_answers'
+    ).length,
+    pending: applications.filter((a) => a.status?.toLowerCase() === 'pending' || a.status === 'processing').length,
     Applied: applications.filter(
       (a) => a.status === 'Applied' || a.status === 'sent' || a.status === 'approved'
     ).length,
@@ -151,6 +164,17 @@ export const ApplicationsPage = () => {
 
   const filteredApps = applications.filter((a) => {
     if (filter === 'All') return true;
+    if (filter === 'action_required') {
+      return isActionRequired(a.status);
+    }
+    if (filter === 'waiting_for_review') {
+      return (
+        a.status === 'waiting_for_review' ||
+        a.status === 'waiting_for_final_review' ||
+        a.status === 'human_required' ||
+        a.status === 'resolving_answers'
+      );
+    }
     if (filter === 'Applied') {
       return a.status === 'Applied' || a.status === 'sent' || a.status === 'approved';
     }
@@ -246,6 +270,7 @@ export const ApplicationsPage = () => {
                   const isUpdating = updatingId === app._id;
                   const isTailoring = tailoringId === app._id;
                   const isLocked = ['applied', 'sent', 'interview', 'offer', 'rejected'].includes(app.status?.toLowerCase());
+                  const needsAction = isActionRequired(app.status);
 
                   return (
                     <tr
@@ -297,6 +322,9 @@ export const ApplicationsPage = () => {
                               currentSelectedStatus
                             )}`}
                           >
+                            {needsAction && (
+                              <option value={app.status}>{formatStatusLabel(app.status)}</option>
+                            )}
                             {!isLocked && <option value="pending">Pending</option>}
                             {!isLocked && <option value="waiting_for_review">Waiting Review</option>}
                             <option value="Applied">Applied</option>
@@ -332,9 +360,22 @@ export const ApplicationsPage = () => {
                         className="py-4 px-6 text-right space-x-2 whitespace-nowrap"
                         onClick={(e) => e.stopPropagation()}
                       >
+                        {/* Direct Review & Retry button for action required or failed applications */}
+                        {needsAction && (
+                          <button
+                            type="button"
+                            onClick={() => setSelectedApp(app)}
+                            className="inline-flex items-center gap-1 text-xs font-bold text-amber-900 bg-amber-100 hover:bg-amber-200 border border-amber-300 px-3 py-1.5 rounded-lg transition-colors cursor-pointer shadow-2xs"
+                            title="Review questions and retry application"
+                          >
+                            <AlertCircle className="w-3.5 h-3.5 text-amber-700" />
+                            <span>Review & Retry</span>
+                          </button>
+                        )}
+
                         {/* Dedicated Tailor & Draft Button: reads job, tailors resume, writes mail */}
                         <div className="inline-flex items-center gap-1">
-                          {!isLocked && (
+                          {!isLocked && !needsAction && (
                             <button
                               type="button"
                               onClick={() => handleTailorAndReview(app)}
