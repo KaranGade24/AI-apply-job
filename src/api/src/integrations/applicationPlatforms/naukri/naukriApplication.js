@@ -805,13 +805,110 @@ export const runNaukriApplication = async ({
       });
 
       const submitBtn = activePage
-        .locator('button:has-text("Submit"), button:has-text("Save & Apply"), button:has-text("Apply Now"), button[type="submit"]')
+        .locator('button:has-text("Submit"), button:has-text("Save & Apply"), button:has-text("Apply Now"), button:has-text("Apply on company site"), #company-site-button, button[type="submit"]')
         .first();
 
       const canSubmit = await submitBtn.isVisible().catch(() => false);
       if (canSubmit) {
-        await submitBtn.click();
+        await submitBtn.click().catch(() => {});
         await activePage.waitForTimeout(3000);
+      }
+
+      // Check if clicking submit opened an external company site or popup
+      if (context) {
+        const allPages = context.pages();
+        if (allPages.length > 1) {
+          const externalOrGooglePage = allPages.find((p) => {
+            const u = (p.url() || '').toLowerCase();
+            return (
+              u.includes('docs.google.com/forms') ||
+              u.includes('forms.gle') ||
+              u.includes('accounts.google.com') ||
+              (!u.includes('naukri.com') && !u.includes('about:blank') && u !== activePage.url().toLowerCase())
+            );
+          });
+          if (externalOrGooglePage) {
+            activePage = externalOrGooglePage;
+            await activePage.waitForLoadState('domcontentloaded').catch(() => {});
+          }
+        }
+      }
+
+      // If activePage has navigated to an external company site or Google Form
+      const currentUrlAfterSubmit = (activePage.url() || '').toLowerCase();
+      const isExternalAfterSubmit =
+        currentUrlAfterSubmit.includes('docs.google.com/forms') ||
+        currentUrlAfterSubmit.includes('forms.gle') ||
+        currentUrlAfterSubmit.includes('accounts.google.com') ||
+        (!currentUrlAfterSubmit.includes('naukri.com') && !currentUrlAfterSubmit.includes('about:blank'));
+
+      if (isExternalAfterSubmit) {
+        await updateApplicationStatus(applicationId, APPLICATION_STATUS.ANALYZING_PORTAL, {
+          logMessage: `Redirected to company site: ${activePage.url()}. Analyzing with Gemini AI...`,
+        });
+
+        // If it's a Google Form
+        if (
+          currentUrlAfterSubmit.includes('docs.google.com/forms') ||
+          currentUrlAfterSubmit.includes('forms.gle') ||
+          currentUrlAfterSubmit.includes('accounts.google.com')
+        ) {
+          const googleAuth = await detectGoogleAuthState(activePage);
+          if (googleAuth.isSignInRequired) {
+            await JobApplication.findByIdAndUpdate(applicationId, {
+              applicationMethod: 'googleForm',
+              status: APPLICATION_STATUS.GOOGLE_LOGIN_REQUIRED,
+              'form.requiresHuman': true,
+              'form.humanReason': 'google_login_required',
+            });
+            throw new appError('Google Sign-In is required to access the employer application form.', 401);
+          }
+
+          const gfResult = await handleGoogleFormApplication({
+            applicationId,
+            jobId: job._id,
+            userId,
+            googleFormUrl: activePage.url(),
+          });
+
+          return {
+            status: gfResult.submitted ? APPLICATION_STATUS.APPLIED : APPLICATION_STATUS.WAITING_FOR_REVIEW,
+            message: gfResult.message,
+            data: gfResult,
+          };
+        }
+
+        // Run LLM page classifier on the external company site
+        const extractedExt = await extractPageContent(activePage);
+        const analysisExt = await classifyPageWithLlm(extractedExt, job, userId);
+
+        await JobApplication.findByIdAndUpdate(applicationId, {
+          applicationMethod: 'company_site',
+          pageAnalysis: {
+            ...analysisExt,
+            pageTitle: extractedExt.title,
+            currentUrl: activePage.url(),
+            analyzedAt: new Date(),
+          },
+        });
+
+        if (analysisExt.pageType === 'job_listings_accordion' || analysisExt.nextRecommendedAction === 'click_opening_apply') {
+          await navigatePortalWithAiDecision(activePage, analysisExt, context);
+          await activePage.waitForTimeout(2000);
+        } else if (analysisExt.emailContact?.email) {
+          const refId = analysisExt.emailContact.referenceId;
+          await JobApplication.findByIdAndUpdate(applicationId, {
+            applicationMethod: 'email',
+            'email.recipient': analysisExt.emailContact.email,
+            'email.subject': `Application: ${job.title}${refId ? ` (Ref: ${refId})` : ''}`,
+            'email.body': `Dear Hiring Team,\n\nI am applying for the ${job.title} position at ${job.company}.\n\nBest regards,\n${userDoc?.fullName || 'Applicant'}`,
+            status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
+          });
+          return {
+            status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
+            message: `Employer specifies direct email application. Draft ready for review.`,
+          };
+        }
       }
 
       // Verify submission
@@ -821,6 +918,7 @@ export const runNaukriApplication = async ({
           logMessage: 'Application successfully submitted and verified on portal.',
         });
         await JobApplication.findByIdAndUpdate(applicationId, {
+          status: APPLICATION_STATUS.APPLIED,
           'form.submittedAt': new Date(),
           'form.requiresHuman': false,
         });
@@ -830,13 +928,38 @@ export const runNaukriApplication = async ({
           message: 'Job application successfully submitted!',
         };
       } else {
-        await updateApplicationStatus(applicationId, APPLICATION_STATUS.FAILED, {
-          logMessage: 'Submit button was clicked, but submission confirmation was not detected on portal.',
+        // Run AI page inspection to see if it was submitted or needs human review
+        const postSubmitExtracted = await extractPageContent(activePage);
+        const postSubmitAnalysis = await classifyPageWithLlm(postSubmitExtracted, job, userId);
+
+        if (postSubmitAnalysis.pageType === 'already_applied') {
+          await updateApplicationStatus(applicationId, APPLICATION_STATUS.APPLIED, {
+            logMessage: 'AI verified application was submitted successfully.',
+          });
+          await JobApplication.findByIdAndUpdate(applicationId, {
+            status: APPLICATION_STATUS.APPLIED,
+            'form.submittedAt': new Date(),
+          });
+          return {
+            status: APPLICATION_STATUS.APPLIED,
+            message: 'Job application confirmed as applied.',
+          };
+        }
+
+        await updateApplicationStatus(applicationId, APPLICATION_STATUS.HUMAN_REQUIRED, {
+          logMessage: `Submit clicked. Status: ${postSubmitAnalysis.summary || 'Confirmation pending portal response'}`,
         });
-        throw new appError(
-          'Application submit was triggered, but confirmation could not be verified on the portal.',
-          400
-        );
+        await JobApplication.findByIdAndUpdate(applicationId, {
+          status: APPLICATION_STATUS.HUMAN_REQUIRED,
+          'form.requiresHuman': true,
+          'form.humanReason': 'verification_pending',
+          'form.humanMessage': postSubmitAnalysis.summary || 'Please verify submission on employer site or review responses.',
+        });
+
+        return {
+          status: APPLICATION_STATUS.HUMAN_REQUIRED,
+          message: postSubmitAnalysis.summary || 'Application submitted. Please review or confirm on employer portal.',
+        };
       }
     }
 

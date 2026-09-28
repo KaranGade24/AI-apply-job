@@ -38,9 +38,13 @@ export const detectApplyAction = async (page) => {
     const isDirectApply = await applyBtn.isVisible().catch(() => false);
 
     if (isDirectApply) {
+      // Check if text of apply button says "company site" or "external"
+      const btnText = (await applyBtn.textContent().catch(() => '')).toLowerCase();
+      const isExternal = btnText.includes('company') || btnText.includes('external') || btnText.includes('site') || btnText.includes('employer');
+
       return {
         hasApply: true,
-        isCompanySite: false,
+        isCompanySite: isExternal,
         isAlreadyApplied: false,
         selector: NAUKRI_APPLICATION_SELECTORS.APPLY_BUTTON,
       };
@@ -107,7 +111,7 @@ export const detectSecurityPrompt = async (page) => {
  */
 export const detectSubmissionSuccess = async (page) => {
   try {
-    const pageText = await page.evaluate(() => document.body.innerText || '').catch(() => '');
+    const pageText = (await page.evaluate(() => document.body.innerText || '').catch(() => '')).toLowerCase();
 
     const successKeywords = [
       'applied successfully',
@@ -115,10 +119,20 @@ export const detectSubmissionSuccess = async (page) => {
       'application submitted',
       'applied on',
       'your application has been sent',
+      'application sent',
+      'thank you for applying',
+      'we have received your application',
+      'responses recorded',
+      'response has been recorded',
+      'already applied',
+      'application received',
+      'successfully applied',
+      'applied to this job',
+      'application in review',
     ];
 
     for (const kw of successKeywords) {
-      if (pageText.toLowerCase().includes(kw)) {
+      if (pageText.includes(kw)) {
         return { isSubmitted: true, confirmationText: kw };
       }
     }
