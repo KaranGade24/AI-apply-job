@@ -192,6 +192,41 @@ const jobApplicationSchema = new mongoose.Schema(
       actionReason: { type: String, default: "" },
       analyzedAt: { type: Date, default: null },
     },
+    /**
+     * Phone Application Method — stores call script and talking points for human action
+     */
+    phoneApplication: {
+      phoneNumber: { type: String, default: "" },
+      callScript: { type: String, default: "" },
+      talkingPoints: [{ type: String }],
+      bestTimeToCall: { type: String, default: "" },
+      followUpAction: { type: String, default: "" },
+      generatedAt: { type: Date, default: null },
+    },
+    /**
+     * Google Form Application Method — stores result of automated form submission
+     */
+    googleFormResult: {
+      googleFormUrl: { type: String, default: "" },
+      fieldsDetected: { type: Number, default: 0 },
+      filledCount: { type: Number, default: 0 },
+      skippedCount: { type: Number, default: 0 },
+      hasResumeField: { type: Boolean, default: false },
+      submitted: { type: Boolean, default: false },
+      formClosed: { type: Boolean, default: false },
+      errors: [{ type: String }],
+      submittedAt: { type: Date, default: null },
+    },
+    /**
+     * Unknown Page Result — stores AI analysis result when method was initially unknown
+     */
+    unknownPageResult: {
+      pageUrl: { type: String, default: "" },
+      detectedMethod: { type: String, default: "" },
+      actionTaken: { type: String, default: "" },
+      message: { type: String, default: "" },
+      analyzedAt: { type: Date, default: null },
+    },
     workflow: {
       threadId: {
         type: String,

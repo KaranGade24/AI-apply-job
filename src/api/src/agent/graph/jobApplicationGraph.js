@@ -27,11 +27,18 @@ import {
   updateApplicationStatus,
   updateApplicationResume,
   updateApplicationEmail,
+  updateApplicationPhone,
+  updateApplicationGoogleForm,
+  updateApplicationUnknownResult,
 } from "../../repositories/application.repository.js";
 import { getActiveResumeByUserId } from "../../repositories/resume.repository.js";
 import { User } from "../../model/User.js";
 import { generateResumePdf } from "../../pdf/resumePdfService.js";
 import { sendApplicationEmail } from "../../integrations/email/emailService.js";
+import { isGoogleFormUrl } from "../../application/googleForm/googleFormFiller.js";
+import { runGoogleFormApplication } from "../../application/methods/googleFormApplicationMethod.js";
+import { runPhoneApplication } from "../../application/methods/phoneApplicationMethod.js";
+import { runUnknownApplicationMethod } from "../../application/methods/unknownApplicationMethod.js";
 
 /**
  * 1. Init Application Node
@@ -100,22 +107,18 @@ const loadExistingApplicationNode = async (state) => {
       throw new appError(`Job record missing for application: ${state.applicationId}`, 404);
     }
 
-    // jobId is populated by findApplicationById; convert to plain object to prevent
-    // Mongoose document serialization issues inside LangGraph state channels.
     let jobDoc = application.jobId;
     if (jobDoc.toObject) {
       jobDoc = jobDoc.toObject();
     }
     const jobId = jobDoc._id ? jobDoc._id.toString() : jobDoc.toString();
 
-    // userId may be populated (object) or a raw ObjectId string — normalise to string.
     const resolvedUserId =
       state.userId ||
       (application.userId?._id
         ? application.userId._id.toString()
         : application.userId?.toString?.() || "");
 
-    // isRegeneration is true when a prior tailored resume already exists on this application.
     const isRegeneration = !!(application.resume?.tailoredResumeData);
 
     const existingSourceResumeId =
@@ -129,7 +132,6 @@ const loadExistingApplicationNode = async (state) => {
       `Loaded existing application ${application._id} for job ${jobId} (isRegeneration=${isRegeneration})`,
     );
 
-    // Resolve user-specific dynamic constants from DB
     const userSettings = await resolveUserResumeSettings(resolvedUserId);
 
     return {
@@ -161,11 +163,12 @@ const loadExistingApplicationNode = async (state) => {
 /**
  * 2. Check Application Method Node
  *
- * Supported routing:
- *   - APPLICATION_METHOD.EMAIL       → full pipeline (tailor resume + generate email)
- *   - APPLICATION_METHOD.WEBSITE_FORM
- *   - APPLICATION_METHOD.GOOGLE_FORM → tailor resume + generate PDF only (portal apply)
- *   - Everything else (phone, unknown, NOT_SPECIFIED, etc.) → UNSUPPORTED_METHOD
+ * Resolves the application method into exactly one of 4 canonical methods:
+ *   1. EMAIL       — job has hrEmail OR applicationMethod is "email"
+ *   2. PHONE       — job has phone contact OR applicationMethod is "phone"
+ *   3. GOOGLE_FORM — applicationUrl is a Google Form (forms.gle / docs.google.com/forms)
+ *   4. UNKNOWN     — anything else (career page, custom site, direct portal)
+ *                    → AI will open and analyze the page to determine what to do
  */
 const checkApplicationMethodNode = async (state) => {
   try {
@@ -175,30 +178,47 @@ const checkApplicationMethodNode = async (state) => {
 
     const job = state.job;
 
-    // Detect method: prefer HR email if present, then form URL, then normalized method
     let normalizedMethod;
-    if (job?.hrEmail && job.hrEmail !== "unknown" && job.hrEmail !== "NOT_SPECIFIED") {
-      normalizedMethod = APPLICATION_METHOD.EMAIL;
-    } else if (
+
+    // Priority 1: If applicationUrl is a direct Google Form link
+    if (
       job?.applicationUrl &&
-      (job.applicationUrl.includes("forms.gle") ||
-        job.applicationUrl.includes("docs.google.com/forms"))
+      isGoogleFormUrl(job.applicationUrl)
     ) {
       normalizedMethod = APPLICATION_METHOD.GOOGLE_FORM;
-    } else {
-      normalizedMethod = normalizeApplicationMethod(job?.applicationMethod);
-      if (
-        normalizedMethod === APPLICATION_METHOD.UNKNOWN ||
-        !Object.values(APPLICATION_METHOD).includes(normalizedMethod)
-      ) {
-        normalizedMethod = APPLICATION_METHOD.WEBSITE_FORM;
+    }
+    // Priority 2: HR email present → email method
+    else if (
+      job?.hrEmail &&
+      job.hrEmail !== "unknown" &&
+      job.hrEmail !== "NOT_SPECIFIED" &&
+      job.hrEmail.includes("@")
+    ) {
+      normalizedMethod = APPLICATION_METHOD.EMAIL;
+    }
+    // Priority 3: Phone contact present → phone method
+    else if (
+      job?.phone &&
+      job.phone !== "unknown" &&
+      job.phone !== "NOT_SPECIFIED"
+    ) {
+      normalizedMethod = APPLICATION_METHOD.PHONE;
+    }
+    // Priority 4: Normalize from job's applicationMethod field
+    else {
+      const rawMethod = normalizeApplicationMethod(job?.applicationMethod);
+      if (Object.values(APPLICATION_METHOD).includes(rawMethod)) {
+        normalizedMethod = rawMethod;
+      } else {
+        // Default: UNKNOWN (AI will analyze the page)
+        normalizedMethod = APPLICATION_METHOD.UNKNOWN;
       }
     }
 
     await logJobEvent(
       "checkApplicationMethodNode",
-      "METHOD_CHECK",
-      `Application method resolved: ${job?.applicationMethod} -> ${normalizedMethod}`,
+      "METHOD_RESOLVED",
+      `Application method resolved: ${job?.applicationMethod} → ${normalizedMethod} | URL: ${job?.applicationUrl || "N/A"} | hrEmail: ${job?.hrEmail || "N/A"} | phone: ${job?.phone || "N/A"}`,
     );
 
     return { applicationMethod: normalizedMethod };
@@ -334,11 +354,9 @@ const tailorResumeNode = async (state) => {
       await logError("jobApplicationGraph.tailorResumeNode.llm", llmError.message);
       const targetSkills = state.job?.skills || ["JavaScript", "React", "Node.js", "SQL"];
       const baseResume = state.resume || {};
-      
-      // Ensure skills is an array for iteration
-      const safeBaseSkills = Array.isArray(baseResume.skills) 
-        ? baseResume.skills 
-        : (typeof baseResume.skills === 'string' ? [baseResume.skills] : []);
+      const safeBaseSkills = Array.isArray(baseResume.skills)
+        ? baseResume.skills
+        : (typeof baseResume.skills === "string" ? [baseResume.skills] : []);
 
       result = {
         tailoredResume: {
@@ -352,19 +370,18 @@ const tailorResumeNode = async (state) => {
           education: baseResume.education || [],
           projects: baseResume.projects || [],
         },
-        error: llmError.message
+        error: llmError.message,
       };
     }
 
     const tailored = result.tailoredResume || {};
     const baseResume = state.resume || {};
-    
-    // If there was an error in LLM call, save it to the application document
+
     if (result.error && state.applicationId) {
-       await updateApplicationStatus(state.applicationId, state.status || APPLICATION_STATUS.PROCESSING, {
-         error: result.error,
-         logMessage: `AI Error during tailoring: ${result.error}`
-       });
+      await updateApplicationStatus(state.applicationId, state.status || APPLICATION_STATUS.PROCESSING, {
+        error: result.error,
+        logMessage: `AI Error during tailoring: ${result.error}`,
+      });
     }
 
     // Merge & preserve personal links from base resume
@@ -392,51 +409,28 @@ const tailorResumeNode = async (state) => {
         "",
     };
 
-    // Merge & preserve project links (Live Demo & GitHub repository) from base resume
-    const baseProjects = Array.isArray(baseResume.projects)
-      ? baseResume.projects
-      : [];
-    const tailoredProjects = Array.isArray(tailored.projects)
-      ? tailored.projects
-      : [];
+    // Merge & preserve project links from base resume
+    const baseProjects = Array.isArray(baseResume.projects) ? baseResume.projects : [];
+    const tailoredProjects = Array.isArray(tailored.projects) ? tailored.projects : [];
 
     tailored.projects = tailoredProjects.map((proj) => {
       const match =
         baseProjects.find((b) => {
           const bTitle = (b.title || b.name || "").toLowerCase();
           const pTitle = (proj.title || proj.name || "").toLowerCase();
-          return (
-            bTitle &&
-            pTitle &&
-            (bTitle.includes(pTitle) || pTitle.includes(bTitle))
-          );
+          return bTitle && pTitle && (bTitle.includes(pTitle) || pTitle.includes(bTitle));
         }) || {};
 
       const github =
-        proj.links?.github ||
-        proj.githubUrl ||
-        proj.github ||
-        match.links?.github ||
-        match.githubUrl ||
-        match.github ||
-        "";
+        proj.links?.github || proj.githubUrl || proj.github ||
+        match.links?.github || match.githubUrl || match.github || "";
       const liveDemo =
-        proj.links?.liveDemo ||
-        proj.links?.demo ||
-        proj.demoUrl ||
-        proj.liveDemo ||
-        match.links?.liveDemo ||
-        match.links?.demo ||
-        match.demoUrl ||
-        match.liveDemo ||
-        "";
+        proj.links?.liveDemo || proj.links?.demo || proj.demoUrl || proj.liveDemo ||
+        match.links?.liveDemo || match.links?.demo || match.demoUrl || match.liveDemo || "";
 
       return {
         ...proj,
-        links: {
-          github,
-          liveDemo,
-        },
+        links: { github, liveDemo },
         githubUrl: github,
         demoUrl: liveDemo,
       };
@@ -500,16 +494,14 @@ const generatePdfNode = async (state) => {
       pdfPath,
     });
 
-    // For re-generation runs, keep the existing email draft intact and
-    // return to WAITING_FOR_REVIEW without regenerating the email.
+    // For re-generation runs, return to WAITING_FOR_REVIEW
     if (state.isRegeneration) {
       await updateApplicationStatus(
         state.applicationId,
         APPLICATION_STATUS.WAITING_FOR_REVIEW,
         {
           error: null,
-          logMessage:
-            "Tailored PDF regenerated successfully. Returning to human review.",
+          logMessage: "Tailored PDF regenerated successfully. Returning to human review.",
         },
       );
 
@@ -529,8 +521,7 @@ const generatePdfNode = async (state) => {
       state.applicationId,
       APPLICATION_STATUS.EMAIL_GENERATING,
       {
-        logMessage:
-          "Tailored PDF generated successfully. Generating application email draft...",
+        logMessage: "Tailored PDF generated successfully. Generating application email draft...",
       },
     );
 
@@ -560,59 +551,12 @@ const generatePdfNode = async (state) => {
 };
 
 /**
- * 6. Generate Application Email Draft Node
+ * 6a. METHOD: EMAIL — Generate Application Email Draft Node
  */
 const generateEmailNode = async (state) => {
   try {
     if (state.status === APPLICATION_STATUS.FAILED) {
       return { status: APPLICATION_STATUS.FAILED };
-    }
-
-    // Check if this is a Naukri job where direct 1-click or company-site applies instead of email outreach
-    const isNaukri =
-      state.job?.source === "naukri" ||
-      state.job?.applicationMethod === "naukri_direct" ||
-      state.job?.applicationMethod === "company_site" ||
-      state.job?.applicationMethod === "naukri";
-
-    if (isNaukri) {
-      const isCompanySite =
-        state.job?.applicationMethod === "company_site" ||
-        state.job?.applyButtonSelector === "#company-site-button";
-
-      await updateApplicationEmail(state.applicationId, {
-        recipient: "",
-        subject: `Naukri Application: ${state.job?.title || "Position"} at ${state.job?.company || "Company"}`,
-        body: isCompanySite
-          ? "Redirect to official employer career portal via company-site-button. Tailored ATS resume prepared for portal submission."
-          : "1-Click direct in-portal application on Naukri via apply-button. Tailored ATS resume prepared for submission.",
-        approved: false,
-      });
-
-      await updateApplicationStatus(
-        state.applicationId,
-        APPLICATION_STATUS.WAITING_FOR_REVIEW,
-        {
-          error: null,
-          logMessage:
-            "Tailored PDF generated. Application prepared for Naukri review.",
-        },
-      );
-
-      await logJobEvent(
-        "generateEmailNode",
-        "WAITING_FOR_REVIEW",
-        `Naukri application ${state.applicationId} ready for review without external email.`,
-      );
-
-      return {
-        email: {
-          recipient: "",
-          subject: `Naukri Application: ${state.job?.title}`,
-          body: isCompanySite ? "Apply on company site" : "Naukri 1-Click apply",
-        },
-        status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
-      };
     }
 
     await logJobEvent(
@@ -649,17 +593,16 @@ const generateEmailNode = async (state) => {
         recipient: state.job?.hrEmail || "",
         subject: `Application for ${targetTitle} - ${candidateName}`,
         body: `Dear Hiring Team at ${targetCompany},\n\nI am writing to express my strong enthusiasm for the ${targetTitle} opportunity. With my proven experience in modern software engineering and my hands-on background in full-stack web technologies, I am confident in my ability to make an immediate, positive impact on your team.\n\nThroughout my work, I have built reliable, maintainable software and scalable systems. I am very interested in the work being done at ${targetCompany} and welcome the opportunity to contribute to your technical milestones.\n\nMy tailored resume is attached for your review. I look forward to speaking with you in an interview.\n\nSincerely,\n\n${candidateName}`,
-        error: llmError.message
+        error: llmError.message,
       };
     }
 
     const cleanedBody = formatAndCleanEmailBody(result.body, candidateName);
 
-    // If there was an error in LLM call, save it to the application document
     if (result.error && state.applicationId) {
       await updateApplicationStatus(state.applicationId, state.status || APPLICATION_STATUS.PROCESSING, {
         error: result.error,
-        logMessage: `AI Error during email generation: ${result.error}`
+        logMessage: `AI Error during email generation: ${result.error}`,
       });
     }
 
@@ -680,8 +623,7 @@ const generateEmailNode = async (state) => {
       APPLICATION_STATUS.WAITING_FOR_REVIEW,
       {
         error: null,
-        logMessage:
-          "Application draft created. Paused at human review checkpoint.",
+        logMessage: "Application draft created. Paused at human review checkpoint.",
       },
     );
 
@@ -707,6 +649,288 @@ const generateEmailNode = async (state) => {
       await updateApplicationStatus(state.applicationId, APPLICATION_STATUS.FAILED, {
         error: error.message,
         logMessage: `Email draft generation failed: ${error.message}`,
+      });
+    }
+    return {
+      status: APPLICATION_STATUS.FAILED,
+      errorInfo: { message: error.message },
+    };
+  }
+};
+
+/**
+ * 6b. METHOD: PHONE — Phone Application Node
+ *
+ * Generates a professional call script and talking points.
+ * Sets application to WAITING_FOR_REVIEW so the candidate can make the call.
+ */
+const phoneApplicationNode = async (state) => {
+  try {
+    if (state.status === APPLICATION_STATUS.FAILED) {
+      return { status: APPLICATION_STATUS.FAILED };
+    }
+
+    const phoneNumber =
+      state.job?.phone ||
+      state.job?.contactPhone ||
+      state.job?.hrPhone ||
+      "";
+
+    await logJobEvent(
+      "phoneApplicationNode",
+      "PHONE_START",
+      `Preparing phone application for ${state.job?.company || "Company"} - ${state.job?.title || "Position"}. Phone: ${phoneNumber || "N/A"}`,
+    );
+
+    const phoneResult = await runPhoneApplication({
+      applicationId: state.applicationId,
+      phoneNumber,
+      candidateInfo: state.tailoredResume || state.resume,
+      jobDetails: state.job,
+      userId: state.userId,
+    });
+
+    // Store call script as email body for review
+    await updateApplicationEmail(state.applicationId, {
+      recipient: phoneNumber,
+      subject: `Phone Application: ${state.job?.title || "Position"} at ${state.job?.company || "Company"}`,
+      body: phoneResult.callScript,
+      approved: false,
+    });
+
+    // Persist phone application data to DB via repository
+    await updateApplicationPhone(state.applicationId, {
+      phoneNumber,
+      callScript: phoneResult.callScript,
+      talkingPoints: phoneResult.talkingPoints,
+      bestTimeToCall: phoneResult.bestTimeToCall,
+      followUpAction: phoneResult.followUpAction,
+      generatedAt: new Date(),
+    });
+
+    await updateApplicationStatus(
+      state.applicationId,
+      APPLICATION_STATUS.WAITING_FOR_REVIEW,
+      {
+        error: null,
+        logMessage: `Phone application script ready. Call ${phoneNumber || "HR"} using the generated script.`,
+      },
+    );
+
+    await logJobEvent(
+      "phoneApplicationNode",
+      "PHONE_READY",
+      `Phone call script ready for ${state.job?.company || "Company"}. Phone: ${phoneNumber || "N/A"}`,
+    );
+
+    return {
+      phoneApplication: {
+        phoneNumber,
+        callScript: phoneResult.callScript,
+        talkingPoints: phoneResult.talkingPoints,
+        bestTimeToCall: phoneResult.bestTimeToCall,
+        followUpAction: phoneResult.followUpAction,
+      },
+      email: {
+        recipient: phoneNumber,
+        subject: `Phone Application: ${state.job?.title || "Position"} at ${state.job?.company || "Company"}`,
+        body: phoneResult.callScript,
+        approved: false,
+      },
+      status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
+    };
+  } catch (error) {
+    await logError("jobApplicationGraph.phoneApplicationNode", error.message);
+    await logJobEvent("phoneApplicationNode", "FAILED", error.message);
+    if (state.applicationId) {
+      await updateApplicationStatus(state.applicationId, APPLICATION_STATUS.FAILED, {
+        logMessage: `Phone application preparation failed: ${error.message}`,
+      });
+    }
+    return {
+      status: APPLICATION_STATUS.FAILED,
+      errorInfo: { message: error.message },
+    };
+  }
+};
+
+/**
+ * 6c. METHOD: GOOGLE FORM — Google Form Application Node
+ *
+ * Opens the Google Form URL in a headless browser.
+ * Extracts form fields and fills them using LLM-resolved answers.
+ * If a resume/file upload field is detected, uploads the tailored resume PDF.
+ * Submits the form and updates application status.
+ */
+const googleFormApplicationNode = async (state) => {
+  try {
+    if (state.status === APPLICATION_STATUS.FAILED) {
+      return { status: APPLICATION_STATUS.FAILED };
+    }
+
+    const googleFormUrl = state.job?.applicationUrl || "";
+
+    await logJobEvent(
+      "googleFormApplicationNode",
+      "GOOGLE_FORM_START",
+      `Starting Google Form application: ${googleFormUrl}`,
+    );
+
+    const formResult = await runGoogleFormApplication({
+      applicationId: state.applicationId,
+      googleFormUrl,
+      candidateInfo: state.tailoredResume || state.resume,
+      jobDetails: state.job,
+      userId: state.userId,
+      resumePdfPath: state.resumePdfPath || null,
+    });
+
+    if (formResult.formClosed) {
+      // Google Form is closed — fall back to email if possible
+      await logJobEvent(
+        "googleFormApplicationNode",
+        "FORM_CLOSED",
+        `Google Form closed. Falling back to email if HR email available.`,
+      );
+
+      await updateApplicationStatus(state.applicationId, APPLICATION_STATUS.WAITING_FOR_REVIEW, {
+        logMessage: `Google Form is closed. Manual follow-up required.`,
+      });
+
+      return {
+        googleFormResult: formResult,
+        status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
+      };
+    }
+
+    const finalStatus = formResult.submitted
+      ? APPLICATION_STATUS.APPLIED
+      : APPLICATION_STATUS.WAITING_FOR_REVIEW;
+
+    // Persist Google Form result to DB via repository
+    if (state.applicationId) {
+      await updateApplicationGoogleForm(state.applicationId, {
+        googleFormUrl,
+        fieldsDetected: formResult.fieldsDetected || 0,
+        filledCount: formResult.filledCount || 0,
+        skippedCount: formResult.skippedCount || 0,
+        hasResumeField: formResult.hasResumeField || false,
+        submitted: formResult.submitted || false,
+        formClosed: formResult.formClosed || false,
+        errors: formResult.errors || [],
+        submittedAt: formResult.submitted ? new Date() : null,
+      });
+    }
+
+    await logJobEvent(
+      "googleFormApplicationNode",
+      formResult.submitted ? "SUBMITTED" : "WAITING_FOR_REVIEW",
+      `Google Form: submitted=${formResult.submitted}, filled=${formResult.filledCount} fields. Status: ${finalStatus}`,
+    );
+
+    return {
+      googleFormResult: formResult,
+      status: finalStatus,
+    };
+  } catch (error) {
+    await logError("jobApplicationGraph.googleFormApplicationNode", error.message);
+    await logJobEvent("googleFormApplicationNode", "FAILED", error.message);
+    if (state.applicationId) {
+      await updateApplicationStatus(state.applicationId, APPLICATION_STATUS.FAILED, {
+        logMessage: `Google Form application failed: ${error.message}`,
+      });
+    }
+    return {
+      status: APPLICATION_STATUS.FAILED,
+      errorInfo: { message: error.message },
+    };
+  }
+};
+
+/**
+ * 6d. METHOD: UNKNOWN — Unknown/Career Page Application Node
+ *
+ * Opens the unknown URL in a headless browser.
+ * Uses AI LLM to classify the page and detect the real application method.
+ * Dispatches to the correct sub-handler (email, phone, Google Form, custom form).
+ * Falls back to WAITING_FOR_REVIEW for human action if AI cannot determine method.
+ */
+const unknownApplicationNode = async (state) => {
+  try {
+    if (state.status === APPLICATION_STATUS.FAILED) {
+      return { status: APPLICATION_STATUS.FAILED };
+    }
+
+    // Use applicationUrl or sourceUrl as the page to analyze
+    const pageUrl =
+      state.job?.applicationUrl ||
+      state.job?.sourceUrl ||
+      "";
+
+    if (!pageUrl) {
+      await logJobEvent(
+        "unknownApplicationNode",
+        "NO_URL",
+        "No URL available for unknown application method. Setting to WAITING_FOR_REVIEW.",
+      );
+      await updateApplicationStatus(state.applicationId, APPLICATION_STATUS.WAITING_FOR_REVIEW, {
+        logMessage: "No application URL found. Human review required.",
+      });
+      return { status: APPLICATION_STATUS.WAITING_FOR_REVIEW };
+    }
+
+    await logJobEvent(
+      "unknownApplicationNode",
+      "UNKNOWN_START",
+      `AI analyzing unknown page: ${pageUrl}`,
+    );
+
+    const unknownResult = await runUnknownApplicationMethod({
+      applicationId: state.applicationId,
+      pageUrl,
+      candidateInfo: state.tailoredResume || state.resume,
+      jobDetails: state.job,
+      userId: state.userId,
+      resumePdfPath: state.resumePdfPath || null,
+    });
+
+    await logJobEvent(
+      "unknownApplicationNode",
+      "UNKNOWN_COMPLETE",
+      `Unknown method resolved: ${unknownResult.detectedMethod}. Action: ${unknownResult.actionTaken}. Message: ${unknownResult.message}`,
+    );
+
+    // Determine final status
+    let finalStatus = APPLICATION_STATUS.WAITING_FOR_REVIEW;
+    if (
+      unknownResult.actionTaken === "email_sent" ||
+      unknownResult.actionTaken === "google_form_submitted" ||
+      unknownResult.actionTaken === "custom_form_submitted"
+    ) {
+      finalStatus = APPLICATION_STATUS.APPLIED;
+    }
+
+    // Persist unknown page analysis & execution to DB via repository
+    if (state.applicationId) {
+      await updateApplicationUnknownResult(state.applicationId, {
+        pageUrl,
+        detectedMethod: unknownResult.detectedMethod,
+        actionTaken: unknownResult.actionTaken,
+        message: unknownResult.message,
+        analyzedAt: new Date(),
+      });
+    }
+
+    return {
+      unknownPageResult: unknownResult,
+      status: finalStatus,
+    };
+  } catch (error) {
+    await logError("jobApplicationGraph.unknownApplicationNode", error.message);
+    await logJobEvent("unknownApplicationNode", "FAILED", error.message);
+    if (state.applicationId) {
+      await updateApplicationStatus(state.applicationId, APPLICATION_STATUS.FAILED, {
+        logMessage: `Unknown application method failed: ${error.message}`,
       });
     }
     return {
@@ -808,6 +1032,10 @@ const routeAfterLoadExisting = (state) => {
   return "checkApplicationMethodNode";
 };
 
+/**
+ * After method check, route to getUserResumeNode for tailoring-required methods,
+ * or directly to the method-specific node for phone (no tailoring needed).
+ */
 const routeAfterMethodCheck = (state) => {
   if (
     state.status === APPLICATION_STATUS.UNSUPPORTED_METHOD ||
@@ -815,6 +1043,8 @@ const routeAfterMethodCheck = (state) => {
   ) {
     return END;
   }
+  // Phone method: we still load resume (for call script context)
+  // All 4 methods go through getUserResumeNode
   return "getUserResumeNode";
 };
 
@@ -822,13 +1052,42 @@ const routeAfterGetUserResume = (state) => {
   if (state.status === APPLICATION_STATUS.FAILED) {
     return END;
   }
-  return "tailorResumeNode";
+
+  const method = state.applicationMethod;
+
+  // EMAIL: requires full tailored resume and PDF attachment
+  if (method === APPLICATION_METHOD.EMAIL) {
+    return "tailorResumeNode";
+  }
+
+  // PHONE: uses candidate info for call script and talking points directly (no tailoring/PDF needed)
+  if (method === APPLICATION_METHOD.PHONE) {
+    return "phoneApplicationNode";
+  }
+
+  // GOOGLE_FORM: opens form and inspects fields; tailors on-demand only if resume field exists
+  if (method === APPLICATION_METHOD.GOOGLE_FORM) {
+    return "googleFormApplicationNode";
+  }
+
+  // UNKNOWN: analyzes career/job page with LLM; tailors on-demand only if resume field exists
+  return "unknownApplicationNode";
 };
 
 const routeAfterTailor = (state) => {
   if (state.status === APPLICATION_STATUS.FAILED || !state.tailoredResume) {
     return END;
   }
+
+  const method = state.applicationMethod;
+
+  // Phone method: no PDF needed
+  if (method === APPLICATION_METHOD.PHONE) {
+    return "phoneApplicationNode";
+  }
+
+  // All other methods need PDF (email needs it as attachment,
+  // Google Form & Unknown need it for potential file upload)
   return "generatePdfNode";
 };
 
@@ -839,11 +1098,26 @@ const routeAfterPdf = (state) => {
   if (state.isRegeneration || state.status === APPLICATION_STATUS.WAITING_FOR_REVIEW) {
     return END;
   }
-  return "generateEmailNode";
+
+  const method = state.applicationMethod;
+
+  if (method === APPLICATION_METHOD.EMAIL) {
+    return "generateEmailNode";
+  }
+  if (method === APPLICATION_METHOD.GOOGLE_FORM) {
+    return "googleFormApplicationNode";
+  }
+  // UNKNOWN / WEBSITE_FORM
+  return "unknownApplicationNode";
 };
 
 /**
  * Build StateGraph for Job Application Pipeline
+ * Supports all 4 application methods:
+ * 1. EMAIL       — tailors resume → PDF → drafts email → human review → send
+ * 2. PHONE       — tailors resume → generates call script → human review
+ * 3. GOOGLE_FORM — tailors resume → PDF → fills Google Form → submit
+ * 4. UNKNOWN     — tailors resume → PDF → AI analyzes page → dispatches to sub-handler
  */
 const workflow = new StateGraph({
   channels: {
@@ -857,11 +1131,14 @@ const workflow = new StateGraph({
       value: (x, y) => y ?? x,
       default: () => RESUME_PAGE_COUNT,
     },
-    applicationMethod: { value: (x, y) => y ?? x, default: () => "email" },
+    applicationMethod: { value: (x, y) => y ?? x, default: () => APPLICATION_METHOD.EMAIL },
     tailoredResume: { value: (x, y) => y ?? x, default: () => null },
     resumeStrategy: { value: (x, y) => y ?? x, default: () => null },
     resumePdfPath: { value: (x, y) => y ?? x, default: () => "" },
     email: { value: (x, y) => y ?? x, default: () => null },
+    phoneApplication: { value: (x, y) => y ?? x, default: () => null },
+    googleFormResult: { value: (x, y) => y ?? x, default: () => null },
+    unknownPageResult: { value: (x, y) => y ?? x, default: () => null },
     status: {
       value: (x, y) => y ?? x,
       default: () => APPLICATION_STATUS.PENDING,
@@ -869,9 +1146,11 @@ const workflow = new StateGraph({
     rejectionReason: { value: (x, y) => y ?? x, default: () => null },
     errorInfo: { value: (x, y) => y ?? x, default: () => null },
     isRegeneration: { value: (x, y) => y ?? x, default: () => false },
+    template: { value: (x, y) => y ?? x, default: () => "ATS Modern" },
   },
 });
 
+// Register all nodes
 workflow.addNode("initApplicationNode", initApplicationNode);
 workflow.addNode("loadExistingApplicationNode", loadExistingApplicationNode);
 workflow.addNode("checkApplicationMethodNode", checkApplicationMethodNode);
@@ -879,6 +1158,9 @@ workflow.addNode("getUserResumeNode", getUserResumeNode);
 workflow.addNode("tailorResumeNode", tailorResumeNode);
 workflow.addNode("generatePdfNode", generatePdfNode);
 workflow.addNode("generateEmailNode", generateEmailNode);
+workflow.addNode("phoneApplicationNode", phoneApplicationNode);
+workflow.addNode("googleFormApplicationNode", googleFormApplicationNode);
+workflow.addNode("unknownApplicationNode", unknownApplicationNode);
 
 // Define conditional edges
 workflow.addConditionalEdges(START, routeFromStart, {
@@ -896,31 +1178,37 @@ workflow.addConditionalEdges("loadExistingApplicationNode", routeAfterLoadExisti
   [END]: END,
 });
 
-workflow.addConditionalEdges(
-  "checkApplicationMethodNode",
-  routeAfterMethodCheck,
-  {
-    [END]: END,
-    getUserResumeNode: "getUserResumeNode",
-  },
-);
+workflow.addConditionalEdges("checkApplicationMethodNode", routeAfterMethodCheck, {
+  [END]: END,
+  getUserResumeNode: "getUserResumeNode",
+});
 
 workflow.addConditionalEdges("getUserResumeNode", routeAfterGetUserResume, {
   tailorResumeNode: "tailorResumeNode",
+  phoneApplicationNode: "phoneApplicationNode",
+  googleFormApplicationNode: "googleFormApplicationNode",
+  unknownApplicationNode: "unknownApplicationNode",
   [END]: END,
 });
 
 workflow.addConditionalEdges("tailorResumeNode", routeAfterTailor, {
   generatePdfNode: "generatePdfNode",
+  phoneApplicationNode: "phoneApplicationNode",
   [END]: END,
 });
 
 workflow.addConditionalEdges("generatePdfNode", routeAfterPdf, {
   generateEmailNode: "generateEmailNode",
+  googleFormApplicationNode: "googleFormApplicationNode",
+  unknownApplicationNode: "unknownApplicationNode",
   [END]: END,
 });
 
+// Terminal nodes — all end after their execution
 workflow.addEdge("generateEmailNode", END);
+workflow.addEdge("phoneApplicationNode", END);
+workflow.addEdge("googleFormApplicationNode", END);
+workflow.addEdge("unknownApplicationNode", END);
 
 export const memorySaver = new MemorySaver();
 export const jobApplicationGraph = workflow.compile({

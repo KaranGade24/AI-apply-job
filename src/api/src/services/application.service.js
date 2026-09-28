@@ -45,6 +45,16 @@ const isApplicationLocked = (status) => {
 };
 
 /**
+ * Safely verifies if an application belongs to the requesting user
+ */
+const isUserAuthorized = (docUserId, reqUserId) => {
+  if (!docUserId || !reqUserId) return true;
+  const docIdStr = (docUserId._id || docUserId).toString();
+  const reqIdStr = (reqUserId._id || reqUserId).toString();
+  return docIdStr === reqIdStr;
+};
+
+/**
  * Creates an application for a specific job and initiates the application graph
  * @param {string} userId
  * @param {string} jobId
@@ -157,10 +167,7 @@ export const approveAndSendApplication = async (applicationId, userId) => {
       throw new appError("Job application not found", 404);
     }
 
-    if (
-      application.userId._id.toString() !== userId &&
-      application.userId.toString() !== userId
-    ) {
+    if (!isUserAuthorized(application.userId, userId)) {
       throw new appError("Unauthorized access to job application", 403);
     }
 
@@ -171,9 +178,18 @@ export const approveAndSendApplication = async (applicationId, userId) => {
       );
     }
 
-    if (application.status !== APPLICATION_STATUS.WAITING_FOR_REVIEW && application.status !== APPLICATION_STATUS.APPROVED) {
+    const allowedStatuses = [
+      APPLICATION_STATUS.PENDING,
+      APPLICATION_STATUS.WAITING_FOR_REVIEW,
+      APPLICATION_STATUS.APPROVED,
+      'pending',
+      'waiting_for_review',
+      'approved',
+    ];
+
+    if (!allowedStatuses.includes(application.status)) {
       throw new appError(
-        `Cannot approve application in '${application.status}' status. Must be 'waiting_for_review' or 'approved'`,
+        `Cannot approve application in '${application.status}' status. Must be pending, waiting_for_review, or approved`,
         400,
       );
     }
@@ -268,10 +284,7 @@ export const submitMissingAnswersService = async (applicationId, userId, answers
       throw new appError("Application not found", 404);
     }
 
-    if (
-      application.userId._id.toString() !== userId &&
-      application.userId.toString() !== userId
-    ) {
+    if (!isUserAuthorized(application.userId, userId)) {
       throw new appError("Unauthorized access to application", 403);
     }
 
@@ -310,10 +323,7 @@ export const confirmFinalApplicationService = async (applicationId, userId, payl
       throw new appError("Application not found", 404);
     }
 
-    if (
-      application.userId._id.toString() !== userId &&
-      application.userId.toString() !== userId
-    ) {
+    if (!isUserAuthorized(application.userId, userId)) {
       throw new appError("Unauthorized access to application", 403);
     }
 
@@ -352,10 +362,7 @@ export const saveEditedAnswersService = async (applicationId, userId, answers = 
       throw new appError("Application not found", 404);
     }
 
-    if (
-      application.userId._id.toString() !== userId &&
-      application.userId.toString() !== userId
-    ) {
+    if (!isUserAuthorized(application.userId, userId)) {
       throw new appError("Unauthorized access to application", 403);
     }
 
@@ -393,10 +400,7 @@ export const refillApplicationFormService = async (applicationId, userId, answer
       throw new appError("Application not found", 404);
     }
 
-    if (
-      application.userId._id?.toString() !== userId &&
-      application.userId?.toString() !== userId
-    ) {
+    if (!isUserAuthorized(application.userId, userId)) {
       throw new appError("Unauthorized access to application", 403);
     }
 
@@ -439,10 +443,7 @@ export const rejectApplication = async (
       throw new appError("Job application not found", 404);
     }
 
-    if (
-      application.userId._id.toString() !== userId &&
-      application.userId.toString() !== userId
-    ) {
+    if (!isUserAuthorized(application.userId, userId)) {
       throw new appError("Unauthorized access to job application", 403);
     }
 
@@ -487,10 +488,7 @@ export const editApplicationEmail = async (
       throw new appError("Job application not found", 404);
     }
 
-    if (
-      application.userId._id.toString() !== userId &&
-      application.userId.toString() !== userId
-    ) {
+    if (!isUserAuthorized(application.userId, userId)) {
       throw new appError("Unauthorized access to job application", 403);
     }
 
@@ -535,10 +533,7 @@ export const deleteApplicationService = async (applicationId, userId) => {
       throw new appError("Application not found", 404);
     }
 
-    if (
-      application.userId._id.toString() !== userId &&
-      application.userId.toString() !== userId
-    ) {
+    if (!isUserAuthorized(application.userId, userId)) {
       throw new appError("Unauthorized access to job application", 403);
     }
 
@@ -574,10 +569,7 @@ export const getApplicationById = async (applicationId, userId) => {
   if (!appDoc) {
     throw new appError("Application not found", 404);
   }
-  if (
-    appDoc.userId._id.toString() !== userId &&
-    appDoc.userId.toString() !== userId
-  ) {
+  if (!isUserAuthorized(appDoc.userId, userId)) {
     throw new appError("Unauthorized access to job application", 403);
   }
   return appDoc;
@@ -606,10 +598,7 @@ export const updateApplicationResumeService = async (
       throw new appError("Job application not found", 404);
     }
 
-    if (
-      application.userId._id.toString() !== userId &&
-      application.userId.toString() !== userId
-    ) {
+    if (!isUserAuthorized(application.userId, userId)) {
       throw new appError("Unauthorized access to job application", 403);
     }
 

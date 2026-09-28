@@ -79,12 +79,30 @@ export const discoverJobsService = async ({
 
     let jobs = workflowResult.matchedJobs || [];
     if (userId && jobs.length > 0) {
-      const [appliedJobIds, skippedJobIds] = await Promise.all([
+      const [appliedJobIds, skippedJobIds, skippedUrls] = await Promise.all([
         JobApplication.find({ userId }).distinct('jobId'),
-        SkippedApplication.find({ userId }).distinct('jobId')
+        SkippedApplication.find({ userId }).distinct('jobId'),
+        SkippedApplication.find({ userId }).distinct('sourceUrl')
       ]);
-      const excludedIds = new Set([...appliedJobIds.map(id => id.toString()), ...skippedJobIds.map(id => id.toString())]);
-      jobs = jobs.filter(job => !excludedIds.has(job._id.toString()));
+
+      const excludedIdSet = new Set(
+        [...appliedJobIds, ...skippedJobIds]
+          .filter(Boolean)
+          .map((id) => id.toString())
+      );
+
+      const excludedUrlSet = new Set(
+        skippedUrls.filter(Boolean).map((u) => u.trim().toLowerCase())
+      );
+
+      jobs = jobs.filter((job) => {
+        if (!job) return false;
+        const idStr = job._id ? job._id.toString() : null;
+        if (idStr && excludedIdSet.has(idStr)) return false;
+        const urlStr = job.sourceUrl ? job.sourceUrl.trim().toLowerCase() : null;
+        if (urlStr && excludedUrlSet.has(urlStr)) return false;
+        return true;
+      });
     }
 
     return {
@@ -110,16 +128,26 @@ export const getSavedJobsService = async (filter = {}, limit = 50, userId = null
     let finalFilter = { ...filter };
 
     if (userId) {
-      // Fetch IDs of jobs that the user has already applied to or skipped
-      const [appliedJobIds, skippedJobIds] = await Promise.all([
+      // Fetch IDs and URLs of jobs that the user has already applied to or skipped
+      const [appliedJobIds, skippedJobIds, skippedUrls] = await Promise.all([
         JobApplication.find({ userId }).distinct('jobId'),
-        SkippedApplication.find({ userId }).distinct('jobId')
+        SkippedApplication.find({ userId }).distinct('jobId'),
+        SkippedApplication.find({ userId }).distinct('sourceUrl')
       ]);
 
-      const excludedIds = [...new Set([...appliedJobIds, ...skippedJobIds])].filter(id => id != null);
-      
+      const excludedIds = [...new Set([...appliedJobIds, ...skippedJobIds])].filter(Boolean);
+      const cleanSkippedUrls = skippedUrls.filter(Boolean);
+
+      const conditions = [];
       if (excludedIds.length > 0) {
-        finalFilter._id = { $nin: excludedIds };
+        conditions.push({ _id: { $nin: excludedIds } });
+      }
+      if (cleanSkippedUrls.length > 0) {
+        conditions.push({ sourceUrl: { $nin: cleanSkippedUrls } });
+      }
+
+      if (conditions.length > 0) {
+        finalFilter.$and = [...(finalFilter.$and || []), ...conditions];
       }
     }
 

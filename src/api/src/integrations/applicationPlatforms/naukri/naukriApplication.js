@@ -223,14 +223,21 @@ export const runNaukriApplication = async ({
         await activePage.waitForTimeout(2500);
       }
 
-      // If email instructions with reference ID were detected
-      if (analysis.pageType === 'email_instructions' && analysis.emailContact?.email) {
+      // If email instructions with reference ID or closed form fallback were detected
+      if (
+        (analysis.pageType === 'email_instructions' ||
+          analysis.pageType === 'form_closed' ||
+          analysis.nextRecommendedAction === 'send_email' ||
+          analysis.nextRecommendedAction === 'form_closed_fallback_email') &&
+        analysis.emailContact?.email
+      ) {
         const refId = analysis.emailContact.referenceId || analysis.matchedRole?.referenceId;
         const subj = refId
           ? `Application: ${job.title} (Ref: ${refId})`
           : `Application: ${job.title}`;
 
         await JobApplication.findByIdAndUpdate(applicationId, {
+          applicationMethod: 'email',
           'email.recipient': analysis.emailContact.email,
           'email.subject': subj,
           'email.body': `Dear Hiring Team,\n\nI am applying for the ${job.title} position${refId ? ` (Reference ID: ${refId})` : ''} at ${job.company}. My tailored ATS resume is attached for your review.\n\nBest regards,\n${userDoc?.fullName || 'Applicant'}`,
@@ -331,7 +338,7 @@ export const runNaukriApplication = async ({
       });
     }
 
-    const formInspection = await inspectForm(page);
+    const formInspection = await inspectForm(activePage);
 
     if (formInspection.isQuestionnairePresent) {
       await updateApplicationStatus(applicationId, APPLICATION_STATUS.RESOLVING_ANSWERS, {
@@ -408,7 +415,7 @@ export const runNaukriApplication = async ({
           logMessage: `Executing ${actions.length} verified browser actions into form...`,
         });
 
-        await executeBrowserActions(page, actions, {
+        await executeBrowserActions(activePage, actions, {
           resumePdfPath: application.resume?.pdfPath,
         });
       }
@@ -452,24 +459,24 @@ export const runNaukriApplication = async ({
 
       // If confirmSubmission IS true: Submit the application!
       await updateApplicationStatus(applicationId, APPLICATION_STATUS.SUBMITTING, {
-        logMessage: 'Final user confirmation received. Submitting application on Naukri...',
+        logMessage: 'Final user confirmation received. Submitting application...',
       });
 
-      const submitBtn = page
+      const submitBtn = activePage
         .locator('button:has-text("Submit"), button:has-text("Save & Apply"), button:has-text("Apply Now"), button[type="submit"]')
         .first();
 
       const canSubmit = await submitBtn.isVisible().catch(() => false);
       if (canSubmit) {
         await submitBtn.click();
-        await page.waitForTimeout(3000);
+        await activePage.waitForTimeout(3000);
       }
 
       // Verify submission
-      const finalSuccess = await detectSubmissionSuccess(page);
+      const finalSuccess = await detectSubmissionSuccess(activePage);
       if (finalSuccess.isSubmitted || canSubmit) {
         await updateApplicationStatus(applicationId, APPLICATION_STATUS.APPLIED, {
-          logMessage: 'Application successfully submitted and verified on Naukri.',
+          logMessage: 'Application successfully submitted and verified.',
         });
         await JobApplication.findByIdAndUpdate(applicationId, {
           'form.submittedAt': new Date(),
@@ -478,13 +485,13 @@ export const runNaukriApplication = async ({
 
         return {
           status: APPLICATION_STATUS.APPLIED,
-          message: 'Job application successfully submitted on Naukri!',
+          message: 'Job application successfully submitted!',
         };
       }
     }
 
     // Final fallback check
-    const finalCheck = await detectSubmissionSuccess(page);
+    const finalCheck = await detectSubmissionSuccess(activePage);
     const resultStatus = finalCheck.isSubmitted ? APPLICATION_STATUS.APPLIED : APPLICATION_STATUS.WAITING_FOR_REVIEW;
 
     await JobApplication.findByIdAndUpdate(applicationId, {

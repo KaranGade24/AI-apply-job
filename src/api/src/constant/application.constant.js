@@ -17,7 +17,13 @@ export const APPLICATION_STATUS = Object.freeze({
   SENDING: "sending",
   SENT: "sent",
   FAILED: "failed",
-  // Browser application workflow statuses
+  // Phone application method statuses
+  PHONE_APPLYING: "phone_applying",
+  CALL_SCRIPT_READY: "call_script_ready",
+  // Google Form application method statuses
+  GOOGLE_FORM_FILLING: "google_form_filling",
+  GOOGLE_FORM_SUBMITTED: "google_form_submitted",
+  // Browser / unknown page analysis statuses
   ANALYZING_PORTAL: "analyzing_portal",
   SESSION_LOADING: "session_loading",
   SESSION_EXPIRED: "session_expired",
@@ -68,12 +74,20 @@ export const HUMAN_REASONS = Object.freeze({
   VALIDATION_MISMATCH: "validationMismatch",
 });
 
+/**
+ * 4 canonical application methods supported by the AI pipeline:
+ * 1. EMAIL       — Send application email with tailored resume to HR contact
+ * 2. PHONE       — AI generates call script; candidate calls HR
+ * 3. GOOGLE_FORM — AI opens Google Form, fills fields, uploads resume if needed, submits
+ * 4. UNKNOWN     — AI opens the URL, analyzes with LLM, detects actual method and takes action
+ */
 export const APPLICATION_METHOD = Object.freeze({
   EMAIL: "email",
   PHONE: "phone",
   GOOGLE_FORM: "googleForm",
-  WEBSITE_FORM: "websiteForm",
   UNKNOWN: "unknown",
+  // Legacy alias kept for backward compatibility
+  WEBSITE_FORM: "unknown",
 });
 
 export const RESUME_TEMPLATES = [

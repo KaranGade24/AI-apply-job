@@ -155,7 +155,9 @@ export const JobSearchPage = () => {
       } else {
         const errorMsg = err.response?.data?.message || err.message;
         if (errorMsg?.includes('NAUKRI_AUTHENTICATION_REQUIRED') || errorMsg?.includes('Naukri session')) {
-          setIsNaukriModalOpen(true);
+          if (typeof openNaukriModal === 'function') {
+            openNaukriModal();
+          }
           showToast('Naukri session expired or required. Please reconnect.');
         } else {
           showToast(errorMsg || 'Failed to discover jobs.');
@@ -266,6 +268,11 @@ export const JobSearchPage = () => {
       matchesCategory = /ai|ml|machine|genai|llm|python/i.test(job.title) || (job.skills && job.skills.some((s) => /ai|llm|gemini|python/i.test(s)));
     } else if (activeTab === 'devops') {
       matchesCategory = /devops|cloud|aws|docker|kubernetes/i.test(job.title) || (job.skills && job.skills.some((s) => /docker|aws|devops/i.test(s)));
+    } else if (activeTab === 'other') {
+      const isKnown =
+        /frontend|react|vue|angular|ui|web|backend|node|express|python|java|api|full\s*stack|mern|mean|software|ai|ml|machine|genai|llm|devops|cloud|aws|docker|kubernetes/i.test(job.title) ||
+        (job.skills && job.skills.some((s) => /react|frontend|ui|node|express|backend|mern|fullstack|ai|llm|gemini|docker|aws|devops/i.test(s)));
+      matchesCategory = !isKnown;
     }
 
     // 2. Multi Location Filter

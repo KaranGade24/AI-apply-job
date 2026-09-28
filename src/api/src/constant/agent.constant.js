@@ -30,13 +30,14 @@ export const AI_MODELS = {
  */
 export const resolveUserAiSettings = async (userId) => {
   try {
-    const { getUserSettingsService } = await import("../services/setting.service.js");
+    const { getUserSettingsService } =
+      await import("../services/setting.service.js");
     const settings = await getUserSettingsService(userId);
-    
+
     const defaults = {
       model: MODEL_NAME,
       temperature: MODEL_TEMPERATURE,
-      provider: "googleGemini"
+      provider: "googleGemini",
     };
 
     if (!settings || !settings.aiSettings) {
@@ -44,18 +45,25 @@ export const resolveUserAiSettings = async (userId) => {
     }
 
     const { model, temperature, provider } = settings.aiSettings;
-    
+
     // Validate provider
-    const activeProvider = AI_PROVIDERS.find(p => p.id === provider) ? provider : defaults.provider;
+    const activeProvider = AI_PROVIDERS.find((p) => p.id === provider)
+      ? provider
+      : defaults.provider;
 
     // Validate model for the provider
     const allowedModels = AI_MODELS[activeProvider] || [];
-    const activeModel = allowedModels.find(m => m.id === model) ? model : (allowedModels[0]?.id || defaults.model);
+    const activeModel = allowedModels.find((m) => m.id === model)
+      ? model
+      : allowedModels[0]?.id || defaults.model;
 
     return {
       provider: activeProvider,
       model: activeModel,
-      temperature: typeof temperature === 'number' && temperature >= 0 && temperature <= 1 ? temperature : defaults.temperature,
+      temperature:
+        typeof temperature === "number" && temperature >= 0 && temperature <= 1
+          ? temperature
+          : defaults.temperature,
     };
   } catch (error) {
     return {
@@ -69,7 +77,7 @@ export const resolveUserAiSettings = async (userId) => {
 export const MAX_ATTEMPTS = 3;
 export const MAX_DISCOVERY_ATTEMPTS = 3;
 export const MAX_TOOL_CALLS = 2;
-export const LLM_TIMEOUT_MS = 60000; // 60 seconds timeout for AI structured extraction
+export const LLM_TIMEOUT_MS = 90000; // 90 seconds timeout for AI structured extraction
 
 export const SCRAPE_LIMIT_CONFIG = Object.freeze({
   DEFAULT_TARGET_MATCHED: 10,
@@ -83,9 +91,10 @@ export const SCRAPE_LIMIT_CONFIG = Object.freeze({
  */
 export const resolveUserJobSearchSettings = async (userId) => {
   try {
-    const { getUserSettingsService } = await import("../services/setting.service.js");
+    const { getUserSettingsService } =
+      await import("../services/setting.service.js");
     const settings = await getUserSettingsService(userId);
-    
+
     const defaults = {
       maxJobsToSearch: SCRAPE_LIMIT_CONFIG.MAX_SCRAPE_LIMIT,
     };
@@ -97,7 +106,10 @@ export const resolveUserJobSearchSettings = async (userId) => {
     const { maxJobsToSearch } = settings.jobSetting;
 
     return {
-      maxJobsToSearch: typeof maxJobsToSearch === 'number' && maxJobsToSearch > 0 ? maxJobsToSearch : defaults.maxJobsToSearch,
+      maxJobsToSearch:
+        typeof maxJobsToSearch === "number" && maxJobsToSearch > 0
+          ? maxJobsToSearch
+          : defaults.maxJobsToSearch,
     };
   } catch (error) {
     return {
@@ -112,13 +124,19 @@ export const resolveUserJobSearchSettings = async (userId) => {
  * @param {number} userMaxLimit - Optional user defined max limit from settings
  * @returns {number}
  */
-export const calculateScrapeLimit = (targetMaxMatched = SCRAPE_LIMIT_CONFIG.DEFAULT_TARGET_MATCHED, userMaxLimit) => {
+export const calculateScrapeLimit = (
+  targetMaxMatched = SCRAPE_LIMIT_CONFIG.DEFAULT_TARGET_MATCHED,
+  userMaxLimit,
+) => {
   const target = targetMaxMatched || SCRAPE_LIMIT_CONFIG.DEFAULT_TARGET_MATCHED;
   const maxLimit = userMaxLimit || SCRAPE_LIMIT_CONFIG.MAX_SCRAPE_LIMIT;
-  
+
   return Math.min(
-    Math.max(target * SCRAPE_LIMIT_CONFIG.MULTIPLIER, SCRAPE_LIMIT_CONFIG.MIN_SCRAPE_LIMIT),
-    maxLimit
+    Math.max(
+      target * SCRAPE_LIMIT_CONFIG.MULTIPLIER,
+      SCRAPE_LIMIT_CONFIG.MIN_SCRAPE_LIMIT,
+    ),
+    maxLimit,
   );
 };
 

@@ -10,6 +10,9 @@ import { getJobSource } from "../../integrations/jobSources/sourceManager.js";
 import { compareJobWithConfig } from "../../integrations/utils/compareJobs.js";
 import { createBrowser } from "../../browser/browserConfig.js";
 import { upsertJob, getExistingSourceUrls } from "../../repositories/job.repository.js";
+import { Job } from "../../model/Job.js";
+import { JobApplication } from "../../model/JobApplication.js";
+import { SkippedApplication } from "../../model/SkippedApplication.js";
 import { Resume } from "../../model/Resume.js";
 import { logError, logResumeEvent, logJobEvent } from "../../utils/logger.js";
 import { calculateScrapeLimit, resolveUserJobSearchSettings, MAX_DISCOVERY_ATTEMPTS } from "../../constant/agent.constant.js";
@@ -250,35 +253,73 @@ const applyFiltersNode = async (state) => {
   try {
     const config = state.config;
     const normalized = state.normalizedJobs || [];
+    const userId = config?.userId;
 
-    // Query database for existing jobs by sourceUrl before evaluating/sending to AI
+    // Build user-specific exclusion set (jobs the CURRENT user already applied to or skipped)
+    const userExcludedUrls = new Set();
+    if (userId) {
+      const [appliedJobs, skippedJobsList] = await Promise.all([
+        JobApplication.find({ userId }).populate("jobId", "sourceUrl").lean(),
+        SkippedApplication.find({ userId }, { sourceUrl: 1 }).lean(),
+      ]);
+
+      appliedJobs.forEach((app) => {
+        if (app.jobId?.sourceUrl) {
+          userExcludedUrls.add(app.jobId.sourceUrl.trim().toLowerCase());
+        }
+      });
+      skippedJobsList.forEach((sk) => {
+        if (sk.sourceUrl) {
+          userExcludedUrls.add(sk.sourceUrl.trim().toLowerCase());
+        }
+      });
+    }
+
+    // Lookup existing jobs in MongoDB so we can reuse their _id and metadata
     const sourceUrls = normalized.map((j) => j.sourceUrl).filter(Boolean);
-    const existingSet = await getExistingSourceUrls(sourceUrls);
+    const existingJobDocs = await Job.find(
+      { sourceUrl: { $in: sourceUrls } },
+      { _id: 1, sourceUrl: 1, matchStatus: 1, matchScore: 1 }
+    ).lean();
+    const existingJobsMap = new Map();
+    existingJobDocs.forEach((doc) => {
+      if (doc.sourceUrl) {
+        existingJobsMap.set(doc.sourceUrl.trim().toLowerCase(), doc);
+      }
+    });
 
     const passedJobs = [];
     const skippedJobs = [];
     let skippedExistingCount = 0;
 
     for (const job of normalized) {
-      // Do not re-process or re-count jobs that already exist in MongoDB
-      if (job.sourceUrl && existingSet.has(job.sourceUrl)) {
+      const cleanUrl = job.sourceUrl ? job.sourceUrl.trim().toLowerCase() : "";
+
+      // Skip only if the CURRENT user has already applied or explicitly skipped this job
+      if (cleanUrl && userExcludedUrls.has(cleanUrl)) {
         skippedExistingCount++;
         continue;
       }
 
-      const evaluation = compareJobWithConfig(job, config);
+      // If job already exists in DB, attach its _id
+      const existingJobDoc = existingJobsMap.get(cleanUrl);
+      const enrichedJob = existingJobDoc
+        ? { ...job, _id: existingJobDoc._id }
+        : { ...job };
+
+      const evaluation = compareJobWithConfig(enrichedJob, config);
       if (evaluation.isMatch) {
         passedJobs.push({
-          ...job,
+          ...enrichedJob,
           deterministicScore: evaluation.score,
           matchReasons: evaluation.matchReasons,
         });
       } else {
         skippedJobs.push({
           userId: config?.userId,
-          job,
-          skipReason: evaluation.skipReason || 'CONFIG_MISMATCH',
-          skipDetails: (evaluation.failReasons || []).join('; '),
+          job: enrichedJob,
+          skipReason: evaluation.skipReason || "CONFIG_MISMATCH",
+          skipDetails: (evaluation.failReasons || []).join("; "),
         });
       }
     }
@@ -417,7 +458,12 @@ const storeEligibleJobsNode = async (state) => {
     for (const jobData of jobsToStore) {
       if (jobData.sourceUrl) {
         const doc = await upsertJob(jobData).catch(() => null);
-        if (doc) storedList.push(doc);
+        if (doc) {
+          const plain = doc.toObject ? doc.toObject() : doc;
+          storedList.push({ ...jobData, ...plain });
+        } else {
+          storedList.push(jobData);
+        }
       }
     }
 
@@ -429,6 +475,7 @@ const storeEligibleJobsNode = async (state) => {
 
     return {
       storedJobsCount: storedList.length,
+      matchedJobs: storedList,
     };
   } catch (error) {
     await logError("jobDiscoveryGraph.storeEligibleJobsNode", error.message);
@@ -539,8 +586,11 @@ const graphBuilder = new StateGraph({
         if (!y) return x || [];
         const map = new Map();
         [...x, ...y].forEach((j) => {
-          const key = j._id?.toString() || j.sourceUrl;
-          if (key && !map.has(key)) map.set(key, j);
+          const key = j.sourceUrl || j._id?.toString() || j.title;
+          if (key) {
+            const prev = map.get(key) || {};
+            map.set(key, { ...prev, ...j });
+          }
         });
         return Array.from(map.values());
       },
