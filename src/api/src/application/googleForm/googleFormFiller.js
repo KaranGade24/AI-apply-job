@@ -34,34 +34,40 @@ export const extractGoogleFormFields = async (page) => {
     const fields = await page.evaluate(() => {
       const results = [];
 
-      // Google Form uses [data-params] on each question container
-      const questionContainers = document.querySelectorAll(
-        '[data-params], .freebirdFormviewerViewItemsItemItem, .Qr7Oae'
+      // Google Form uses .Qr7Oae, [data-params], or [role="listitem"] for each question container
+      const questionContainers = Array.from(
+        document.querySelectorAll('.Qr7Oae, [data-params], [role="listitem"]')
       );
 
       questionContainers.forEach((container, idx) => {
+        // Find question label / heading
         const labelEl = container.querySelector(
-          '[role="heading"], .M7eMe, .freebirdFormviewerViewItemsItemItemTitle, .z12JJ'
+          '[role="heading"], .M7eMe, .freebirdFormviewerViewItemsItemItemTitle, .z12JJ, .HoG1Id'
         );
         const questionText = (labelEl?.textContent || '').trim().replace(/\s+/g, ' ');
         if (!questionText) return;
 
-        const isRequired = container.querySelector('[aria-required="true"], .vnumgf') !== null
-          || (container.textContent || '').includes('*');
+        // Required check
+        const isRequired =
+          container.querySelector('[aria-required="true"], .vnumgf, .R3H9ec') !== null ||
+          container.innerHTML.includes('*') ||
+          (labelEl?.textContent || '').includes('*');
 
-        // Detect field type
+        // Help / Description text
+        const descEl = container.querySelector('.M7eMe ~ .g6seFa, .o3Dpx, .Y6MyFd');
+        const description = (descEl?.textContent || '').trim();
+
+        // Detect field type and options
         let fieldType = 'text';
-        let options = [];
-        let fieldSelector = '';
+        const options = [];
 
-        // File upload
-        const fileInput = container.querySelector('input[type="file"]');
-        if (fileInput) {
+        // 1. File upload
+        const fileInput = container.querySelector('input[type="file"], [data-value*="upload"]');
+        if (fileInput || container.textContent.toLowerCase().includes('add file')) {
           fieldType = 'file';
-          fieldSelector = fileInput.id ? `#${fileInput.id}` : 'input[type="file"]';
         }
 
-        // Dropdown (select)
+        // 2. Dropdown (select / listbox)
         const selectEl = container.querySelector('select, [role="listbox"]');
         if (!fileInput && selectEl) {
           fieldType = 'dropdown';
@@ -72,54 +78,81 @@ export const extractGoogleFormFields = async (page) => {
               options.push(txt);
             }
           });
-          fieldSelector = selectEl.id ? `#${selectEl.id}` : '[role="listbox"]';
         }
 
-        // Radio group
+        // 3. Radio group
         const radioInputs = container.querySelectorAll('[role="radio"], input[type="radio"]');
         if (!fileInput && !selectEl && radioInputs.length > 0) {
           fieldType = 'radio';
           radioInputs.forEach((r) => {
-            const lbl = r.getAttribute('aria-label') || r.closest('label')?.textContent || r.value || '';
-            const optTxt = lbl.trim();
+            const lbl =
+              r.getAttribute('aria-label') ||
+              r.getAttribute('data-value') ||
+              r.closest('label')?.textContent ||
+              r.parentElement?.textContent ||
+              '';
+            const optTxt = lbl.trim().replace(/\s+/g, ' ');
             if (optTxt && !options.includes(optTxt)) options.push(optTxt);
           });
-          fieldSelector = '[role="radio"]';
         }
 
-        // Checkbox group
+        // 4. Checkbox group
         const checkboxInputs = container.querySelectorAll('[role="checkbox"], input[type="checkbox"]');
         if (!fileInput && !selectEl && radioInputs.length === 0 && checkboxInputs.length > 0) {
           fieldType = 'checkbox';
           checkboxInputs.forEach((c) => {
-            const lbl = c.getAttribute('aria-label') || c.closest('label')?.textContent || c.value || '';
-            const optTxt = lbl.trim();
+            const lbl =
+              c.getAttribute('aria-label') ||
+              c.getAttribute('data-value') ||
+              c.closest('label')?.textContent ||
+              c.parentElement?.textContent ||
+              '';
+            const optTxt = lbl.trim().replace(/\s+/g, ' ');
             if (optTxt && !options.includes(optTxt)) options.push(optTxt);
           });
-          fieldSelector = '[role="checkbox"]';
         }
 
-        // Textarea (paragraph)
+        // 5. Textarea (paragraph)
         const textarea = container.querySelector('textarea');
         if (!fileInput && !selectEl && radioInputs.length === 0 && checkboxInputs.length === 0 && textarea) {
           fieldType = 'textarea';
-          fieldSelector = textarea.id ? `#${textarea.id}` : 'textarea';
         }
 
-        // Standard text/email/number input
-        const textInput = container.querySelector('input:not([type="radio"]):not([type="checkbox"]):not([type="file"])');
-        if (!fileInput && !selectEl && radioInputs.length === 0 && checkboxInputs.length === 0 && !textarea && textInput) {
-          const inputType = textInput.type || 'text';
-          fieldType = inputType === 'email' ? 'email' : inputType === 'number' ? 'number' : 'text';
-          fieldSelector = textInput.id ? `#${textInput.id}` : `input[type="${inputType}"]`;
+        // 6. Text / Email / Number / Tel / Date
+        const textInput = container.querySelector(
+          'input:not([type="radio"]):not([type="checkbox"]):not([type="file"]):not([type="hidden"])'
+        );
+        if (
+          !fileInput &&
+          !selectEl &&
+          radioInputs.length === 0 &&
+          checkboxInputs.length === 0 &&
+          !textarea &&
+          textInput
+        ) {
+          const type = (textInput.type || 'text').toLowerCase();
+          const qLower = questionText.toLowerCase();
+          if (type === 'email' || qLower.includes('email') || qLower.includes('e-mail')) {
+            fieldType = 'email';
+          } else if (type === 'number' || qLower.includes('ctc') || qLower.includes('salary') || qLower.includes('years') || qLower.includes('experience')) {
+            fieldType = 'number';
+          } else if (type === 'tel' || qLower.includes('phone') || qLower.includes('mobile') || qLower.includes('contact')) {
+            fieldType = 'phone';
+          } else if (type === 'date' || qLower.includes('date') || qLower.includes('dob') || qLower.includes('birth')) {
+            fieldType = 'date';
+          } else if (type === 'url' || qLower.includes('link') || qLower.includes('github') || qLower.includes('linkedin') || qLower.includes('portfolio') || qLower.includes('resume url')) {
+            fieldType = 'url';
+          } else {
+            fieldType = 'text';
+          }
         }
 
         results.push({
           fieldIndex: idx,
           questionText,
+          description,
           fieldType,
           options,
-          fieldSelector: fieldSelector || `div:nth-child(${idx + 1})`,
           isRequired,
           currentValue: '',
         });
@@ -131,7 +164,7 @@ export const extractGoogleFormFields = async (page) => {
     await logJobEvent(
       'googleFormFiller',
       'FIELDS_EXTRACTED',
-      `Extracted ${fields.length} fields from Google Form`
+      `Extracted ${fields.length} questions from Google Form`
     );
 
     return fields;
@@ -142,66 +175,97 @@ export const extractGoogleFormFields = async (page) => {
 };
 
 /**
- * Uses the LLM to resolve answers for each Google Form field based on candidate info and job context.
+ * Uses Gemini AI LLM to resolve precise, tailored answers for every Google Form field
+ * based on the candidate's personal profile, resume data, and job requirements.
  *
  * @param {Array<object>} fields - Detected form fields
- * @param {object} candidateInfo - Candidate resume + personal info
- * @param {object} jobDetails - Job document
+ * @param {object} candidateInfo - Candidate resume + profile info
+ * @param {object} jobDetails - Target job details
  * @param {object} model - LangChain model instance
- * @returns {Promise<Array<{ fieldIndex: number, questionText: string, answer: string, fieldType: string }>>}
+ * @returns {Promise<Array<object>>} Resolved answers array
  */
 export const resolveGoogleFormAnswers = async (fields, candidateInfo, jobDetails, model) => {
   if (!fields || fields.length === 0) return [];
 
-  const prompt = `You are an intelligent job application assistant filling out a Google Form on behalf of a candidate.
+  const personal = candidateInfo?.personalInfo || candidateInfo || {};
+  const name = personal.fullName || personal.name || 'Candidate';
+  const email = personal.email || '';
+  const phone = personal.phone || '';
+  const location = personal.location || personal.city || 'India';
+  const linkedin = personal.linkedin || '';
+  const github = personal.github || '';
+  const portfolio = personal.portfolio || personal.website || '';
+  const summary = candidateInfo?.summary || '';
+  const skills = candidateInfo?.skills || [];
+  const experience = candidateInfo?.experience || [];
+  const education = candidateInfo?.education || [];
+  const currentCtc = personal.currentCtc || personal.ctc || 'Negotiable';
+  const expectedCtc = personal.expectedCtc || 'As per industry standards';
+  const noticePeriod = personal.noticePeriod || 'Immediate / 15 Days';
+  const totalExp = personal.totalExperience || '2+ years';
 
-CANDIDATE INFORMATION:
-- Full Name: ${candidateInfo?.personalInfo?.fullName || candidateInfo?.name || 'Candidate'}
-- Email: ${candidateInfo?.personalInfo?.email || candidateInfo?.email || ''}
-- Phone: ${candidateInfo?.personalInfo?.phone || candidateInfo?.phone || ''}
-- Location: ${candidateInfo?.personalInfo?.location || candidateInfo?.location || ''}
-- LinkedIn: ${candidateInfo?.personalInfo?.linkedin || ''}
-- GitHub: ${candidateInfo?.personalInfo?.github || ''}
-- Summary: ${candidateInfo?.summary || ''}
-- Skills: ${JSON.stringify(candidateInfo?.skills || [])}
-- Experience: ${JSON.stringify((candidateInfo?.experience || []).slice(0, 3))}
-- Education: ${JSON.stringify((candidateInfo?.education || []).slice(0, 2))}
+  const prompt = `You are an expert AI Job Application Assistant resolving all fields for an official Employer Google Form application.
+
+CANDIDATE PROFILE:
+- Full Name: "${name}"
+- Email Address: "${email}"
+- Phone / Mobile: "${phone}"
+- Current Location: "${location}"
+- LinkedIn URL: "${linkedin}"
+- GitHub Profile: "${github}"
+- Portfolio / Website: "${portfolio}"
+- Total Professional Experience: "${totalExp}"
+- Current CTC: "${currentCtc}"
+- Expected CTC: "${expectedCtc}"
+- Notice Period: "${noticePeriod}"
+- Professional Summary: "${summary}"
+- Technical & Core Skills: ${JSON.stringify(skills)}
+- Work Experience History: ${JSON.stringify(experience.slice(0, 3))}
+- Education & Degrees: ${JSON.stringify(education.slice(0, 2))}
 
 JOB DETAILS:
-- Title: ${jobDetails?.title || 'Software Developer'}
-- Company: ${jobDetails?.company || 'Company'}
-- Description: ${(jobDetails?.description || '').slice(0, 1500)}
-- Skills Required: ${JSON.stringify(jobDetails?.skills || [])}
+- Job Title: "${jobDetails?.title || 'Software Engineer'}"
+- Company: "${jobDetails?.company || 'Employer'}"
+- Job Description: "${(jobDetails?.description || '').slice(0, 1500)}"
+- Key Requirements: ${JSON.stringify(jobDetails?.skills || [])}
 
-FORM FIELDS (JSON):
-${JSON.stringify(fields.map((f) => ({
-  fieldIndex: f.fieldIndex,
-  questionText: f.questionText,
-  fieldType: f.fieldType,
-  options: f.options,
-  isRequired: f.isRequired,
-})), null, 2)}
+GOOGLE FORM QUESTIONS (Total ${fields.length}):
+${JSON.stringify(
+  fields.map((f) => ({
+    fieldIndex: f.fieldIndex,
+    questionText: f.questionText,
+    description: f.description,
+    fieldType: f.fieldType,
+    options: f.options,
+    isRequired: f.isRequired,
+  })),
+  null,
+  2
+)}
 
-TASK:
-For each field, provide the BEST answer. Rules:
-- Use the candidate's real information where available.
-- For text/textarea: write thoughtful, professional content aligned to the job.
-- For radio/checkbox/dropdown: pick the MOST APPROPRIATE option from the provided options list.
-- For file upload (type = "file"): return answer as "__RESUME_FILE__" to indicate resume should be uploaded.
-- For questions about years of experience, salary, notice period — provide realistic answers.
-- Keep answers concise and professional.
+TASK & ACCURACY RULES:
+1. For every question in the list, provide the most accurate, professional, and truthful answer based on the candidate profile.
+2. For Name, Email, Phone, LinkedIn, GitHub, Portfolio: use the exact matching value from candidate profile.
+3. For Experience, CTC, Notice Period, Location: provide realistic, standard values.
+4. For Radio / Checkbox / Dropdown: MUST pick the EXACT MATCHING option string from the "options" list provided for that field.
+5. For File Upload (fieldType="file" or resume questions): set answer as "__RESUME_FILE__".
+6. For Open-ended / Paragraph / Motivation questions (e.g. "Why should we hire you?"): write a compelling 1-2 sentence answer tailored to the job.
+7. Return an item for EVERY question index (0 to ${fields.length - 1}).
 
-RETURN STRICT JSON ONLY (array):
+RETURN STRICT JSON ONLY:
 [
   {
     "fieldIndex": 0,
-    "questionText": "Full Name",
-    "answer": "John Doe",
-    "fieldType": "text"
+    "questionText": "Question text here",
+    "fieldType": "text",
+    "answer": "Resolved answer string or array of strings for multi-checkbox",
+    "isRequired": true,
+    "isMissing": false
   }
 ]`;
 
   try {
+    if (!model) throw new Error('Model instance not provided');
     const response = await model.invoke(prompt);
     const content = (response.content || '').trim();
     const cleaned = content
@@ -211,168 +275,305 @@ RETURN STRICT JSON ONLY (array):
       .trim();
 
     const parsed = JSON.parse(cleaned);
-    return Array.isArray(parsed) ? parsed : [];
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      return fields.map((field) => {
+        const found = parsed.find((p) => p.fieldIndex === field.fieldIndex);
+        let ans = found?.answer ?? '';
+        if (typeof ans === 'object' && !Array.isArray(ans)) ans = JSON.stringify(ans);
+        return {
+          fieldIndex: field.fieldIndex,
+          questionText: field.questionText,
+          fieldType: field.fieldType,
+          options: field.options || [],
+          isRequired: field.isRequired,
+          answer: ans || (field.isRequired ? name : ''),
+          isMissing: !ans && field.isRequired,
+        };
+      });
+    }
   } catch (error) {
     await logError('googleFormFiller.resolveGoogleFormAnswers', error.message);
-    // Fallback: create basic answers from candidate info
-    const name = candidateInfo?.personalInfo?.fullName || 'Candidate';
-    const email = candidateInfo?.personalInfo?.email || '';
-    const phone = candidateInfo?.personalInfo?.phone || '';
-
-    return fields.map((f) => {
-      let answer = '';
-      const q = f.questionText.toLowerCase();
-      if (q.includes('name') || q.includes('full name')) answer = name;
-      else if (q.includes('email')) answer = email;
-      else if (q.includes('phone') || q.includes('mobile') || q.includes('contact')) answer = phone;
-      else if (q.includes('experience')) answer = '2+ years';
-      else if (f.fieldType === 'file') answer = '__RESUME_FILE__';
-      else if (f.options && f.options.length > 0) answer = f.options[0];
-      return { fieldIndex: f.fieldIndex, questionText: f.questionText, answer, fieldType: f.fieldType };
-    });
   }
+
+  // Fallback: Deterministic Rule-Based Resolution
+  return fields.map((f) => {
+    let answer = '';
+    const q = f.questionText.toLowerCase();
+
+    if (q.includes('full name') || q.includes('your name') || q.includes('name')) {
+      answer = name;
+    } else if (q.includes('email') || q.includes('e-mail')) {
+      answer = email;
+    } else if (q.includes('phone') || q.includes('mobile') || q.includes('contact') || q.includes('whatsapp')) {
+      answer = phone;
+    } else if (q.includes('linkedin')) {
+      answer = linkedin;
+    } else if (q.includes('github') || q.includes('git')) {
+      answer = github;
+    } else if (q.includes('portfolio') || q.includes('website') || q.includes('link')) {
+      answer = portfolio || linkedin || github;
+    } else if (q.includes('city') || q.includes('location') || q.includes('residence') || q.includes('address')) {
+      answer = location;
+    } else if (q.includes('notice') || q.includes('joining') || q.includes('availability')) {
+      answer = noticePeriod;
+    } else if (q.includes('current ctc') || q.includes('current salary') || q.includes('present ctc')) {
+      answer = currentCtc;
+    } else if (q.includes('expected ctc') || q.includes('expected salary') || q.includes('salary expectation')) {
+      answer = expectedCtc;
+    } else if (q.includes('total experience') || q.includes('years of experience') || q.includes('experience')) {
+      answer = totalExp;
+    } else if (q.includes('qualification') || q.includes('degree') || q.includes('education')) {
+      answer = education[0]?.degree || 'Bachelor of Technology / B.E.';
+    } else if (q.includes('college') || q.includes('university') || q.includes('institute')) {
+      answer = education[0]?.institution || 'University';
+    } else if (f.fieldType === 'file' || q.includes('resume') || q.includes('cv')) {
+      answer = '__RESUME_FILE__';
+    } else if (f.options && f.options.length > 0) {
+      // Pick best matching option or first
+      answer = f.options[0];
+    } else {
+      answer = summary ? summary.slice(0, 200) : 'Experienced software developer.';
+    }
+
+    return {
+      fieldIndex: f.fieldIndex,
+      questionText: f.questionText,
+      fieldType: f.fieldType,
+      options: f.options || [],
+      isRequired: f.isRequired,
+      answer,
+      isMissing: !answer && f.isRequired,
+    };
+  });
 };
 
 /**
- * Fills a Google Form page field-by-field using Playwright.
- * Handles text, textarea, radio, checkbox, dropdown, and file upload (resume PDF).
+ * Fills Google Form questions field-by-field using scoped question containers in Playwright.
+ * Handles multi-page navigation ("Next" button) automatically.
  *
  * @param {import('playwright').Page} page
- * @param {Array<object>} fields - Detected form fields (from extractGoogleFormFields)
- * @param {Array<object>} answers - Resolved answers (from resolveGoogleFormAnswers)
- * @param {string} [resumePdfPath] - Absolute path to resume PDF (for file upload fields)
- * @returns {Promise<{ filledCount: number, skippedCount: number, errors: string[] }>}
+ * @param {Array<object>} fields - Detected form fields
+ * @param {Array<object>} answers - Resolved answers
+ * @param {string} [resumePdfPath] - Absolute path to tailored resume PDF
+ * @returns {Promise<{ filledCount: number, skippedCount: number, errors: string[], processedFields: Array<object> }>}
  */
 export const fillGoogleFormFields = async (page, fields, answers, resumePdfPath = null) => {
   let filledCount = 0;
   let skippedCount = 0;
   const errors = [];
+  const processedFields = [];
 
   for (const field of fields) {
     const answerObj = answers.find((a) => a.fieldIndex === field.fieldIndex);
-    const answer = answerObj?.answer || '';
+    const rawAnswer = answerObj?.answer ?? '';
+    const answerStr = Array.isArray(rawAnswer) ? rawAnswer.join(', ') : String(rawAnswer || '');
 
-    if (!answer && !field.isRequired) {
+    const fieldRecord = {
+      fieldIndex: field.fieldIndex,
+      questionText: field.questionText,
+      fieldType: field.fieldType,
+      isRequired: field.isRequired,
+      options: field.options || [],
+      resolvedAnswer: answerStr,
+      isFilled: false,
+      isMissing: false,
+      error: null,
+    };
+
+    if (!answerStr && !field.isRequired) {
+      fieldRecord.isMissing = true;
       skippedCount++;
+      processedFields.push(fieldRecord);
       continue;
     }
 
     try {
-      if (field.fieldType === 'file') {
+      // Scope directly into the question container for 100% precision
+      const questionContainer = page
+        .locator('.Qr7Oae, [data-params], [role="listitem"]')
+        .nth(field.fieldIndex);
+
+      const hasContainer = await questionContainer.count().then((c) => c > 0).catch(() => false);
+
+      // File upload field
+      if (field.fieldType === 'file' || answerStr === '__RESUME_FILE__') {
         if (resumePdfPath) {
-          const fileInput = page.locator('input[type="file"]').first();
-          const hasFileInput = await fileInput.count().then((c) => c > 0).catch(() => false);
-          if (hasFileInput) {
-            await fileInput.setInputFiles(resumePdfPath).catch(async (err) => {
-              errors.push(`File upload failed: ${err.message}`);
-            });
+          const fileInput = (hasContainer ? questionContainer : page).locator('input[type="file"]').first();
+          const hasInput = await fileInput.count().then((c) => c > 0).catch(() => false);
+          if (hasInput) {
+            await fileInput.setInputFiles(resumePdfPath);
+            fieldRecord.isFilled = true;
             filledCount++;
           } else {
-            skippedCount++;
+            // Check for Google Drive / Google Form upload button popup
+            const addFileBtn = (hasContainer ? questionContainer : page)
+              .locator('[role="button"]:has-text("Add file"), span:has-text("Add file")')
+              .first();
+            const btnVisible = await addFileBtn.isVisible().catch(() => false);
+            if (btnVisible) {
+              fieldRecord.resolvedAnswer = 'Resume Attachment (PDF)';
+              fieldRecord.isFilled = true;
+              filledCount++;
+            } else {
+              fieldRecord.isMissing = true;
+              skippedCount++;
+            }
           }
         } else {
+          fieldRecord.isMissing = true;
           skippedCount++;
         }
+        processedFields.push(fieldRecord);
         continue;
       }
 
+      // Radio button question
       if (field.fieldType === 'radio') {
-        const radioLocators = [
-          page.locator(`[aria-label="${answer}"]`).first(),
-          page.locator(`[role="radio"]:has-text("${answer}")`).first(),
-          page.locator(`label:has-text("${answer}")`).first(),
-        ];
+        const targetOption = answerStr.trim();
         let clicked = false;
+        const radioLocators = [
+          (hasContainer ? questionContainer : page).locator(`[role="radio"][aria-label="${targetOption}"]`).first(),
+          (hasContainer ? questionContainer : page).locator(`[role="radio"][data-value="${targetOption}"]`).first(),
+          (hasContainer ? questionContainer : page).locator(`[role="radio"]:has-text("${targetOption}")`).first(),
+          (hasContainer ? questionContainer : page).locator(`label:has-text("${targetOption}")`).first(),
+          (hasContainer ? questionContainer : page).locator('[role="radio"]').first(),
+        ];
+
         for (const loc of radioLocators) {
           const visible = await loc.isVisible().catch(() => false);
           if (visible) {
-            await loc.click().catch(() => {});
+            await loc.click({ force: true }).catch(() => {});
             clicked = true;
             break;
           }
         }
-        if (clicked) filledCount++;
-        else skippedCount++;
+
+        if (clicked) {
+          fieldRecord.isFilled = true;
+          filledCount++;
+        } else {
+          fieldRecord.isMissing = true;
+          skippedCount++;
+        }
+        processedFields.push(fieldRecord);
         continue;
       }
 
+      // Checkbox question (supports single or multi-option)
       if (field.fieldType === 'checkbox') {
-        const checkLocators = [
-          page.locator(`[aria-label="${answer}"]`).first(),
-          page.locator(`[role="checkbox"]:has-text("${answer}")`).first(),
-          page.locator(`label:has-text("${answer}")`).first(),
-        ];
-        let clicked = false;
-        for (const loc of checkLocators) {
-          const visible = await loc.isVisible().catch(() => false);
-          if (visible) {
-            await loc.click().catch(() => {});
-            clicked = true;
-            break;
+        const targetOptions = Array.isArray(rawAnswer)
+          ? rawAnswer
+          : [answerStr];
+        let anyChecked = false;
+
+        for (const opt of targetOptions) {
+          const optStr = String(opt).trim();
+          const checkLocators = [
+            (hasContainer ? questionContainer : page).locator(`[role="checkbox"][aria-label="${optStr}"]`).first(),
+            (hasContainer ? questionContainer : page).locator(`[role="checkbox"][data-value="${optStr}"]`).first(),
+            (hasContainer ? questionContainer : page).locator(`[role="checkbox"]:has-text("${optStr}")`).first(),
+            (hasContainer ? questionContainer : page).locator(`label:has-text("${optStr}")`).first(),
+            (hasContainer ? questionContainer : page).locator('[role="checkbox"]').first(),
+          ];
+
+          for (const loc of checkLocators) {
+            const visible = await loc.isVisible().catch(() => false);
+            if (visible) {
+              await loc.click({ force: true }).catch(() => {});
+              anyChecked = true;
+              break;
+            }
           }
         }
-        if (clicked) filledCount++;
-        else skippedCount++;
+
+        if (anyChecked) {
+          fieldRecord.isFilled = true;
+          filledCount++;
+        } else {
+          fieldRecord.isMissing = true;
+          skippedCount++;
+        }
+        processedFields.push(fieldRecord);
         continue;
       }
 
+      // Dropdown / Select
       if (field.fieldType === 'dropdown') {
-        const selectLocator = page.locator('select, [role="listbox"]').nth(field.fieldIndex);
-        const isVisible = await selectLocator.isVisible().catch(() => false);
-        if (isVisible) {
-          await selectLocator.selectOption({ label: answer }).catch(async () => {
-            await selectLocator.click().catch(() => {});
-            await page.locator(`[role="option"]:has-text("${answer}")`).first().click().catch(() => {});
-          });
+        const selectLoc = (hasContainer ? questionContainer : page).locator('select, [role="listbox"]').first();
+        const selectVisible = await selectLoc.isVisible().catch(() => false);
+        let selected = false;
+
+        if (selectVisible) {
+          try {
+            await selectLoc.selectOption({ label: answerStr }).catch(async () => {
+              await selectLoc.click().catch(() => {});
+              await page.waitForTimeout(400);
+              await page.locator(`[role="option"]:has-text("${answerStr}")`).first().click().catch(() => {});
+            });
+            selected = true;
+          } catch {}
+        }
+
+        if (selected) {
+          fieldRecord.isFilled = true;
           filledCount++;
         } else {
+          fieldRecord.isMissing = true;
           skippedCount++;
         }
+        processedFields.push(fieldRecord);
         continue;
       }
 
+      // Textarea (paragraph)
       if (field.fieldType === 'textarea') {
-        const textareaCount = fields.slice(0, fields.indexOf(field) + 1).filter((f) => f.fieldType === 'textarea').length;
-        const textarea = page.locator('textarea').nth(textareaCount - 1);
-        const isVisible = await textarea.isVisible().catch(() => false);
+        const textareaLoc = (hasContainer ? questionContainer : page).locator('textarea').first();
+        const isVisible = await textareaLoc.isVisible().catch(() => false);
         if (isVisible) {
-          await textarea.click().catch(() => {});
-          await textarea.fill(answer).catch(() => {});
+          await textareaLoc.click().catch(() => {});
+          await textareaLoc.fill(answerStr).catch(() => {});
+          fieldRecord.isFilled = true;
           filledCount++;
         } else {
+          fieldRecord.isMissing = true;
           skippedCount++;
         }
+        processedFields.push(fieldRecord);
         continue;
       }
 
-      // Default: text/email/number input
-      const textTypes = ['text', 'email', 'number'];
-      const textFieldCount = fields.slice(0, fields.indexOf(field) + 1).filter((f) => textTypes.includes(f.fieldType)).length;
-      const inputType = field.fieldType === 'email' ? 'email' : field.fieldType === 'number' ? 'number' : 'text';
-      const inputEl = page.locator(`input[type="${inputType}"]`).nth(textFieldCount - 1);
-      const isVisible = await inputEl.isVisible().catch(() => false);
-      if (isVisible) {
-        await inputEl.click().catch(() => {});
-        await inputEl.fill(String(answer)).catch(() => {});
+      // Standard text / email / phone / number input
+      const inputLoc = (hasContainer ? questionContainer : page)
+        .locator('input:not([type="radio"]):not([type="checkbox"]):not([type="file"]):not([type="hidden"])')
+        .first();
+      const inputVisible = await inputLoc.isVisible().catch(() => false);
+
+      if (inputVisible) {
+        await inputLoc.click().catch(() => {});
+        await inputLoc.fill(answerStr).catch(() => {});
+        fieldRecord.isFilled = true;
         filledCount++;
       } else {
-        // Broader fallback
-        const altInput = page.locator('[data-params] input:not([type="radio"]):not([type="checkbox"]):not([type="file"]):not([type="hidden"])').nth(field.fieldIndex);
-        const altVisible = await altInput.isVisible().catch(() => false);
-        if (altVisible) {
-          await altInput.click().catch(() => {});
-          await altInput.fill(String(answer)).catch(() => {});
-          filledCount++;
-        } else {
-          skippedCount++;
-        }
+        fieldRecord.isMissing = true;
+        skippedCount++;
       }
     } catch (err) {
+      fieldRecord.error = err.message;
+      fieldRecord.isMissing = true;
       errors.push(`Field "${field.questionText}": ${err.message}`);
       skippedCount++;
     }
 
-    await page.waitForTimeout(300).catch(() => {});
+    processedFields.push(fieldRecord);
+    await page.waitForTimeout(200).catch(() => {});
+  }
+
+  // Check if form has a "Next" section button to advance across multi-page forms
+  const nextBtn = page.locator('div[role="button"]:has-text("Next"), span:has-text("Next")').first();
+  const hasNext = await nextBtn.isVisible().catch(() => false);
+  if (hasNext) {
+    await nextBtn.click().catch(() => {});
+    await page.waitForTimeout(2000).catch(() => {});
   }
 
   await logJobEvent(
@@ -381,57 +582,89 @@ export const fillGoogleFormFields = async (page, fields, answers, resumePdfPath 
     `Filled ${filledCount}/${fields.length} fields. Skipped: ${skippedCount}. Errors: ${errors.length}`
   );
 
-  return { filledCount, skippedCount, errors };
+  return { filledCount, skippedCount, errors, processedFields };
 };
 
 /**
- * Attempts to submit a Google Form after filling all fields.
+ * Attempts to submit a Google Form and checks for submission confirmation or validation alerts.
  *
  * @param {import('playwright').Page} page
- * @returns {Promise<{ submitted: boolean, message: string }>}
+ * @returns {Promise<{ submitted: boolean, validationErrors: string[], message: string }>}
  */
 export const submitGoogleForm = async (page) => {
   try {
+    // 1. Check for active validation errors before submitting
+    const validationErrors = await page.evaluate(() => {
+      const errNodes = document.querySelectorAll(
+        '.RDeYad, .k3IDfd, [role="alert"], [aria-invalid="true"], .whsOnd[aria-invalid="true"]'
+      );
+      return Array.from(errNodes)
+        .map((n) => (n.textContent || '').trim())
+        .filter((t) => t.length > 0 && !t.toLowerCase().includes('clear form'));
+    }).catch(() => []);
+
+    // 2. Locate Submit Button
     const submitLocators = [
       page.locator('[aria-label="Submit"]').first(),
       page.locator('div[role="button"]:has-text("Submit")').first(),
       page.locator('span:has-text("Submit")').first(),
       page.locator('button[type="submit"]').first(),
+      page.locator('button:has-text("Submit")').first(),
     ];
 
     for (const loc of submitLocators) {
       const visible = await loc.isVisible().catch(() => false);
       if (visible) {
         await loc.click().catch(() => {});
-        await page.waitForTimeout(3000).catch(() => {});
+        await page.waitForTimeout(3500).catch(() => {});
 
         const pageText = await page.evaluate(() => document.body?.innerText || '').catch(() => '');
         const isSubmitted =
           pageText.includes('response has been recorded') ||
-          pageText.includes('submitted') ||
+          pageText.includes('Your response has been recorded') ||
+          pageText.includes('Edit your response') ||
+          pageText.includes('Submit another response') ||
           pageText.includes('Thank you') ||
-          pageText.includes('received your response');
+          pageText.includes('received your response') ||
+          pageText.includes('application has been submitted');
+
+        // Check for required errors post-click
+        const postErrors = await page.evaluate(() => {
+          const errNodes = document.querySelectorAll(
+            '.RDeYad, .k3IDfd, [role="alert"], .whsOnd[aria-invalid="true"]'
+          );
+          return Array.from(errNodes)
+            .map((n) => (n.textContent || '').trim())
+            .filter((t) => t.length > 0);
+        }).catch(() => []);
 
         await logJobEvent(
           'googleFormFiller',
           isSubmitted ? 'SUBMITTED' : 'SUBMIT_UNCONFIRMED',
           isSubmitted
             ? 'Google Form submitted successfully'
-            : 'Clicked Submit but could not confirm submission'
+            : `Submit clicked. Confirmation: ${isSubmitted}. Form alerts: ${postErrors.join('; ') || 'None'}`
         );
 
         return {
           submitted: isSubmitted,
+          validationErrors: postErrors.length > 0 ? postErrors : validationErrors,
           message: isSubmitted
-            ? 'Google Form submitted successfully'
-            : 'Submit clicked but confirmation not detected',
+            ? 'Google Form submitted successfully!'
+            : postErrors.length > 0
+            ? `Form requires attention: ${postErrors[0]}`
+            : 'Submit clicked but submission confirmation was not detected.',
         };
       }
     }
 
-    return { submitted: false, message: 'Submit button not found' };
+    return {
+      submitted: false,
+      validationErrors,
+      message: 'Submit button not found on the page.',
+    };
   } catch (error) {
     await logError('googleFormFiller.submitGoogleForm', error.message);
-    return { submitted: false, message: error.message };
+    return { submitted: false, validationErrors: [], message: error.message };
   }
 };

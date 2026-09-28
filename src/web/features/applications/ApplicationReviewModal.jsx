@@ -81,6 +81,8 @@ export const ApplicationReviewModal = ({
   const [savingAnswers, setSavingAnswers] = useState(false);
   const [googleModalOpen, setGoogleModalOpen] = useState(false);
   const [retryingGoogleForm, setRetryingGoogleForm] = useState(false);
+  const [formQuestionFilter, setFormQuestionFilter] = useState('all'); // 'all' | 'filled' | 'missing' | 'required'
+  const [formSearchQuery, setFormSearchQuery] = useState('');
 
   // Multi-role & Direct Email Outreach state
   const [tailoringRoleId, setTailoringRoleId] = useState(null);
@@ -2173,6 +2175,414 @@ export const ApplicationReviewModal = ({
                           </a>
                         </div>
                       </div>
+
+                      {/* Comprehensive Extracted Form Fields & Resolved Answers View */}
+                      {(() => {
+                        const rawExtracted = application?.googleFormResult?.extractedFields || [];
+                        const reviewFields = application?.form?.reviewFields || [];
+
+                        // Combine / normalize fields to ensure all questions are presented
+                        const displayFields =
+                          rawExtracted.length > 0
+                            ? rawExtracted
+                            : reviewFields.map((rf, idx) => ({
+                                fieldIndex: idx,
+                                questionText: rf.question,
+                                fieldType: rf.type || 'text',
+                                isRequired: rf.required || false,
+                                options: rf.options || [],
+                                resolvedAnswer: reviewAnswers[rf.questionId] ?? rf.answer ?? '',
+                                isFilled: Boolean(reviewAnswers[rf.questionId] ?? rf.answer),
+                                isMissing: !Boolean(reviewAnswers[rf.questionId] ?? rf.answer) && rf.required,
+                                error: null,
+                              }));
+
+                        if (displayFields.length === 0) {
+                          return null;
+                        }
+
+                        const totalCount = displayFields.length;
+                        const filledCount = displayFields.filter((f) => {
+                          const ans =
+                            reviewAnswers[f.questionText] ??
+                            reviewAnswers[`gf_${f.fieldIndex}`] ??
+                            f.resolvedAnswer;
+                          return ans && String(ans).trim() !== '' && ans !== '__RESUME_FILE__';
+                        }).length;
+                        const missingCount = displayFields.filter((f) => {
+                          const ans =
+                            reviewAnswers[f.questionText] ??
+                            reviewAnswers[`gf_${f.fieldIndex}`] ??
+                            f.resolvedAnswer;
+                          return (!ans || String(ans).trim() === '') && f.isRequired;
+                        }).length;
+
+                        // Filter by query and category
+                        const filtered = displayFields.filter((f) => {
+                          const currentAns = String(
+                            reviewAnswers[f.questionText] ??
+                              reviewAnswers[`gf_${f.fieldIndex}`] ??
+                              f.resolvedAnswer ??
+                              ''
+                          );
+                          const isFilled = Boolean(currentAns.trim());
+                          const isMiss = !isFilled && f.isRequired;
+
+                          if (formQuestionFilter === 'filled' && !isFilled) return false;
+                          if (formQuestionFilter === 'missing' && !isMiss) return false;
+                          if (formQuestionFilter === 'required' && !f.isRequired) return false;
+
+                          if (formSearchQuery.trim()) {
+                            const q = formSearchQuery.toLowerCase();
+                            const matchQ = (f.questionText || '').toLowerCase().includes(q);
+                            const matchA = currentAns.toLowerCase().includes(q);
+                            return matchQ || matchA;
+                          }
+                          return true;
+                        });
+
+                        const handleCopyAllQA = () => {
+                          const formatted = displayFields
+                            .map((f, i) => {
+                              const ans =
+                                reviewAnswers[f.questionText] ??
+                                reviewAnswers[`gf_${f.fieldIndex}`] ??
+                                f.resolvedAnswer ??
+                                '[Unfilled]';
+                              return `Q${i + 1}. ${f.questionText}${f.isRequired ? ' *' : ''}\nAnswer: ${ans}\n`;
+                            })
+                            .join('\n');
+                          copyToClipboard(formatted, 'all_qa');
+                          showToast('All form questions & answers copied to clipboard!', 'success');
+                        };
+
+                        return (
+                          <div className="border border-slate-200 rounded-xl bg-white shadow-xs overflow-hidden space-y-0">
+                            {/* Header & Stats Banner */}
+                            <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <span className="px-2 py-0.5 bg-blue-600 text-white rounded text-[10px] font-black uppercase tracking-wider">
+                                    Form Inspection
+                                  </span>
+                                  <h3 className="text-xs font-bold text-slate-900">
+                                    Extracted Questions & Resolved Answers ({totalCount})
+                                  </h3>
+                                </div>
+                                <p className="text-[11px] text-slate-500 mt-0.5">
+                                  Review what AI filled on the form, copy individual field values, or update missing answers.
+                                </p>
+                              </div>
+
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={handleCopyAllQA}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 rounded-lg text-xs font-bold transition-colors cursor-pointer shadow-2xs"
+                                >
+                                  {copiedKey === 'all_qa' ? (
+                                    <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                  ) : (
+                                    <Copy className="w-3.5 h-3.5 text-slate-500" />
+                                  )}
+                                  <span>Copy All Q&A</span>
+                                </button>
+
+                                <Button
+                                  size="xs"
+                                  variant="outline"
+                                  loading={retryingGoogleForm}
+                                  onClick={handleRetryGoogleForm}
+                                  className="text-blue-700 border-blue-300 hover:bg-blue-50 font-bold gap-1 cursor-pointer"
+                                >
+                                  <RefreshCw className={`w-3.5 h-3.5 ${retryingGoogleForm ? 'animate-spin' : ''}`} />
+                                  <span>Re-fill Form</span>
+                                </Button>
+                              </div>
+                            </div>
+
+                            {/* Validation / Missing Notice Banner */}
+                            {missingCount > 0 && (
+                              <div className="p-3 bg-amber-50 border-b border-amber-200 flex items-start gap-2.5 text-xs text-amber-900">
+                                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                                <div className="space-y-0.5">
+                                  <span className="font-bold">
+                                    {missingCount} Required Question{missingCount > 1 ? 's' : ''} Need Your Input
+                                  </span>
+                                  <p className="text-[11px] text-amber-800">
+                                    Some mandatory fields could not be matched automatically. Fill them in below or copy them directly into the form.
+                                  </p>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Filters & Search Toolbar */}
+                            <div className="p-3 bg-slate-50/50 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                              <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                                <button
+                                  type="button"
+                                  onClick={() => setFormQuestionFilter('all')}
+                                  className={`px-2.5 py-1 rounded-lg font-semibold text-xs transition-colors cursor-pointer ${
+                                    formQuestionFilter === 'all'
+                                      ? 'bg-blue-600 text-white'
+                                      : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
+                                  }`}
+                                >
+                                  All ({totalCount})
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setFormQuestionFilter('filled')}
+                                  className={`px-2.5 py-1 rounded-lg font-semibold text-xs transition-colors cursor-pointer flex items-center gap-1 ${
+                                    formQuestionFilter === 'filled'
+                                      ? 'bg-emerald-600 text-white'
+                                      : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
+                                  }`}
+                                >
+                                  <CheckCircle2 className="w-3 h-3 text-emerald-500" />
+                                  <span>Filled ({filledCount})</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setFormQuestionFilter('missing')}
+                                  className={`px-2.5 py-1 rounded-lg font-semibold text-xs transition-colors cursor-pointer flex items-center gap-1 ${
+                                    formQuestionFilter === 'missing'
+                                      ? 'bg-amber-600 text-white'
+                                      : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
+                                  }`}
+                                >
+                                  <AlertCircle className="w-3 h-3 text-amber-500" />
+                                  <span>Missing / Required ({missingCount})</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setFormQuestionFilter('required')}
+                                  className={`px-2.5 py-1 rounded-lg font-semibold text-xs transition-colors cursor-pointer ${
+                                    formQuestionFilter === 'required'
+                                      ? 'bg-purple-600 text-white'
+                                      : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
+                                  }`}
+                                >
+                                  Required Only
+                                </button>
+                              </div>
+
+                              <div className="relative">
+                                <input
+                                  type="text"
+                                  value={formSearchQuery}
+                                  onChange={(e) => setFormSearchQuery(e.target.value)}
+                                  placeholder="Search questions or answers..."
+                                  className="w-full sm:w-56 px-2.5 py-1 text-xs border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                />
+                                {formSearchQuery && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setFormSearchQuery('')}
+                                    className="absolute right-2 top-1.5 text-slate-400 hover:text-slate-600 text-xs cursor-pointer"
+                                  >
+                                    ×
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Questions Cards List */}
+                            <div className="p-3 max-h-[420px] overflow-y-auto divide-y divide-slate-100 space-y-2">
+                              {filtered.length === 0 ? (
+                                <div className="p-8 text-center text-xs text-slate-400">
+                                  No questions match the selected filter.
+                                </div>
+                              ) : (
+                                filtered.map((f, idx) => {
+                                  const fieldKey = f.questionText || `gf_${f.fieldIndex}`;
+                                  const currentVal =
+                                    reviewAnswers[fieldKey] ?? f.resolvedAnswer ?? '';
+                                  const isFilled = Boolean(String(currentVal).trim());
+                                  const isMissingAndReq = !isFilled && f.isRequired;
+
+                                  return (
+                                    <div
+                                      key={idx}
+                                      className={`p-3 rounded-xl border transition-all ${
+                                        isMissingAndReq
+                                          ? 'border-amber-300 bg-amber-50/40'
+                                          : isFilled
+                                          ? 'border-slate-200 bg-white hover:border-slate-300'
+                                          : 'border-slate-100 bg-slate-50/60'
+                                      }`}
+                                    >
+                                      <div className="flex items-start justify-between gap-3">
+                                        <div className="space-y-1 flex-1">
+                                          <div className="flex flex-wrap items-center gap-1.5">
+                                            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 font-bold">
+                                              Q{f.fieldIndex !== undefined ? f.fieldIndex + 1 : idx + 1}
+                                            </span>
+                                            <span className="text-xs font-bold text-slate-900">
+                                              {f.questionText}
+                                            </span>
+                                            {f.isRequired && (
+                                              <span
+                                                className="text-rose-500 font-bold"
+                                                title="Required field"
+                                              >
+                                                *
+                                              </span>
+                                            )}
+                                            <span className="text-[10px] px-1.5 py-0.5 rounded-full border border-slate-200 bg-slate-50 text-slate-500 capitalize">
+                                              {f.fieldType || 'text'}
+                                            </span>
+                                          </div>
+
+                                          {f.description && (
+                                            <p className="text-[11px] text-slate-500 italic">
+                                              {f.description}
+                                            </p>
+                                          )}
+                                        </div>
+
+                                        {/* Status Badge */}
+                                        <div className="shrink-0 flex items-center gap-1.5">
+                                          {isFilled ? (
+                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                                              <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                              <span>Filled</span>
+                                            </span>
+                                          ) : isMissingAndReq ? (
+                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">
+                                              <AlertCircle className="w-3 h-3 text-amber-600" />
+                                              <span>Required / Empty</span>
+                                            </span>
+                                          ) : (
+                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-600">
+                                              <span>Optional</span>
+                                            </span>
+                                          )}
+                                        </div>
+                                      </div>
+
+                                      {/* Field Value Box with Direct Copy & Inline Edit */}
+                                      <div className="mt-2.5 flex items-center gap-2">
+                                        <div className="relative flex-1">
+                                          {f.options && f.options.length > 0 ? (
+                                            <select
+                                              value={currentVal}
+                                              onChange={(e) => {
+                                                const val = e.target.value;
+                                                setReviewAnswers((prev) => ({
+                                                  ...prev,
+                                                  [fieldKey]: val,
+                                                }));
+                                              }}
+                                              className="w-full px-3 py-1.5 text-xs font-semibold text-slate-800 rounded-lg border border-slate-300 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                            >
+                                              <option value="">-- Select an option --</option>
+                                              {f.options.map((opt, oIdx) => (
+                                                <option key={oIdx} value={opt}>
+                                                  {opt}
+                                                </option>
+                                              ))}
+                                            </select>
+                                          ) : f.fieldType === 'textarea' ? (
+                                            <textarea
+                                              rows={2}
+                                              value={currentVal}
+                                              onChange={(e) => {
+                                                const val = e.target.value;
+                                                setReviewAnswers((prev) => ({
+                                                  ...prev,
+                                                  [fieldKey]: val,
+                                                }));
+                                              }}
+                                              placeholder={`Answer for "${f.questionText}"...`}
+                                              className="w-full px-3 py-1.5 text-xs text-slate-800 rounded-lg border border-slate-300 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 leading-relaxed font-sans"
+                                            />
+                                          ) : (
+                                            <input
+                                              type="text"
+                                              value={currentVal}
+                                              onChange={(e) => {
+                                                const val = e.target.value;
+                                                setReviewAnswers((prev) => ({
+                                                  ...prev,
+                                                  [fieldKey]: val,
+                                                }));
+                                              }}
+                                              placeholder={`Answer for "${f.questionText}"...`}
+                                              className="w-full px-3 py-1.5 text-xs font-semibold text-slate-800 rounded-lg border border-slate-300 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                            />
+                                          )}
+                                        </div>
+
+                                        {/* Individual Copy Value Button */}
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            copyToClipboard(String(currentVal || ''), `f_${idx}`)
+                                          }
+                                          disabled={!currentVal}
+                                          className={`px-3 py-1.5 rounded-lg border text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer shrink-0 ${
+                                            copiedKey === `f_${idx}`
+                                              ? 'bg-emerald-50 border-emerald-300 text-emerald-700'
+                                              : currentVal
+                                              ? 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
+                                              : 'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed'
+                                          }`}
+                                          title="Copy this answer to clipboard"
+                                        >
+                                          {copiedKey === `f_${idx}` ? (
+                                            <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                          ) : (
+                                            <Copy className="w-3.5 h-3.5 text-slate-500" />
+                                          )}
+                                          <span>{copiedKey === `f_${idx}` ? 'Copied' : 'Copy'}</span>
+                                        </button>
+                                      </div>
+
+                                      {/* Error notice if any */}
+                                      {f.error && (
+                                        <p className="mt-1 text-[11px] text-rose-600 flex items-center gap-1 font-medium">
+                                          <AlertCircle className="w-3 h-3 shrink-0" />
+                                          <span>{f.error}</span>
+                                        </p>
+                                      )}
+                                    </div>
+                                  );
+                                })
+                              )}
+                            </div>
+
+                            {/* Bottom Footer Actions */}
+                            <div className="p-3 bg-slate-50 border-t border-slate-200 flex flex-wrap items-center justify-between gap-2">
+                              <span className="text-[11px] text-slate-500">
+                                Tip: You can edit any answer above, then click <strong>"Save Answers"</strong> or <strong>"Re-fill Form"</strong>.
+                              </span>
+
+                              <div className="flex items-center gap-2">
+                                <Button
+                                  size="xs"
+                                  variant="outline"
+                                  loading={savingAnswers}
+                                  onClick={handleSaveAnswers}
+                                  className="text-slate-700 border-slate-300 hover:bg-slate-100 font-bold cursor-pointer"
+                                >
+                                  <span>Save Answers</span>
+                                </Button>
+
+                                <Button
+                                  size="xs"
+                                  loading={retryingGoogleForm}
+                                  onClick={handleRetryGoogleForm}
+                                  className="bg-blue-600 hover:bg-blue-700 text-white font-bold gap-1 cursor-pointer"
+                                >
+                                  <Sparkles className="w-3.5 h-3.5" />
+                                  <span>Re-fill Form in Browser</span>
+                                </Button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })()}
 
                       {/* Quick Auto-Fill Cheat Sheet for Form Completion */}
                       <div className="border border-slate-200 rounded-xl p-4 space-y-3 bg-white">

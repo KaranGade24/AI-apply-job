@@ -217,6 +217,20 @@ const jobApplicationSchema = new mongoose.Schema(
       loginRequired: { type: Boolean, default: false },
       loginUrl: { type: String, default: "" },
       errors: [{ type: String }],
+      validationErrors: [{ type: String }],
+      extractedFields: [
+        {
+          fieldIndex: { type: Number },
+          questionText: { type: String, default: "" },
+          fieldType: { type: String, default: "text" },
+          isRequired: { type: Boolean, default: false },
+          options: [{ type: String }],
+          resolvedAnswer: { type: mongoose.Schema.Types.Mixed, default: "" },
+          isFilled: { type: Boolean, default: false },
+          isMissing: { type: Boolean, default: false },
+          error: { type: String, default: null },
+        },
+      ],
       submittedAt: { type: Date, default: null },
     },
     /**

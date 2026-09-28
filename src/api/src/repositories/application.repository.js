@@ -320,23 +320,30 @@ export const updateApplicationPhone = async (id, phoneData = {}) => {
  */
 export const updateApplicationGoogleForm = async (id, googleFormData = {}) => {
   try {
+    const updateSet = {
+      "googleFormResult.googleFormUrl": googleFormData.googleFormUrl || "",
+      "googleFormResult.fieldsDetected": googleFormData.fieldsDetected ?? 0,
+      "googleFormResult.filledCount": googleFormData.filledCount ?? 0,
+      "googleFormResult.skippedCount": googleFormData.skippedCount ?? 0,
+      "googleFormResult.hasResumeField": googleFormData.hasResumeField ?? false,
+      "googleFormResult.submitted": googleFormData.submitted ?? false,
+      "googleFormResult.formClosed": googleFormData.formClosed ?? false,
+      "googleFormResult.loginRequired": googleFormData.loginRequired ?? false,
+      "googleFormResult.loginUrl": googleFormData.loginUrl || "",
+      "googleFormResult.errors": googleFormData.errors || [],
+      "googleFormResult.submittedAt": googleFormData.submittedAt || (googleFormData.submitted ? new Date() : null),
+    };
+
+    if (Array.isArray(googleFormData.extractedFields)) {
+      updateSet["googleFormResult.extractedFields"] = googleFormData.extractedFields;
+    }
+    if (Array.isArray(googleFormData.validationErrors)) {
+      updateSet["googleFormResult.validationErrors"] = googleFormData.validationErrors;
+    }
+
     return await JobApplication.findByIdAndUpdate(
       id,
-      {
-        $set: {
-          "googleFormResult.googleFormUrl": googleFormData.googleFormUrl || "",
-          "googleFormResult.fieldsDetected": googleFormData.fieldsDetected ?? 0,
-          "googleFormResult.filledCount": googleFormData.filledCount ?? 0,
-          "googleFormResult.skippedCount": googleFormData.skippedCount ?? 0,
-          "googleFormResult.hasResumeField": googleFormData.hasResumeField ?? false,
-          "googleFormResult.submitted": googleFormData.submitted ?? false,
-          "googleFormResult.formClosed": googleFormData.formClosed ?? false,
-          "googleFormResult.loginRequired": googleFormData.loginRequired ?? false,
-          "googleFormResult.loginUrl": googleFormData.loginUrl || "",
-          "googleFormResult.errors": googleFormData.errors || [],
-          "googleFormResult.submittedAt": googleFormData.submittedAt || (googleFormData.submitted ? new Date() : null),
-        },
-      },
+      { $set: updateSet },
       { returnDocument: "after" }
     );
   } catch (error) {

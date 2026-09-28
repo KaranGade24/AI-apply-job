@@ -262,7 +262,10 @@ export const runGoogleFormApplication = async ({
       ? APPLICATION_STATUS.APPLIED
       : APPLICATION_STATUS.WAITING_FOR_REVIEW;
 
+    const processedFieldsList = fillResult.processedFields || [];
+
     if (applicationId) {
+      // 1. Update googleFormResult
       await updateApplicationGoogleForm(applicationId, {
         googleFormUrl,
         fieldsDetected: fields.length,
@@ -273,16 +276,63 @@ export const runGoogleFormApplication = async ({
         formClosed: false,
         loginRequired: false,
         errors: fillResult.errors || [],
+        validationErrors: submitResult.validationErrors || [],
+        extractedFields: processedFieldsList,
         submittedAt: submitResult.submitted ? new Date() : null,
       });
+
+      // 2. Also populate standard form.reviewFields and form.missingQuestions so they appear across all review views
+      try {
+        const { JobApplication } = await import('../../model/JobApplication.js');
+        const reviewFields = processedFieldsList.map((f, i) => ({
+          questionId: `gf_${i}_${(f.questionText || '').slice(0, 20).replace(/\W+/g, '_')}`,
+          fieldId: String(f.fieldIndex),
+          question: f.questionText,
+          type: f.fieldType || 'text',
+          answer: f.resolvedAnswer,
+          source: 'ai',
+          options: f.options || [],
+        }));
+
+        const missingQuestions = processedFieldsList
+          .filter((f) => f.isMissing && f.isRequired)
+          .map((f, i) => ({
+            questionId: `gf_miss_${i}_${(f.questionText || '').slice(0, 20).replace(/\W+/g, '_')}`,
+            fieldId: String(f.fieldIndex),
+            question: f.questionText,
+            type: f.fieldType || 'text',
+            required: true,
+            options: f.options || [],
+            placeholder: `Enter ${f.questionText}`,
+          }));
+
+        await JobApplication.findByIdAndUpdate(
+          applicationId,
+          {
+            $set: {
+              'form.reviewFields': reviewFields,
+              'form.missingQuestions': missingQuestions,
+              ...(missingQuestions.length > 0
+                ? {
+                    'form.requiresHuman': true,
+                    'form.humanReason': 'missingInformation',
+                  }
+                : {}),
+            },
+          },
+          { returnDocument: 'after' }
+        );
+      } catch (syncErr) {
+        await logError('googleFormApplicationMethod.syncReviewFields', syncErr.message);
+      }
 
       await updateApplicationStatus(
         applicationId,
         finalStatus,
         {
           logMessage: submitResult.submitted
-            ? `Google Form submitted successfully! Filled ${fillResult.filledCount} fields.`
-            : `Google Form filled (${fillResult.filledCount} fields) but submit confirmation pending review.`,
+            ? `Google Form submitted successfully! Filled ${fillResult.filledCount}/${fields.length} questions.`
+            : `Google Form filled (${fillResult.filledCount}/${fields.length} questions). Submit confirmation pending.`,
         }
       );
     }
@@ -299,6 +349,8 @@ export const runGoogleFormApplication = async ({
       filledCount: fillResult.filledCount,
       skippedCount: fillResult.skippedCount,
       errors: fillResult.errors,
+      validationErrors: submitResult.validationErrors,
+      extractedFields: processedFieldsList,
       formClosed: false,
       loginRequired: false,
       hasResumeField,

@@ -27,7 +27,7 @@ export const upsertGoogleAccount = async (userId, accountData) => {
     return await GoogleAccount.findOneAndUpdate(
       { userId },
       { $set: { ...accountData, userId } },
-      { new: true, upsert: true, setDefaultsOnInsert: true }
+      { returnDocument: 'after', upsert: true, setDefaultsOnInsert: true }
     );
   } catch (error) {
     await logError('googleAccount.repository.upsertGoogleAccount', error.message);
@@ -55,7 +55,7 @@ export const updateGoogleAccountStatus = async (
     return await GoogleAccount.findOneAndUpdate(
       { userId },
       { $set: update },
-      { new: true }
+      { returnDocument: 'after' }
     );
   } catch (error) {
     await logError('googleAccount.repository.updateGoogleAccountStatus', error.message);
