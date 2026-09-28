@@ -5,7 +5,10 @@ import { classifyPageWithLlm } from '../pageAnalysis/pageClassifierLlm.js';
 import { inspectForm } from '../form/formInspector.js';
 import { isGoogleFormUrl } from '../googleForm/googleFormFiller.js';
 import { APPLICATION_STATUS } from '../../constant/application.constant.js';
-import { getDecryptedGoogleSession } from '../../services/googleSession.service.js';
+import {
+  getDecryptedGoogleSession,
+  injectGoogleSessionIntoContext,
+} from '../../services/googleSession.service.js';
 
 /**
  * UnknownPageHandler — Full browser-based AI agent for unknown application URLs.
@@ -53,6 +56,9 @@ export const analyzeUnknownPage = async ({ url, job, userId, sessionState = null
       browser,
       effectiveStorageState ? { storageState: effectiveStorageState } : {}
     );
+    if (userId) {
+      await injectGoogleSessionIntoContext(context, userId);
+    }
     page = await context.newPage();
 
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(async () => {
@@ -226,6 +232,7 @@ export const fillCustomFormOnPage = async ({
   answers = [],
   resumePdfPath = null,
   sessionState = null,
+  userId = null,
 }) => {
   let browser = null;
   let context = null;
@@ -237,6 +244,9 @@ export const fillCustomFormOnPage = async ({
       browser,
       sessionState ? { storageState: sessionState } : {}
     );
+    if (userId) {
+      await injectGoogleSessionIntoContext(context, userId);
+    }
     page = await context.newPage();
 
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(async () => {

@@ -29,6 +29,7 @@ import { findNaukriAccountByUserId } from "../repositories/naukriAccount.reposit
 import { decryptValue } from "../utils/encryption.js";
 import { logError, logJobEvent } from "../utils/logger.js";
 import { appError } from "../utils/errors.js";
+import { injectGoogleSessionIntoContext } from "./googleSession.service.js";
 
 /**
  * Checks if an application's status is "Locked" (already applied or further in the funnel),
@@ -195,6 +196,43 @@ export const approveAndSendApplication = async (applicationId, userId) => {
       );
     }
 
+    // Check if application is for a Google Form
+    const isGoogleForm =
+      application.applicationMethod === 'googleForm' ||
+      application.jobId?.applicationUrl?.includes('docs.google.com/forms') ||
+      application.jobId?.applicationUrl?.includes('forms.gle');
+
+    if (isGoogleForm) {
+      await logJobEvent(
+        'approveAndSendApplication',
+        'GOOGLE_FORM_APPROVE',
+        `User approved Google Form application ${applicationId}. Initiating Google Form engine...`
+      );
+
+      const gfUrl = application.jobId?.applicationUrl || application.sourceUrl;
+      const gfResult = await runGoogleFormApplication({
+        applicationId,
+        jobId: application.jobId?._id || application.jobId,
+        userId,
+        googleFormUrl: gfUrl,
+      });
+
+      if (!gfResult.submitted) {
+        if (gfResult.loginRequired) {
+          throw new appError(
+            'Google Sign-In is required to submit this Google Form. Please connect your Google session in the modal or sign in, then retry.',
+            401
+          );
+        }
+        throw new appError(
+          gfResult.message || 'Google Form could not be submitted. Please check the form link.',
+          400
+        );
+      }
+
+      return await findApplicationById(applicationId);
+    }
+
     // Check if application is for a Naukri job
     const isNaukriJob =
       application.jobId?.source === 'naukri' ||
@@ -209,9 +247,40 @@ export const approveAndSendApplication = async (applicationId, userId) => {
         `User approved Naukri application ${applicationId}. Initiating browser application engine...`
       );
 
-      // Execute browser-based application engine for Naukri
-      await runNaukriApplication({ applicationId, userId });
-      return await findApplicationById(applicationId);
+      // Execute browser-based application engine for Naukri with confirmSubmission = true
+      const naukriResult = await runNaukriApplication({
+        applicationId,
+        userId,
+        confirmSubmission: true,
+      });
+
+      const updatedApp = await findApplicationById(applicationId);
+      if (updatedApp.status !== APPLICATION_STATUS.APPLIED) {
+        if (updatedApp.status === APPLICATION_STATUS.GOOGLE_LOGIN_REQUIRED) {
+          throw new appError(
+            'Google Sign-In is required to access the employer application form. Please connect your Google session in the modal or sign in, then retry.',
+            401
+          );
+        }
+        if (updatedApp.status === APPLICATION_STATUS.HUMAN_REQUIRED) {
+          throw new appError(
+            naukriResult.message || 'Additional employer questionnaire answers required before submitting.',
+            400
+          );
+        }
+        if (updatedApp.status === APPLICATION_STATUS.WAITING_FOR_FINAL_REVIEW) {
+          throw new appError(
+            naukriResult.message || 'Form answers prepared. Please review your answers before final submission.',
+            400
+          );
+        }
+        throw new appError(
+          naukriResult.message || 'Application could not be submitted on employer portal.',
+          400
+        );
+      }
+
+      return updatedApp;
     }
 
     const recipient = application.email?.recipient;
@@ -259,9 +328,16 @@ export const approveAndSendApplication = async (applicationId, userId) => {
     return await findApplicationById(applicationId);
   } catch (error) {
     if (applicationId) {
-      await updateApplicationStatus(applicationId, APPLICATION_STATUS.FAILED, {
-        logMessage: `Application dispatch failed: ${error.message}`,
-      }).catch(() => {});
+      const currentApp = await findApplicationById(applicationId).catch(() => null);
+      if (
+        currentApp?.status !== APPLICATION_STATUS.GOOGLE_LOGIN_REQUIRED &&
+        currentApp?.status !== APPLICATION_STATUS.HUMAN_REQUIRED &&
+        currentApp?.status !== APPLICATION_STATUS.WAITING_FOR_FINAL_REVIEW
+      ) {
+        await updateApplicationStatus(applicationId, APPLICATION_STATUS.FAILED, {
+          logMessage: `Application dispatch failed: ${error.message}`,
+        }).catch(() => {});
+      }
     }
     await logError(
       "applicationService.approveAndSendApplication",
@@ -984,6 +1060,7 @@ export const analyzeEmployerPortalService = async (applicationId, userId) => {
       browser,
       sessionState ? { storageState: sessionState } : {}
     );
+    await injectGoogleSessionIntoContext(context, userId);
     page = await context.newPage();
 
     await updateApplicationStatus(applicationId, APPLICATION_STATUS.ANALYZING_PORTAL, {
@@ -1114,6 +1191,7 @@ export const advanceEmployerPortalActionService = async (applicationId, userId, 
       browser,
       sessionState ? { storageState: sessionState } : {}
     );
+    await injectGoogleSessionIntoContext(context, userId);
     page = await context.newPage();
 
     await page.goto(portalUrl, { waitUntil: "domcontentloaded", timeout: 25000 }).catch(async () => {

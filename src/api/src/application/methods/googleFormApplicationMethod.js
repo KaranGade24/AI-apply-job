@@ -16,6 +16,7 @@ import { getGeminiModel } from '../../agent/config/modelConfig.js';
 import {
   getDecryptedGoogleSession,
   detectGoogleAuthState,
+  injectGoogleSessionIntoContext,
 } from '../../services/googleSession.service.js';
 import {
   updateGoogleAccountStatus,
@@ -101,6 +102,9 @@ export const runGoogleFormApplication = async ({
       browser,
       googleSession ? { storageState: googleSession } : {}
     );
+    if (userId) {
+      await injectGoogleSessionIntoContext(context, userId);
+    }
     page = await context.newPage();
 
     await page.goto(googleFormUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(async () => {
@@ -319,3 +323,6 @@ export const runGoogleFormApplication = async ({
     await BrowserManager.closeSafely({ page, context, browser });
   }
 };
+
+export const handleGoogleFormApplication = runGoogleFormApplication;
+

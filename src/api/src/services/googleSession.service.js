@@ -107,6 +107,63 @@ export const getDecryptedGoogleSession = async (userId) => {
 };
 
 /**
+ * Injects decrypted Google session cookies directly into an active Playwright BrowserContext
+ * This ensures any tab, popup, or redirect to Google Forms or Google Accounts is authenticated.
+ *
+ * @param {import('playwright').BrowserContext} context
+ * @param {string} userId
+ * @returns {Promise<boolean>} True if Google session was found and injected
+ */
+export const injectGoogleSessionIntoContext = async (context, userId) => {
+  try {
+    if (!context || !userId) return false;
+    const session = await getDecryptedGoogleSession(userId);
+    if (!session?.cookies || !Array.isArray(session.cookies) || session.cookies.length === 0) {
+      await logJobEvent(
+        'googleSessionService',
+        'NO_GOOGLE_SESSION_TO_INJECT',
+        `No stored Google session found for User: ${userId}`
+      );
+      return false;
+    }
+
+    const validCookies = session.cookies
+      .filter((c) => c && c.name && c.value)
+      .map((c) => {
+        let domain = c.domain || '.google.com';
+        if (!domain.startsWith('.') && !domain.includes('localhost')) {
+          domain = `.${domain}`;
+        }
+        return {
+          name: c.name,
+          value: c.value,
+          domain,
+          path: c.path || '/',
+          sameSite: c.sameSite === 'Strict' || c.sameSite === 'None' ? c.sameSite : 'Lax',
+          secure: c.secure !== false,
+          httpOnly: Boolean(c.httpOnly),
+          ...(typeof c.expires === 'number' && c.expires > 0 ? { expires: c.expires } : {}),
+        };
+      });
+
+    if (validCookies.length > 0) {
+      await context.addCookies(validCookies);
+      await logJobEvent(
+        'googleSessionService',
+        'GOOGLE_SESSION_INJECTED',
+        `Successfully injected ${validCookies.length} Google session cookies into browser context for User: ${userId}`
+      );
+      return true;
+    }
+
+    return false;
+  } catch (error) {
+    await logError('googleSessionService.injectGoogleSessionIntoContext', error.message);
+    return false;
+  }
+};
+
+/**
  * Verifies if user's saved Google session is currently valid
  * @param {string} userId
  * @returns {Promise<object>}

@@ -28,6 +28,7 @@ import {
 import { Button } from '../../components/ui/Button';
 import {
   previewDraftApi,
+  getApplicationDetailsApi,
   getApplicationByJobIdApi,
   createApplicationApi,
   reviewEmailDraftApi,
@@ -573,6 +574,22 @@ export const ApplicationReviewModal = ({
               showToast('Additional questionnaire answers required below.');
             } else if (nextStat === 'waiting_for_final_review') {
               showToast('Form prepared! Review all answers below before final submit.');
+            } else if (nextStat === 'google_login_required') {
+              showToast('Google Sign-In required. Please connect your Google session.');
+            }
+          }
+        } else if (detectedMethod === 'googleForm') {
+          showToast('Opening Google Form and filling answers with AI...');
+          const gfRes = await retryGoogleFormApi(application._id);
+          if (gfRes?.data) {
+            setApplication(gfRes.data);
+            const nextStat = gfRes.data.status || 'Applied';
+            setCurrentStatus(nextStat);
+            setSelectedStatus(nextStat);
+            if (nextStat === 'Applied') {
+              showToast('Google Form application submitted successfully!');
+            } else if (nextStat === 'google_login_required') {
+              showToast('Google Sign-In required. Please connect your Google session in the modal.');
             }
           }
         } else if (detectedMethod === 'email') {
@@ -630,6 +647,19 @@ export const ApplicationReviewModal = ({
       }
     } catch (err) {
       showToast('Application process error: ' + (err.message || 'Please retry'));
+      if (application?._id) {
+        getApplicationDetailsApi(application._id)
+          .then((fresh) => {
+            if (fresh?.data) {
+              setApplication(fresh.data);
+              if (fresh.data.status) {
+                setCurrentStatus(fresh.data.status);
+                setSelectedStatus(fresh.data.status);
+              }
+            }
+          })
+          .catch(() => {});
+      }
       if (onApplicationUpdated) onApplicationUpdated();
     } finally {
       setActionLoading(false);

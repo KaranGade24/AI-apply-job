@@ -27,6 +27,11 @@ import { User } from '../../../model/User.js';
 import { Setting } from '../../../model/Setting.js';
 import { logJobEvent, logError } from '../../../utils/logger.js';
 import { appError } from '../../../utils/errors.js';
+import {
+  injectGoogleSessionIntoContext,
+  detectGoogleAuthState,
+} from '../../../services/googleSession.service.js';
+import { handleGoogleFormApplication } from '../../../application/methods/googleFormApplicationMethod.js';
 
 /**
  * Core Browser Application Engine for Naukri Jobs
@@ -118,6 +123,11 @@ export const runNaukriApplication = async ({
     context = await BrowserManager.createContext(browser, {
       storageState: sessionState,
     });
+
+    // Automatically inject authenticated Google session into context
+    // This ensures any employer Google Form links or popups will be authenticated!
+    await injectGoogleSessionIntoContext(context, userId);
+
     page = await context.newPage();
 
     // 4. Open Job URL
@@ -338,6 +348,82 @@ export const runNaukriApplication = async ({
       });
     }
 
+    // Check if activePage or portal redirect leads to a Google Form or Google Auth
+    const currentActiveUrl = (activePage.url() || '').toLowerCase();
+    const isGoogleFormRedirect =
+      currentActiveUrl.includes('docs.google.com/forms') ||
+      currentActiveUrl.includes('forms.gle') ||
+      (currentActiveUrl.includes('accounts.google.com') && currentActiveUrl.includes('form'));
+
+    if (isGoogleFormRedirect) {
+      const formUrl = activePage.url();
+      await logJobEvent(
+        'naukriApplication',
+        'GOOGLE_FORM_DETECTED',
+        `Employer portal redirected to Google Form: ${formUrl}`
+      );
+
+      // Check if sign-in is required
+      const googleAuth = await detectGoogleAuthState(activePage);
+      if (googleAuth.isSignInRequired) {
+        await JobApplication.findByIdAndUpdate(applicationId, {
+          applicationMethod: 'googleForm',
+          status: APPLICATION_STATUS.GOOGLE_LOGIN_REQUIRED,
+          'form.requiresHuman': true,
+          'form.humanReason': 'google_login_required',
+          googleFormResult: {
+            googleFormUrl: formUrl,
+            loginRequired: true,
+            loginUrl: googleAuth.currentUrl || formUrl,
+            submitted: false,
+            formClosed: false,
+          },
+        });
+
+        await updateApplicationStatus(applicationId, APPLICATION_STATUS.GOOGLE_LOGIN_REQUIRED, {
+          logMessage:
+            'Google Sign-In required to access employer Google Form. Please connect Google session in the modal or sign in.',
+        });
+
+        throw new appError(
+          'Google Sign-In is required to access the employer application form. Please connect your Google session in the modal or sign in, then retry.',
+          401
+        );
+      }
+
+      // Close current Naukri browser context before handing off
+      await BrowserManager.closeSafely({ page: activePage, context, browser });
+
+      await updateApplicationStatus(applicationId, APPLICATION_STATUS.GOOGLE_FORM_FILLING, {
+        logMessage: `Redirected to Google Form: ${formUrl}. Filling with AI engine...`,
+      });
+
+      const gfResult = await handleGoogleFormApplication({
+        applicationId,
+        jobId: job._id,
+        userId,
+        googleFormUrl: formUrl,
+      });
+
+      if (gfResult.submitted) {
+        return {
+          status: APPLICATION_STATUS.APPLIED,
+          message: 'Application submitted successfully via Google Form!',
+          data: gfResult,
+        };
+      } else if (gfResult.loginRequired) {
+        throw new appError(
+          'Google Sign-In is required to access or submit this form.',
+          401
+        );
+      } else {
+        throw new appError(
+          gfResult.message || 'Google Form could not be submitted.',
+          400
+        );
+      }
+    }
+
     const formInspection = await inspectForm(activePage);
 
     if (formInspection.isQuestionnairePresent) {
@@ -474,9 +560,9 @@ export const runNaukriApplication = async ({
 
       // Verify submission
       const finalSuccess = await detectSubmissionSuccess(activePage);
-      if (finalSuccess.isSubmitted || canSubmit) {
+      if (finalSuccess.isSubmitted) {
         await updateApplicationStatus(applicationId, APPLICATION_STATUS.APPLIED, {
-          logMessage: 'Application successfully submitted and verified.',
+          logMessage: 'Application successfully submitted and verified on portal.',
         });
         await JobApplication.findByIdAndUpdate(applicationId, {
           'form.submittedAt': new Date(),
@@ -487,29 +573,64 @@ export const runNaukriApplication = async ({
           status: APPLICATION_STATUS.APPLIED,
           message: 'Job application successfully submitted!',
         };
+      } else {
+        await updateApplicationStatus(applicationId, APPLICATION_STATUS.FAILED, {
+          logMessage: 'Submit button was clicked, but submission confirmation was not detected on portal.',
+        });
+        throw new appError(
+          'Application submit was triggered, but confirmation could not be verified on the portal.',
+          400
+        );
       }
     }
 
     // Final fallback check
     const finalCheck = await detectSubmissionSuccess(activePage);
-    const resultStatus = finalCheck.isSubmitted ? APPLICATION_STATUS.APPLIED : APPLICATION_STATUS.WAITING_FOR_REVIEW;
+    if (finalCheck.isSubmitted) {
+      await updateApplicationStatus(applicationId, APPLICATION_STATUS.APPLIED, {
+        logMessage: 'Application confirmed as submitted on portal.',
+      });
+      await JobApplication.findByIdAndUpdate(applicationId, {
+        status: APPLICATION_STATUS.APPLIED,
+        'form.submittedAt': new Date(),
+        'form.requiresHuman': false,
+      });
+
+      return {
+        status: APPLICATION_STATUS.APPLIED,
+        message: 'Application submitted successfully.',
+      };
+    }
+
+    // If confirmSubmission was requested, but submission did not succeed, DO NOT mark as applied!
+    if (confirmSubmission) {
+      await updateApplicationStatus(applicationId, APPLICATION_STATUS.FAILED, {
+        logMessage: 'Application confirmation requested, but submission could not be completed on portal.',
+      });
+      throw new appError('Application could not be completed on employer portal. Please review and apply directly.', 400);
+    }
 
     await JobApplication.findByIdAndUpdate(applicationId, {
-      status: resultStatus,
-      ...(finalCheck.isSubmitted && { 'form.submittedAt': new Date() }),
+      status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
     });
 
     return {
-      status: resultStatus,
-      message: finalCheck.isSubmitted ? 'Application submitted successfully.' : 'Application prepared.',
+      status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
+      message: 'Application prepared. Waiting for user review.',
     };
   } catch (error) {
     await logError('naukriApplication.runNaukriApplication', error.message);
     if (applicationId) {
-      await updateApplicationStatus(applicationId, APPLICATION_STATUS.FAILED, {
-        error: error.message,
-        logMessage: `Naukri application error: ${error.message}`,
-      }).catch(() => {});
+      const currentApp = await findApplicationById(applicationId).catch(() => null);
+      if (
+        currentApp?.status !== APPLICATION_STATUS.GOOGLE_LOGIN_REQUIRED &&
+        currentApp?.status !== APPLICATION_STATUS.HUMAN_REQUIRED
+      ) {
+        await updateApplicationStatus(applicationId, APPLICATION_STATUS.FAILED, {
+          error: error.message,
+          logMessage: `Naukri application error: ${error.message}`,
+        }).catch(() => {});
+      }
     }
     throw error;
   } finally {
