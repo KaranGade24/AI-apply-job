@@ -251,32 +251,7 @@ export const approveAndSendApplication = async (applicationId, userId) => {
       });
 
       const updatedApp = await findApplicationById(applicationId);
-      if (updatedApp.status !== APPLICATION_STATUS.APPLIED) {
-        if (updatedApp.status === APPLICATION_STATUS.GOOGLE_LOGIN_REQUIRED) {
-          throw new appError(
-            'Google Sign-In is required to access the employer application form. Please connect your Google session in the modal or sign in, then retry.',
-            401
-          );
-        }
-        if (updatedApp.status === APPLICATION_STATUS.HUMAN_REQUIRED) {
-          throw new appError(
-            naukriResult.message || 'Additional employer questionnaire answers required before submitting.',
-            400
-          );
-        }
-        if (updatedApp.status === APPLICATION_STATUS.WAITING_FOR_FINAL_REVIEW) {
-          throw new appError(
-            naukriResult.message || 'Form answers prepared. Please review your answers before final submission.',
-            400
-          );
-        }
-        throw new appError(
-          naukriResult.message || 'Application could not be submitted on employer portal.',
-          400
-        );
-      }
-
-      return updatedApp;
+      return updatedApp || naukriResult;
     }
 
     const recipient = application.email?.recipient;

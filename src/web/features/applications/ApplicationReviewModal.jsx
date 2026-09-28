@@ -1623,6 +1623,58 @@ export const ApplicationReviewModal = ({
                                 {application.pageAnalysis.summary}
                               </p>
 
+                              {/* External ATS (Workday, Greenhouse, Lever, etc.) Action Card */}
+                              {(application.pageAnalysis.pageType === 'external_ats' ||
+                                (application.pageAnalysis.currentUrl &&
+                                  (application.pageAnalysis.currentUrl.includes('myworkdayjobs.com') ||
+                                    application.pageAnalysis.currentUrl.includes('greenhouse.io') ||
+                                    application.pageAnalysis.currentUrl.includes('lever.co') ||
+                                    application.pageAnalysis.currentUrl.includes('smartrecruiters.com')))) && (
+                                <div className="p-3.5 bg-blue-50 border border-blue-200 rounded-xl space-y-2.5 text-xs">
+                                  <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-2 text-blue-900 font-bold">
+                                      <ExternalLink className="w-4 h-4 text-blue-600 shrink-0" />
+                                      <span>Employer Career Portal / External ATS Detected</span>
+                                    </div>
+                                    <span className="px-2 py-0.5 bg-blue-200 text-blue-900 rounded font-mono text-[10px] font-bold uppercase">
+                                      {application.pageAnalysis.matchedRole?.referenceId
+                                        ? `Ref: ${application.pageAnalysis.matchedRole.referenceId}`
+                                        : 'Workday / ATS'}
+                                    </span>
+                                  </div>
+                                  <p className="text-blue-800 text-[11px] leading-relaxed">
+                                    {application.pageAnalysis.summary ||
+                                      'This employer uses an external career system (e.g., Workday). You can proceed directly to the portal with your tailored resume and autofill answers.'}
+                                  </p>
+                                  <div className="pt-1 flex flex-wrap items-center justify-between gap-2 border-t border-blue-200/60">
+                                    <a
+                                      href={application.pageAnalysis.currentUrl || job.applicationUrl || job.sourceUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-colors shadow-xs"
+                                    >
+                                      <span>Open Application Portal</span>
+                                      <ExternalLink className="w-3.5 h-3.5" />
+                                    </a>
+                                    <div className="flex items-center gap-2">
+                                      <Button
+                                        size="xs"
+                                        variant="outline"
+                                        onClick={async () => {
+                                          await updateApplicationStatusApi(application._id, 'Applied');
+                                          setCurrentStatus('Applied');
+                                          showToast('Application marked as Applied!');
+                                        }}
+                                        className="text-emerald-700 border-emerald-300 hover:bg-emerald-50 font-bold gap-1 cursor-pointer"
+                                      >
+                                        <Check className="w-3.5 h-3.5" />
+                                        <span>Mark as Applied</span>
+                                      </Button>
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+
                               {/* Matched Opening Details (like "Node JS Developer", Reference Id: IN-NJ-01, Exp: 1-3 Years, Loc: Pune) */}
                               {application.pageAnalysis.matchedRole?.title && (
                                 <div className="p-3 bg-amber-50/70 rounded-xl border border-amber-200/80 space-y-2">

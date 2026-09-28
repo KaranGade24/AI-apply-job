@@ -143,6 +143,60 @@ export const navigatePortalWithAiDecision = async (page, analysis, context = nul
       }
     }
 
+    // 3. Action: External ATS (Workday, Greenhouse, Lever, SmartRecruiters, etc.)
+    if (
+      nextRecommendedAction === 'fill_form' ||
+      pageType === 'external_ats'
+    ) {
+      const atsApplyLocators = [
+        page.locator('[data-automation-id="apply-button"]').first(),
+        page.locator('[data-automation-id="autofill-with-resume"]').first(),
+        page.locator('[data-automation-id="apply-manually"]').first(),
+        page.locator('a[data-automation-id="apply-button"]').first(),
+        page.locator('button:has-text("Apply Manually")').first(),
+        page.locator('a:has-text("Apply Manually")').first(),
+        page.locator('button:has-text("Autofill with Resume")').first(),
+        page.locator('a:has-text("Autofill with Resume")').first(),
+        page.locator('button:has-text("Apply Now")').first(),
+        page.locator('a:has-text("Apply Now")').first(),
+        page.locator('button:has-text("Apply")').first(),
+        page.locator('a:has-text("Apply")').first(),
+        page.locator('[role="button"]:has-text("Apply")').first(),
+        page.locator('a[href*="apply"]').first(),
+      ];
+
+      for (const loc of atsApplyLocators) {
+        const visible = await loc.isVisible().catch(() => false);
+        if (visible) {
+          await logJobEvent('pageNavigator', 'CLICK_ATS_APPLY', 'Clicking ATS / Workday Apply button');
+
+          let newPagePromise = null;
+          if (context) {
+            newPagePromise = context.waitForEvent('page', { timeout: 6000 }).catch(() => null);
+          }
+
+          await loc.click().catch(() => {});
+
+          let activePage = page;
+          if (newPagePromise) {
+            const popupPage = await newPagePromise;
+            if (popupPage) {
+              await popupPage.waitForLoadState('domcontentloaded').catch(() => {});
+              activePage = popupPage;
+            }
+          }
+
+          await activePage.waitForTimeout(3000);
+          return {
+            success: true,
+            newPage: activePage,
+            navigated: true,
+            message: 'Clicked ATS Apply button',
+          };
+        }
+      }
+    }
+
     return {
       success: true,
       navigated: false,

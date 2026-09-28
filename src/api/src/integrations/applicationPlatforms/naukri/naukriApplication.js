@@ -235,10 +235,16 @@ export const runNaukriApplication = async ({
         },
       });
 
-      // If portal renders a listings/accordion directory (e.g. "India Openings" with multiple roles)
-      if (analysis.pageType === 'job_listings_accordion' || analysis.nextRecommendedAction === 'click_opening_apply') {
+      // If portal renders a listings/accordion directory, job description, or external ATS page
+      if (
+        analysis.pageType === 'job_listings_accordion' ||
+        analysis.pageType === 'external_ats' ||
+        analysis.pageType === 'job_description_page' ||
+        analysis.nextRecommendedAction === 'click_opening_apply' ||
+        analysis.nextRecommendedAction === 'fill_form'
+      ) {
         await updateApplicationStatus(applicationId, APPLICATION_STATUS.APPLYING, {
-          logMessage: `AI matched role "${analysis.matchedRole?.title || job.title}". Expanding role and clicking Apply Now...`,
+          logMessage: `AI navigating ${analysis.pageType} portal for "${analysis.matchedRole?.title || job.title}"...`,
         });
 
         const navResult = await navigatePortalWithAiDecision(activePage, analysis, context);
