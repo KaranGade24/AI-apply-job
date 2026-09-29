@@ -105,10 +105,13 @@ export const executeSingleBrowserAction = async (page, action, options = {}) => 
 
       case BROWSER_ACTIONS.CHECK: {
         const locator = resolveTargetLocator(page, target);
-        await locator.waitFor({ state: 'visible', timeout: 7000 }).catch(() => {});
+        await locator.waitFor({ state: 'attached', timeout: 7000 }).catch(() => {});
         await locator.scrollIntoViewIfNeeded().catch(() => {});
-        await locator.check().catch(async () => {
-          await locator.click();
+        await locator.check({ force: true }).catch(async () => {
+          await locator.click({ force: true }).catch(async () => {
+            const parent = locator.locator('..');
+            await parent.click({ force: true }).catch(() => {});
+          });
         });
         return { success: true, error: null, timestamp };
       }

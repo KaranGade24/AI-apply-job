@@ -1504,6 +1504,44 @@ export const ApplicationReviewModal = ({
                                       </label>
                                     ))}
                                   </div>
+                                ) : field.type === 'checkbox' || field.isTermsAgreement ? (
+                                  <label className="flex items-center gap-2.5 p-2.5 bg-slate-50 hover:bg-slate-100 rounded-lg border border-slate-200 cursor-pointer transition-colors">
+                                    <input
+                                      type="checkbox"
+                                      checked={
+                                        (reviewAnswers[field.questionId] ?? field.answer) === 'true' ||
+                                        (reviewAnswers[field.questionId] ?? field.answer) === true
+                                      }
+                                      onChange={(e) =>
+                                        setReviewAnswers((prev) => ({
+                                          ...prev,
+                                          [field.questionId]: e.target.checked ? 'true' : 'false',
+                                        }))
+                                      }
+                                      className="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500"
+                                    />
+                                    <span className="text-xs font-semibold text-slate-800">
+                                      {field.question} <span className="text-emerald-700 font-bold ml-1.5">(Accepted / Agreed)</span>
+                                    </span>
+                                  </label>
+                                ) : field.type === 'password' || /password/i.test(field.question || '') ? (
+                                  <div className="space-y-1">
+                                    <input
+                                      type="text"
+                                      value={reviewAnswers[field.questionId] ?? field.answer ?? ''}
+                                      onChange={(e) =>
+                                        setReviewAnswers((prev) => ({
+                                          ...prev,
+                                          [field.questionId]: e.target.value,
+                                        }))
+                                      }
+                                      placeholder="Portal account password..."
+                                      className="w-full text-xs p-2.5 font-mono bg-amber-50/50 rounded-lg border border-amber-300 focus:ring-2 focus:ring-amber-500 focus:outline-hidden font-bold text-slate-900"
+                                    />
+                                    <p className="text-[10px] text-amber-800 font-medium">
+                                      Portal-compliant password (8+ chars, uppercase, lowercase, number, symbol). Password & Verify Password fields receive this identical verified password.
+                                    </p>
+                                  </div>
                                 ) : (
                                   <input
                                     type={field.type === 'number' ? 'number' : 'text'}
@@ -1552,7 +1590,12 @@ export const ApplicationReviewModal = ({
                               onClick={handleConfirmFinal}
                               className="bg-blue-600 hover:bg-blue-700 text-white font-bold gap-1.5 cursor-pointer shadow-xs"
                             >
-                              {application.form?.hasStepper && !application.form?.isFinalStep ? (
+                              {application.form?.isAccountCreation ? (
+                                <>
+                                  <CheckCircle2 className="w-3.5 h-3.5" />
+                                  <span>Create Account & Continue</span>
+                                </>
+                              ) : application.form?.hasStepper && !application.form?.isFinalStep ? (
                                 <>
                                   <span>Confirm & Next Step (Step {application.form?.currentStep || 1} of {application.form?.totalSteps || 2})</span>
                                   <ChevronRight className="w-4 h-4" />
@@ -1560,7 +1603,7 @@ export const ApplicationReviewModal = ({
                               ) : (
                                 <>
                                   <CheckCircle2 className="w-3.5 h-3.5" />
-                                  <span>{isNaukri ? 'Confirm & Apply on Naukri' : 'Confirm & Apply on Portal'}</span>
+                                  <span>{isNaukri && !application.form?.portalUrl ? 'Confirm & Apply on Naukri' : 'Confirm & Apply on Employer Portal'}</span>
                                 </>
                               )}
                             </Button>

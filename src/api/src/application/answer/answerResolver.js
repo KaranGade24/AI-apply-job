@@ -49,11 +49,32 @@ export const resolveAllFormAnswers = async (fields = [], context = {}) => {
     if (ans.fieldId) priorAnswerMap.set(ans.fieldId, ans);
   });
 
+  // Automatically resolve single verified candidate password for both Password & Verify Password
+  let candidatePortalPassword = null;
+  for (const [key, val] of priorAnswerMap.entries()) {
+    if (/password/i.test(key) && (val.answer || val.value)) {
+      candidatePortalPassword = val.answer || val.value;
+      break;
+    }
+  }
+  if (!candidatePortalPassword) {
+    candidatePortalPassword =
+      userSetting?.portalPassword ||
+      userSetting?.defaultPassword ||
+      userProfile?.portalPassword;
+  }
+  if (!candidatePortalPassword) {
+    const rawCompany = (job?.company || 'Velsera').replace(/[^a-zA-Z0-9]/g, '');
+    const companyPart =
+      (rawCompany.charAt(0).toUpperCase() + rawCompany.slice(1).toLowerCase()).slice(0, 10) || 'Velsera';
+    candidatePortalPassword = `Applicant@${companyPart}2026!`;
+  }
+
   for (const field of fields) {
     const qId = field.questionId;
     const fId = field.fieldId;
 
-    // Check if user already provided/confirmed this answer (e.g. from Checkpoint 1)
+    // Check if user already provided/confirmed this answer (e.g. from Checkpoint 1 or review edits)
     if (priorAnswerMap.has(qId) || priorAnswerMap.has(fId)) {
       const prior = priorAnswerMap.get(qId) || priorAnswerMap.get(fId);
       resolvedAnswers.push({
@@ -87,17 +108,52 @@ export const resolveAllFormAnswers = async (fields = [], context = {}) => {
       continue;
     }
 
-    // Sensitive credentials / Password fields cannot be hallucinated by AI
-    if (field.type === FIELD_TYPES.PASSWORD || field.type === 'password') {
-      missingQuestions.push({
+    // Level 0: Terms of Use / Agreement Checkbox
+    const isTerms =
+      field.isTermsAgreement ||
+      (field.type === FIELD_TYPES.CHECKBOX &&
+        /terms|privacy|policy|consent|acknowledge|agree|accept|conditions|statement/i.test(field.question || '')) ||
+      (field.type === FIELD_TYPES.CHECKBOX &&
+        /terms|privacy|policy|consent|agree|accept/i.test(field.name || '')) ||
+      (field.type === FIELD_TYPES.CHECKBOX &&
+        /terms|privacy|policy|consent|agree|accept/i.test(field.fieldId || '')) ||
+      (field.type === FIELD_TYPES.CHECKBOX &&
+        fields.some((f) => f.type === FIELD_TYPES.PASSWORD || /password/i.test(f.question || '')));
+
+    if (isTerms) {
+      resolvedAnswers.push({
+        questionId: qId,
+        fieldId: fId,
+        question: field.question,
+        type: FIELD_TYPES.CHECKBOX,
+        answer: 'true',
+        source: 'setting',
+        confidence: 1.0,
+        userConfirmed: false,
+        options: field.options || [],
+      });
+      continue;
+    }
+
+    // Level 0.5: Candidate Account Creation Password (Password AND Verify Password receive identical password)
+    const isPasswordField =
+      field.type === FIELD_TYPES.PASSWORD ||
+      field.type === 'password' ||
+      /password/i.test(field.question || '') ||
+      /password/i.test(field.name || '') ||
+      /password/i.test(field.fieldId || '');
+
+    if (isPasswordField) {
+      resolvedAnswers.push({
         questionId: qId,
         fieldId: fId,
         question: field.question,
         type: 'password',
-        required: true,
-        placeholder: field.placeholder || 'Enter your password...',
-        requirements: field.requirements || [],
-        options: field.options || [],
+        answer: candidatePortalPassword,
+        source: userSetting?.portalPassword ? 'setting' : 'profile',
+        confidence: 1.0,
+        userConfirmed: false,
+        options: [],
       });
       continue;
     }

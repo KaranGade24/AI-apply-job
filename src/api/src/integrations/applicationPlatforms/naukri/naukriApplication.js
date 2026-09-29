@@ -10,6 +10,7 @@ import {
 import { inspectForm } from '../../../application/form/formInspector.js';
 import { resolveAllFormAnswers } from '../../../application/answer/answerResolver.js';
 import { executeBrowserActions } from '../../../application/browser/browserActionExecutor.js';
+import { fillFormFields } from '../../../application/form/formFiller.js';
 import { verifyFilledFields } from '../../../application/form/formVerifier.js';
 import { validateBrowserActionPlan } from '../../../application/browser/browserActionValidator.js';
 import {
@@ -661,7 +662,7 @@ export const runNaukriApplication = async ({
       );
 
       // CHECKPOINT 1: Missing information / unknown questions
-      if (missingQuestions.length > 0 && !confirmSubmission) {
+      if (missingQuestions.length > 0 && (!Array.isArray(finalEditedAnswers) || finalEditedAnswers.length === 0)) {
         await JobApplication.findByIdAndUpdate(applicationId, {
           status: APPLICATION_STATUS.HUMAN_REQUIRED,
           'form.requiresHuman': true,
@@ -731,9 +732,17 @@ export const runNaukriApplication = async ({
       }
 
       // CHECKPOINT 2: Final Review Before Submission
-      if (!confirmSubmission) {
+      // If user has not yet reviewed/confirmed these specific fields in the frontend modal, pause and send to user
+      const userHasConfirmedForm =
+        Array.isArray(finalEditedAnswers) &&
+        finalEditedAnswers.length > 0 &&
+        finalEditedAnswers.some((a) =>
+          formInspection.fields.some((f) => f.questionId === a.questionId || f.fieldId === a.fieldId)
+        );
+
+      if (!userHasConfirmedForm) {
         const reviewFields = formInspection.fields.map((f) => {
-          const match = resolvedAnswers.find((a) => a.questionId === f.questionId);
+          const match = resolvedAnswers.find((a) => a.questionId === f.questionId || a.fieldId === f.fieldId);
           return {
             questionId: f.questionId,
             fieldId: f.fieldId,
@@ -742,8 +751,12 @@ export const runNaukriApplication = async ({
             answer: match ? match.answer : '',
             source: match ? match.source : 'profile',
             options: f.options || [],
+            required: Boolean(f.required),
+            isTermsAgreement: Boolean(f.isTermsAgreement),
           };
         });
+
+        const storageState = await BrowserManager.captureStorageState(context).catch(() => null);
 
         await JobApplication.findByIdAndUpdate(applicationId, {
           status: APPLICATION_STATUS.WAITING_FOR_FINAL_REVIEW,
@@ -752,12 +765,24 @@ export const runNaukriApplication = async ({
           'form.missingQuestions': [],
           'form.answers': resolvedAnswers,
           'form.reviewFields': reviewFields,
+          'form.fields': formInspection.fields,
+          'form.currentStep': formInspection.stepperState?.currentStep || 1,
+          'form.totalSteps': formInspection.stepperState?.totalSteps || 1,
+          'form.isAccountCreation': Boolean(formInspection.isAccountCreation),
+          'form.portalUrl': activePage.url(),
+          'workflow.agentState.pendingHumanAction': {
+            reason: formInspection.isAccountCreation
+              ? 'Review candidate account credentials and submit'
+              : 'Review filled application form before submission',
+            savedUrl: activePage.url(),
+            savedStorageState: storageState,
+          },
         });
 
         await logJobEvent(
           'naukriApplication',
           'WAITING_FINAL_REVIEW',
-          `Application form filled. Waiting for user final confirmation.`
+          `Application form filled and verified via DOM check. Sent to frontend for candidate verification.`
         );
 
         return {
@@ -767,13 +792,13 @@ export const runNaukriApplication = async ({
         };
       }
 
-      // If confirmSubmission IS true: Submit the application!
+      // If confirmSubmission IS true: Submit or progress the application!
       await updateApplicationStatus(applicationId, APPLICATION_STATUS.SUBMITTING, {
-        logMessage: 'Final user confirmation received. Submitting application...',
+        logMessage: 'Final user confirmation received. Advancing application on portal...',
       });
 
       const submitBtn = activePage
-        .locator('button:has-text("Submit"), button:has-text("Save & Apply"), button:has-text("Apply Now"), button:has-text("Apply on company site"), #company-site-button, button[type="submit"]')
+        .locator('button:has-text("Create Account"), [data-automation-id="createAccountSubmitButton"], button:has-text("Sign In"), [data-automation-id="signInSubmitButton"], button:has-text("Next"), button:has-text("Continue"), [data-automation-id="bottom-navigation-next-button"], button:has-text("Submit"), button:has-text("Save & Apply"), button:has-text("Apply Now"), button:has-text("Apply on company site"), #company-site-button, button[type="submit"]')
         .first();
 
       const canSubmit = await submitBtn.isVisible().catch(() => false);
@@ -886,7 +911,165 @@ export const runNaukriApplication = async ({
         }
 
         // Run multi-step autonomous loop on the external company site / Workday
-        for (let loopStep = 0; loopStep < 4; loopStep++) {
+        for (let loopStep = 0; loopStep < 6; loopStep++) {
+          await activePage.waitForLoadState('domcontentloaded').catch(() => {});
+
+          // Check if submission already succeeded
+          const checkSuccess = await detectSubmissionSuccess(activePage);
+          if (checkSuccess.isSubmitted) {
+            await updateApplicationStatus(applicationId, APPLICATION_STATUS.APPLIED, {
+              logMessage: 'Application successfully submitted and confirmed on employer portal!',
+            });
+            await JobApplication.findByIdAndUpdate(applicationId, {
+              status: APPLICATION_STATUS.APPLIED,
+              'form.submittedAt': new Date(),
+            });
+            return {
+              status: APPLICATION_STATUS.APPLIED,
+              message: 'Application successfully submitted on employer portal!',
+            };
+          }
+
+          // 1. inspectForm() ONCE to get ALL fields on current page
+          const stepInspection = await inspectForm(activePage);
+
+          // If form fields exist (Account Creation, Resume Upload, Questionnaire, or Application Form):
+          if (stepInspection.isQuestionnairePresent && stepInspection.fields && stepInspection.fields.length > 0) {
+            await logJobEvent(
+              'naukriApplication',
+              'PORTAL_FORM_STEP',
+              `Loop step ${loopStep}: ${stepInspection.fields.length} fields detected (AccountCreation: ${stepInspection.isAccountCreation}, Stepper: ${stepInspection.stepperState?.hasStepper ? `Step ${stepInspection.stepperState.currentStep}/${stepInspection.stepperState.totalSteps}` : 'none'})`
+            );
+
+            // 2. Resolve ALL answers: deterministic profile + resume + password/terms + ONE batch LLM call for subjective
+            const { resolvedAnswers } = await resolveAllFormAnswers(
+              stepInspection.fields,
+              {
+                userAnswers: allCollectedAnswers,
+                userProfile: profileDoc || {},
+                user: userDoc || {},
+                userSetting: settingDoc?.userSetting || {},
+                resumeData: application.resume?.tailoredResumeData || {},
+                job,
+              }
+            );
+
+            // 3. Batch fill ALL fields via Playwright
+            await fillFormFields(activePage, stepInspection.fields, resolvedAnswers, {
+              resumePdfPath: application.resume?.pdfPath,
+            });
+
+            // 4. Verify ALL fields filled via DOM check (NO LLM)
+            const verification = await verifyFilledFields(activePage, resolvedAnswers);
+            await logJobEvent(
+              'naukriApplication',
+              'DOM_VERIFIED',
+              `Step ${loopStep} DOM check: ${verification.filledCount}/${stepInspection.fields.length} fields filled (Zero LLM).`
+            );
+
+            // 5. If a file upload input exists on this step, attach the tailored resume PDF!
+            const fileInput = activePage.locator('input[type="file"]').first();
+            const hasFileInput = await fileInput.isVisible({ timeout: 1500 }).catch(() => false);
+            if (hasFileInput && application.resume?.pdfPath) {
+              await fileInput.setInputFiles(application.resume.pdfPath).catch(() => {});
+              await logJobEvent('naukriApplication', 'RESUME_ATTACHED', 'Tailored resume attached to portal file input');
+              await activePage.waitForTimeout(2000);
+            }
+
+            // Check if user has confirmed this specific step from frontend
+            const userHasConfirmedStep =
+              Array.isArray(finalEditedAnswers) &&
+              finalEditedAnswers.length > 0 &&
+              finalEditedAnswers.some((a) =>
+                stepInspection.fields.some((f) => f.questionId === a.questionId || f.fieldId === a.fieldId)
+              );
+
+            if (!userHasConfirmedStep) {
+              const stepReviewFields = stepInspection.fields.map((f) => {
+                const match = resolvedAnswers.find((a) => a.questionId === f.questionId || a.fieldId === f.fieldId);
+                return {
+                  questionId: f.questionId,
+                  fieldId: f.fieldId,
+                  question: f.question,
+                  type: f.type,
+                  answer: match ? match.answer : '',
+                  source: match ? match.source : 'profile',
+                  options: f.options || [],
+                  required: Boolean(f.required),
+                  isTermsAgreement: Boolean(f.isTermsAgreement),
+                };
+              });
+
+              const storageState = await BrowserManager.captureStorageState(context).catch(() => null);
+
+              await JobApplication.findByIdAndUpdate(applicationId, {
+                status: APPLICATION_STATUS.WAITING_FOR_FINAL_REVIEW,
+                'form.fields': stepInspection.fields,
+                'form.answers': resolvedAnswers,
+                'form.reviewFields': stepReviewFields,
+                'form.missingQuestions': [],
+                'form.currentStep': stepInspection.stepperState?.currentStep || loopStep + 1,
+                'form.totalSteps': stepInspection.stepperState?.totalSteps || 2,
+                'form.isAccountCreation': Boolean(stepInspection.isAccountCreation),
+                'form.portalUrl': activePage.url(),
+                'workflow.agentState.pendingHumanAction': {
+                  reason: stepInspection.isAccountCreation
+                    ? 'Review candidate account credentials and submit'
+                    : `Review filled fields for step ${stepInspection.stepperState?.currentStep || loopStep + 1}`,
+                  savedUrl: activePage.url(),
+                  savedStorageState: storageState,
+                },
+              });
+
+              await updateApplicationStatus(applicationId, APPLICATION_STATUS.WAITING_FOR_FINAL_REVIEW, {
+                logMessage: stepInspection.isAccountCreation
+                  ? 'Candidate account creation form filled and verified. Sent to frontend for review.'
+                  : `Step ${stepInspection.stepperState?.currentStep || loopStep + 1} filled and verified via DOM check. Sent to frontend for review.`,
+              });
+
+              await logJobEvent(
+                'naukriApplication',
+                'STEP_FILLED_AWAITING_REVIEW',
+                `Step ${stepInspection.stepperState?.currentStep || loopStep + 1}: ${stepReviewFields.length} fields filled and verified via DOM check. Sent to frontend for candidate verification.`
+              );
+
+              return {
+                status: APPLICATION_STATUS.WAITING_FOR_FINAL_REVIEW,
+                reviewFields: stepReviewFields,
+                message: stepInspection.isAccountCreation
+                  ? 'Candidate account creation form ready for your review. Confirm to proceed.'
+                  : `Application step ${stepInspection.stepperState?.currentStep || loopStep + 1} ready for your review. Confirm to proceed.`,
+              };
+            }
+
+            // 6. User confirmed! Click progression button (Create Account -> Next/Continue -> Submit)
+            const stepButtons = stepInspection.buttons || [];
+            const createAccBtn = stepButtons.find((b) => b.type === 'create_account') ||
+              (stepInspection.isAccountCreation ? { selector: 'button:has-text("Create Account"), [data-automation-id="createAccountSubmitButton"]', text: 'Create Account' } : null);
+            const nextBtn = stepButtons.find((b) => b.type === 'next') ||
+              { selector: 'button:has-text("Next"), button:has-text("Continue"), button:has-text("Save & Continue"), [data-automation-id="bottom-navigation-next-button"]', text: 'Next' };
+            const submitBtn = stepButtons.find((b) => b.type === 'submit');
+
+            const targetBtn = createAccBtn || nextBtn || submitBtn;
+
+            if (targetBtn) {
+              await logJobEvent('naukriApplication', 'PORTAL_CLICK_ACTION', `Clicking ${targetBtn.text || 'action'}...`);
+              const btnLocator = activePage.locator(targetBtn.selector || `button:has-text("${targetBtn.text}")`).first();
+              const canClick = await btnLocator.isVisible().catch(() => false);
+              if (canClick) {
+                await btnLocator.click({ timeout: 5000 }).catch(async () => {
+                  await btnLocator.click({ force: true, timeout: 3000 });
+                });
+                await activePage.waitForLoadState('domcontentloaded').catch(() => {});
+                await activePage.waitForTimeout(3000);
+                // Clear confirmed answers for the subsequent step
+                finalEditedAnswers = [];
+                continue; // Advance loop to next step!
+              }
+            }
+          }
+
+          // If no form fields, inspect page content and navigate modals/apply buttons
           const extractedExt = await extractPageContent(activePage);
           const analysisExt = await classifyPageWithLlm(extractedExt, job, userId);
 
@@ -923,42 +1106,27 @@ export const runNaukriApplication = async ({
             };
           }
 
-          // Check if application form is loaded with fields
-          if (extractedExt.formFieldsCount > 0) {
-            const formInspection = await inspectForm(activePage);
-            await JobApplication.findByIdAndUpdate(applicationId, {
-              status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
-              'form.requiresHuman': false,
-              'form.fields': formInspection.fields || [],
-            });
-
-            await updateApplicationStatus(applicationId, APPLICATION_STATUS.WAITING_FOR_REVIEW, {
-              logMessage: `Employer application form loaded with ${formInspection.fields?.length || extractedExt.formFieldsCount} fields. Ready for candidate review.`,
-            });
-            return {
-              status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
-              message: `Employer application form opened on ${activePage.url()}. Form fields inspected.`,
-              pageAnalysis: analysisExt,
-            };
+          // Modal "Autofill with Resume" / "Apply Manually"
+          const autofillResumeBtn = activePage.locator('[data-automation-id="autofill-with-resume"], button:has-text("Autofill with Resume")').first();
+          if (await autofillResumeBtn.isVisible().catch(() => false)) {
+            await logJobEvent('naukriApplication', 'CLICK_AUTOFILL_RESUME', 'Clicking "Autofill with Resume" modal option');
+            await autofillResumeBtn.click().catch(() => {});
+            await activePage.waitForLoadState('domcontentloaded').catch(() => {});
+            await activePage.waitForTimeout(2500);
+            continue;
           }
 
-          // Check if candidate auth gateway required
-          if (analysisExt.pageType === 'ats_account_gateway' || extractedExt.authGateway?.isAuthRequired) {
-            await updateApplicationStatus(applicationId, APPLICATION_STATUS.WAITING_FOR_REVIEW, {
-              logMessage: `Employer requires candidate account sign-in on ${activePage.url()}`,
-            });
-            return {
-              status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
-              message: `Employer portal requires candidate account creation/login. Direct portal link and tailored profile ready.`,
-              pageAnalysis: analysisExt,
-            };
+          // Job details "Apply" button
+          const applyBtn = activePage.locator('[data-automation-id="apply-button"], button:has-text("Apply"), a:has-text("Apply")').first();
+          if (await applyBtn.isVisible().catch(() => false)) {
+            await logJobEvent('naukriApplication', 'CLICK_APPLY_BTN', 'Clicking Apply button on portal');
+            await applyBtn.click().catch(() => {});
+            await activePage.waitForLoadState('domcontentloaded').catch(() => {});
+            await activePage.waitForTimeout(2500);
+            continue;
           }
 
-          // Advance / Click action
-          await updateApplicationStatus(applicationId, APPLICATION_STATUS.APPLYING, {
-            logMessage: `AI advancing ${analysisExt.pageType} (Action: ${analysisExt.nextRecommendedAction || 'navigate'})...`,
-          });
-
+          // If navigation needed via pageNavigator
           const navResult = await navigatePortalWithAiDecision(activePage, analysisExt, context);
           if (navResult.newPage) {
             activePage = navResult.newPage;
@@ -973,6 +1141,18 @@ export const runNaukriApplication = async ({
         // Return gracefully with the final analyzed company portal state
         const finalExtAfterLoop = await extractPageContent(activePage);
         const finalAnalysisAfterLoop = await classifyPageWithLlm(finalExtAfterLoop, job, userId);
+        const finalInspectionAfterLoop = await inspectForm(activePage);
+
+        await JobApplication.findByIdAndUpdate(applicationId, {
+          'form.fields': finalInspectionAfterLoop.fields || [],
+          pageAnalysis: {
+            ...finalAnalysisAfterLoop,
+            pageTitle: finalExtAfterLoop.title,
+            currentUrl: activePage.url(),
+            analyzedAt: new Date(),
+          },
+        });
+
         await updateApplicationStatus(applicationId, APPLICATION_STATUS.WAITING_FOR_REVIEW, {
           logMessage: `Employer portal active: ${finalAnalysisAfterLoop.summary || activePage.url()}`,
         });

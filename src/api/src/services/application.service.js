@@ -466,6 +466,15 @@ export const confirmFinalApplicationService = async (applicationId, userId, payl
       `User confirmed final application ${applicationId}. Submitting...`
     );
 
+    const hasExternalPortal = Boolean(
+      application.workflow?.agentState?.pendingHumanAction?.savedUrl &&
+      !application.workflow?.agentState?.pendingHumanAction?.savedUrl.includes('naukri.com')
+    );
+
+    if (hasExternalPortal) {
+      return await submitFinalUnknownApplicationService(applicationId, userId, payload);
+    }
+
     const isNaukri = Boolean(application.naukriDetails?.jobId || application.job?.source === 'naukri');
     if (isNaukri) {
       await runNaukriApplication({

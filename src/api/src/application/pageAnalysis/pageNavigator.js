@@ -212,12 +212,19 @@ export const navigatePortalWithAiDecision = async (page, analysis, context = nul
       pageType === 'multi_step_wizard'
     ) {
       const atsApplyLocators = [
+        page.locator('[data-automation-id="createAccountSubmitButton"]').first(),
+        page.locator('button:has-text("Create Account")').first(),
+        page.locator('a:has-text("Create Account")').first(),
+        page.locator('[data-automation-id="signInSubmitButton"]').first(),
+        page.locator('button:has-text("Sign In")').first(),
+        page.locator('a:has-text("Sign In")').first(),
         page.locator('[data-automation-id="autofill-with-resume"]').first(),
         page.locator('button:has-text("Autofill with Resume")').first(),
         page.locator('a:has-text("Autofill with Resume")').first(),
         page.locator('[data-automation-id="apply-manually"]').first(),
         page.locator('button:has-text("Apply Manually")').first(),
         page.locator('a:has-text("Apply Manually")').first(),
+        page.locator('[data-automation-id="bottom-navigation-next-button"]').first(),
         page.locator('[data-automation-id="apply-button"]').first(),
         page.locator('a[data-automation-id="apply-button"]').first(),
         page.locator('button:has-text("Apply Now")').first(),

@@ -124,7 +124,7 @@ export const inspectForm = async (page) => {
 
       // Find all questions / inputs
       const elements = root.querySelectorAll(
-        'input:not([type="hidden"]):not([type="submit"]):not([type="button"]), textarea, select, [role="radiogroup"], [role="group"]'
+        'input:not([type="hidden"]):not([type="submit"]):not([type="button"]), textarea, select, [role="radiogroup"], [role="group"], [role="checkbox"]'
       );
 
       let hasPasswordField = false;
@@ -136,6 +136,7 @@ export const inspectForm = async (page) => {
 
         const tagName = el.tagName.toLowerCase();
         const inputType = (el.getAttribute('type') || '').toLowerCase();
+        const autoId = el.getAttribute('data-automation-id') || '';
         let detectedType = fieldTypes.TEXT;
 
         if (tagName === 'textarea') {
@@ -144,7 +145,7 @@ export const inspectForm = async (page) => {
           detectedType = fieldTypes.SELECT;
         } else if (inputType === 'radio' || el.getAttribute('role') === 'radiogroup') {
           detectedType = fieldTypes.RADIO;
-        } else if (inputType === 'checkbox') {
+        } else if (inputType === 'checkbox' || el.getAttribute('role') === 'checkbox' || /checkbox/i.test(autoId)) {
           detectedType = fieldTypes.CHECKBOX;
         } else if (inputType === 'file') {
           detectedType = fieldTypes.FILE;
@@ -154,7 +155,14 @@ export const inspectForm = async (page) => {
           detectedType = fieldTypes.EMAIL;
         } else if (inputType === 'tel' || inputType === 'phone') {
           detectedType = fieldTypes.PHONE;
-        } else if (inputType === 'password') {
+        } else if (
+          inputType === 'password' ||
+          el.getAttribute('type') === 'password' ||
+          /password/i.test(autoId) ||
+          /password/i.test(el.name || '') ||
+          /password/i.test(el.id || '') ||
+          /password/i.test(el.getAttribute('autocomplete') || '')
+        ) {
           detectedType = fieldTypes.PASSWORD;
           hasPasswordField = true;
         }
@@ -166,15 +174,25 @@ export const inspectForm = async (page) => {
           if (lbl) questionText = lbl.textContent.trim();
         }
 
+        const ariaLabelledBy = el.getAttribute('aria-labelledby');
+        if (!questionText && ariaLabelledBy) {
+          const lblEl = document.getElementById(ariaLabelledBy);
+          if (lblEl) questionText = lblEl.textContent.trim();
+        }
+
         if (!questionText) {
           const parentLabel = el.closest('label');
           if (parentLabel) questionText = parentLabel.textContent.trim();
         }
 
         if (!questionText) {
-          const parentContainer = el.closest('.form-group, .question-wrap, .field-wrap, [class*="question"], [class*="field"], div');
+          const parentContainer = el.closest(
+            '.form-group, .question-wrap, .field-wrap, [class*="question"], [class*="field"], [data-automation-id*="formField"], div'
+          );
           if (parentContainer) {
-            const titleEl = parentContainer.querySelector('h1, h2, h3, h4, h5, p, span.title, label, .label');
+            const titleEl = parentContainer.querySelector(
+              'h1, h2, h3, h4, h5, p, span.title, label, .label, [data-automation-id*="Label"], [data-automation-id*="label"]'
+            );
             if (titleEl && titleEl !== el) {
               questionText = titleEl.textContent.trim();
             }
@@ -185,6 +203,7 @@ export const inspectForm = async (page) => {
           questionText =
             el.getAttribute('placeholder') ||
             el.getAttribute('aria-label') ||
+            autoId ||
             el.getAttribute('name') ||
             el.getAttribute('id') ||
             `Question ${counter + 1}`;
@@ -193,10 +212,20 @@ export const inspectForm = async (page) => {
         // Clean question text (remove asterisk, duplicate spaces)
         questionText = questionText.replace(/\s+/g, ' ').replace(/^\*|\*$/g, '').trim();
 
+        // Check if question text indicates password
+        if (detectedType === fieldTypes.TEXT && /password/i.test(questionText)) {
+          detectedType = fieldTypes.PASSWORD;
+          hasPasswordField = true;
+        }
+
         // Detect terms of use agreement checkbox
         const isTermsAgreement =
           detectedType === fieldTypes.CHECKBOX &&
-          /terms|privacy|acknowledge|agree|conditions/i.test(questionText);
+          (/terms|privacy|policy|consent|acknowledge|agree|accept|conditions|statement/i.test(questionText) ||
+            /terms|privacy|policy|consent|agree|accept/i.test(el.getAttribute('aria-label') || '') ||
+            /terms|privacy|policy|consent|agree|accept/i.test(el.name || '') ||
+            /terms|privacy|policy|consent|agree|accept/i.test(autoId) ||
+            /terms|privacy|policy|consent|agree|accept/i.test(el.closest('label, .form-group, div')?.textContent || ''));
 
         // Extract options if select or radio group
         const options = [];
@@ -217,12 +246,13 @@ export const inspectForm = async (page) => {
           });
         }
 
-        const fieldKey = el.name || el.id || `field_${counter}`;
+        const fieldKey = el.name || el.id || autoId || `field_${counter}`;
         if (!seenNames.has(fieldKey)) {
           seenNames.add(fieldKey);
           fields.push({
-            fieldId: el.id ? `#${el.id}` : el.name ? `[name="${el.name}"]` : `input_${counter}`,
-            name: el.name || el.id || '',
+            fieldId: el.id ? `#${el.id}` : el.name ? `[name="${el.name}"]` : autoId ? `[data-automation-id="${autoId}"]` : `input_${counter}`,
+            name: el.name || el.id || autoId || '',
+            dataAutomationId: autoId,
             type: detectedType,
             question: questionText,
             placeholder: el.getAttribute('placeholder') || '',
