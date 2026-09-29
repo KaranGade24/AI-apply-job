@@ -647,30 +647,71 @@ export const submitFinalUnknownApplicationService = async (applicationId, userId
         await logError('submitFinalUnknownApplicationService', errorMsg);
       }
     } else if (nextBtn) {
-      // Branch B: Multi-step form -> Click Next / Create Account, wait for transition, and inspect new step
+      // Branch B: Multi-step form -> Ensure synthetic input/change/blur events are dispatched
+      await page.evaluate(() => {
+        document.querySelectorAll('input, textarea, select').forEach((el) => {
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+          el.dispatchEvent(new Event('blur', { bubbles: true }));
+        });
+
+        const termsCheckbox = document.querySelector('#input-9, input[type="checkbox"], [data-automation-id="legalNoticeCheckbox"] input');
+        if (termsCheckbox && !termsCheckbox.checked) {
+          termsCheckbox.checked = true;
+          termsCheckbox.dispatchEvent(new Event('input', { bubbles: true }));
+          termsCheckbox.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      }).catch(() => {});
+      await page.waitForTimeout(500);
+
+      // Click Next / Create Account button via Playwright & DOM dispatch
       await logJobEvent('submitFinalUnknownApplication', 'CLICK_NEXT', `Advancing stepper: clicking "${nextBtn.text}"`);
-      const nextLocator = page.locator(nextBtn.selector || `button:has-text("${nextBtn.text}")`).first();
+      const nextLocator = page.locator('[data-automation-id="createAccountSubmitButton"], [data-automation-id="bottom-navigation-next-button"], ' + (nextBtn.selector || `button:has-text("${nextBtn.text}")`)).first();
+      await nextLocator.scrollIntoViewIfNeeded().catch(() => {});
       await nextLocator.click({ timeout: 5000 }).catch(async () => {
         await nextLocator.click({ force: true, timeout: 3000 });
       });
 
+      await page.evaluate(() => {
+        const btn = document.querySelector('[data-automation-id="createAccountSubmitButton"]') ||
+          document.querySelector('[data-automation-id="bottom-navigation-next-button"]') ||
+          Array.from(document.querySelectorAll('button')).find((b) => /create account|sign up|next|continue/i.test(b.textContent || ''));
+        if (btn) {
+          btn.click();
+        }
+      }).catch(() => {});
+
       // Wait for account creation request / stepper advancement to process
-      await page.waitForTimeout(1500);
+      await page.waitForTimeout(2000);
       await Promise.race([
-        page.waitForSelector('#input-4, #input-5, input[type="password"]', { state: 'detached', timeout: 12000 }).catch(() => null),
-        page.waitForSelector('[data-automation-id="page-header"], [data-automation-id="legalNameSection"], [data-automation-id="contactInformation"], input:not([type="password"])', { timeout: 12000 }).catch(() => null),
-        page.waitForLoadState('networkidle', { timeout: 12000 }).catch(() => null),
+        page.waitForSelector('#input-4, #input-5, input[type="password"]', { state: 'detached', timeout: 14000 }).catch(() => null),
+        page.waitForSelector('[data-automation-id="page-header"], [data-automation-id="legalNameSection"], [data-automation-id="contactInformation"], [data-automation-id="resumeSection"], input:not([type="password"])', { timeout: 14000 }).catch(() => null),
+        page.waitForLoadState('networkidle', { timeout: 14000 }).catch(() => null),
       ]);
-      await page.waitForTimeout(2500);
+      await page.waitForTimeout(3000);
 
       // Check if page showed "Account already exists" or "Sign In"
       const currentText = (await page.evaluate(() => document.body.innerText || '')).toLowerCase();
-      if (/account already exists|already have an account|sign in/i.test(currentText)) {
-        const signInBtn = page.locator('button:has-text("Sign In"), a:has-text("Sign In"), [data-automation-id="signInSubmitButton"]').first();
+      if (/account.*already exists|already have an account|sign in instead|already registered/i.test(currentText)) {
+        await logJobEvent('submitFinalUnknownApplication', 'SIGN_IN_FALLBACK', 'Account already exists. Switching to Sign In...');
+        const signInBtn = page.locator('button:has-text("Sign In"), a:has-text("Sign In"), [data-automation-id="signInLink"], [data-automation-id="signInTab"], [data-automation-id="signInSubmitButton"]').first();
         const hasSignIn = await signInBtn.isVisible({ timeout: 2000 }).catch(() => false);
         if (hasSignIn) {
           await signInBtn.click().catch(() => {});
           await page.waitForTimeout(2500);
+
+          const emailInput = page.locator('#input-1, [data-automation-id="email"], input[type="email"]').first();
+          const passInput = page.locator('#input-2, [data-automation-id="password"], input[type="password"]').first();
+          if (await emailInput.isVisible({ timeout: 2000 }).catch(() => false)) {
+            const candEmail = payload.confirmedAnswers?.find((a) => /email/i.test(a.questionId || ''))?.answer || 'gadekaran24@gmail.com';
+            const candPass = payload.confirmedAnswers?.find((a) => /pass/i.test(a.questionId || ''))?.answer || 'Applicant@Velsera2026!';
+            await emailInput.fill(candEmail);
+            await passInput.fill(candPass);
+            const submitSignIn = page.locator('[data-automation-id="signInSubmitButton"], button:has-text("Sign In")').first();
+            await submitSignIn.click().catch(() => {});
+            await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
+            await page.waitForTimeout(3000);
+          }
         }
       }
 
