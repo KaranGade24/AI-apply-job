@@ -54,15 +54,20 @@ ${(extractedPageContent.textSnippet || '').slice(0, 3500)}
 """
 
 SEMANTIC CLASSIFICATION RULES (DO NOT DEFAULT TO 'unknown' IF DOM CONTAINS ACTIONABLE CONTROLS):
-1. Analyze the page structure and workflow stage:
+1. PRIMARY ACTION RULE:
+   - If the page contains job listings, position cards, accordion openings, or an [Apply] button (even if a footer or sidebar has a general "Send resume to careers@..." email), you MUST choose "click_opening_apply" or "click_button" to apply directly via the web portal!
+   - ONLY recommend "send_email" if the page has NO interactive apply buttons, NO online form, and explicitly instructs candidates to apply solely via email.
+   - If a form is closed/expired ("The form is no longer accepting responses"), recommend "form_closed_fallback_email" if an email exists.
+
+2. Analyze the page structure and workflow stage:
    - "multi_step_wizard": The application is a multi-step workflow (stepper indicated, e.g. "Step 1: Contact Info -> Step 2: Experience -> Step 3: Questions").
    - "modal_application_form": An active modal, drawer, or dialog overlay contains application inputs or questionnaire.
    - "application_form": A standard application form on the page with input fields and submit controls.
    - "ats_account_gateway": Candidate sign-in or account creation is required before accessing the application form (e.g. Workday account login, password fields).
    - "external_ats": An enterprise ATS job details page (Workday, Greenhouse, Lever, SmartRecruiters, Taleo, etc.) with an Apply / Autofill trigger.
    - "job_description_page": A single job posting description with an Apply / Submit button.
-   - "job_listings_accordion": A directory of multiple job openings with accordions or expandable cards.
-   - "form_closed": An online form or job posting that is expired or no longer accepting responses. Direct email with Ref ID is recommended if an email exists.
+   - "job_listings_accordion": A directory of multiple job openings with accordions, cards, or position listings with Apply buttons.
+   - "form_closed": An online form or job posting that is expired or no longer accepting responses.
    - "email_instructions": A page instructing candidates to email their resume directly with a reference code.
 
 2. Extract Workflow & Match Details:

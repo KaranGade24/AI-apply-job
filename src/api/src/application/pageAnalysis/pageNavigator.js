@@ -61,94 +61,97 @@ export const navigatePortalWithAiDecision = async (page, analysis, context = nul
     }
 
     // 1. Action: Click Opening Accordion / Role Card and then click its inner "Apply" / "Autofill"
-    if (nextRecommendedAction === 'click_opening_apply' || pageType === 'job_listings_accordion') {
+    if (nextRecommendedAction === 'click_opening_apply' || pageType === 'job_listings_accordion' || (analysis?.openingsList && analysis.openingsList.length > 0)) {
       const roleTitle = effectiveRole.title || '';
-      let targetElement = null;
+      let targetApplyBtn = null;
+      let activePage = page;
+      let clicked = false;
 
-      // Step A: Locate the matching role element / accordion header
+      await logJobEvent('pageNavigator', 'SEARCH_ROLE_CARD', `Searching for opening card matching: "${roleTitle}"`);
+
+      // Strategy 1: Find container holding both the role title and an Apply button
       if (roleTitle) {
-        const titleLocators = [
-          page.locator(`text="${roleTitle}"`).first(),
-          page.locator(`:has-text("${roleTitle}")`).first(),
-          page.locator(`h1, h2, h3, h4, h5, button, a, div[class*="title" i], div[class*="header" i]`).filter({ hasText: roleTitle }).first(),
+        const cardSelectors = [
+          `//*[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), "${roleTitle.toLowerCase().slice(0, 15)}")]/ancestor-or-self::*[.//button[contains(., "Apply") or contains(., "apply")] or .//a[contains(., "Apply") or contains(., "apply")]][1]`,
+          `div:has-text("${roleTitle}")`,
+          `section:has-text("${roleTitle}")`,
+          `article:has-text("${roleTitle}")`,
+          `.card:has-text("${roleTitle}")`,
+          `[class*="position" i]:has-text("${roleTitle}")`,
+          `[class*="opening" i]:has-text("${roleTitle}")`,
+          `[class*="job" i]:has-text("${roleTitle}")`,
         ];
 
-        for (const loc of titleLocators) {
-          const visible = await loc.isVisible().catch(() => false);
-          if (visible) {
-            targetElement = loc;
+        for (const sel of cardSelectors) {
+          try {
+            const loc = sel.startsWith('//') ? page.locator(`xpath=${sel}`).first() : page.locator(sel).first();
+            if (await loc.isVisible().catch(() => false)) {
+              // Click to expand if it's an accordion header
+              await loc.click().catch(() => {});
+              await page.waitForTimeout(600);
+
+              const innerBtn = loc.locator('button:has-text("Apply"), a:has-text("Apply"), [role="button"]:has-text("Apply"), button, a.btn').first();
+              if (await innerBtn.isVisible().catch(() => false)) {
+                targetApplyBtn = innerBtn;
+                await logJobEvent('pageNavigator', 'MATCHED_ROLE_CARD', `Located dedicated Apply button inside card for: "${roleTitle}"`);
+                break;
+              }
+            }
+          } catch {
+            // continue
+          }
+        }
+      }
+
+      // Strategy 2: Fallback to role element or generic Apply button locators
+      if (!targetApplyBtn) {
+        const buttonText = customButtonText || 'Apply';
+        const fallbackLocators = [
+          page.locator(`[data-automation-id="apply-button"]`).first(),
+          page.locator(`button:has-text("${buttonText}")`).first(),
+          page.locator(`a:has-text("${buttonText}")`).first(),
+          page.locator(`button:has-text("Apply")`).first(),
+          page.locator(`a:has-text("Apply")`).first(),
+        ];
+
+        for (const loc of fallbackLocators) {
+          if (await loc.isVisible().catch(() => false)) {
+            targetApplyBtn = loc;
             break;
           }
         }
       }
 
-      // If matched role element found, click it to expand if accordion
-      if (targetElement) {
-        await logJobEvent('pageNavigator', 'CLICK_ROLE', `Expanding role card: "${roleTitle}"`);
-        await targetElement.click().catch(() => {});
-        await page.waitForTimeout(1200);
-      }
+      if (targetApplyBtn) {
+        await logJobEvent('pageNavigator', 'CLICK_APPLY', `Clicking Apply button for ${roleTitle}`);
 
-      // Step B: Locate the inner "Apply Now", "Apply", or AI target button
-      const buttonText = customButtonText || 'Apply';
-      const applyBtnLocators = [
-        targetElement
-          ? targetElement
-              .locator('..')
-              .locator('..')
-              .locator(`button:has-text("${buttonText}"), a:has-text("${buttonText}"), [role="button"]:has-text("${buttonText}")`)
-              .first()
-          : null,
-        targetElement
-          ? targetElement
-              .locator('..')
-              .locator(`button:has-text("${buttonText}"), a:has-text("${buttonText}"), [role="button"]:has-text("${buttonText}")`)
-              .first()
-          : null,
-        page.locator(`[data-automation-id="apply-button"]`).first(),
-        page.locator(`button:has-text("${buttonText}")`).first(),
-        page.locator(`a:has-text("${buttonText}")`).first(),
-        page.locator(`[role="button"]:has-text("${buttonText}")`).first(),
-        page.locator(`button:has-text("Apply")`).first(),
-        page.locator(`a:has-text("Apply")`).first(),
-      ].filter(Boolean);
-
-      let clicked = false;
-      let activePage = page;
-
-      for (const btnLoc of applyBtnLocators) {
-        const visible = await btnLoc.isVisible().catch(() => false);
-        if (visible) {
-          await logJobEvent('pageNavigator', 'CLICK_APPLY', `Clicking button: "${buttonText}" for ${roleTitle}`);
-
-          let newPagePromise = null;
-          if (context) {
-            newPagePromise = context.waitForEvent('page', { timeout: 6000 }).catch(() => null);
-          }
-
-          await btnLoc.click().catch(() => {});
-          clicked = true;
-
-          if (newPagePromise) {
-            const popupPage = await newPagePromise;
-            if (popupPage) {
-              await popupPage.waitForLoadState('domcontentloaded').catch(() => {});
-              activePage = popupPage;
-              await logJobEvent('pageNavigator', 'POPUP_OPENED', `New portal tab opened: ${popupPage.url()}`);
-            }
-          }
-
-          await activePage.waitForTimeout(2500);
-          break;
+        let newPagePromise = null;
+        if (context) {
+          newPagePromise = context.waitForEvent('page', { timeout: 6000 }).catch(() => null);
         }
-      }
 
-      if (clicked) {
+        await targetApplyBtn.scrollIntoViewIfNeeded().catch(() => {});
+        await targetApplyBtn.click({ timeout: 5000 }).catch(async () => {
+          await targetApplyBtn.click({ force: true, timeout: 3000 });
+        });
+        clicked = true;
+
+        if (newPagePromise) {
+          const popupPage = await newPagePromise;
+          if (popupPage) {
+            await popupPage.waitForLoadState('domcontentloaded').catch(() => {});
+            activePage = popupPage;
+            await logJobEvent('pageNavigator', 'POPUP_OPENED', `New portal tab opened: ${popupPage.url()}`);
+          }
+        }
+
+        await activePage.waitForTimeout(2500);
+
         return {
           success: true,
           newPage: activePage,
           navigated: true,
-          message: `Successfully clicked "${buttonText}" for ${roleTitle}`,
+          message: `Successfully clicked Apply for ${roleTitle}`,
         };
       }
     }

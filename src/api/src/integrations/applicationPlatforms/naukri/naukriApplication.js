@@ -25,6 +25,7 @@ import { navigatePortalWithAiDecision } from '../../../application/pageAnalysis/
 import { updateApplicationStatus, findApplicationById } from '../../../repositories/application.repository.js';
 import { JobApplication } from '../../../model/JobApplication.js';
 import { UserProfile } from '../../../model/UserProfile.js';
+import { Resume } from '../../../model/Resume.js';
 import { User } from '../../../model/User.js';
 import { Setting } from '../../../model/Setting.js';
 import { logJobEvent, logError } from '../../../utils/logger.js';
@@ -237,7 +238,7 @@ export const runNaukriApplication = async ({
         },
       });
 
-      // Execute multi-step autonomous portal loop (handling modals like "Start Your Application", "Autofill with Resume", "Apply Manually", and forms)
+      // Execute multi-step autonomous portal loop (handling modals like "Start Your Application", "Autofill with Resume", "Apply Manually", opening cards, and forms)
       for (let loopStep = 0; loopStep < 4; loopStep++) {
         const currentExtracted = await extractPageContent(activePage);
         const currentAnalysis = await classifyPageWithLlm(currentExtracted, job, userId);
@@ -252,14 +253,17 @@ export const runNaukriApplication = async ({
           },
         });
 
-        // Check if email instructions with reference ID or closed form fallback were detected
-        if (
-          (currentAnalysis.pageType === 'email_instructions' ||
-            currentAnalysis.pageType === 'form_closed' ||
-            currentAnalysis.nextRecommendedAction === 'send_email' ||
-            currentAnalysis.nextRecommendedAction === 'form_closed_fallback_email') &&
-          currentAnalysis.emailContact?.email
-        ) {
+        // Check if pure email instructions or closed form fallback (ONLY if no interactive openings/buttons)
+        const hasInteractiveOpenings =
+          (currentExtracted.openingsList && currentExtracted.openingsList.length > 0) ||
+          (currentExtracted.buttons && currentExtracted.buttons.length > 0);
+
+        const isPureEmailOnly =
+          currentAnalysis.pageType === 'form_closed' ||
+          currentAnalysis.nextRecommendedAction === 'form_closed_fallback_email' ||
+          (currentAnalysis.pageType === 'email_instructions' && !hasInteractiveOpenings);
+
+        if (isPureEmailOnly && currentAnalysis.emailContact?.email) {
           const refId = currentAnalysis.emailContact.referenceId || currentAnalysis.matchedRole?.referenceId;
           const subj = refId
             ? `Application: ${job.title} (Ref: ${refId})`
@@ -282,19 +286,64 @@ export const runNaukriApplication = async ({
         }
 
         // Check if application form is reached with input fields
-        if (currentExtracted.formFieldsCount > 0) {
-          const formInspection = await inspectForm(activePage);
+        const formInspection = await inspectForm(activePage);
+        if (formInspection.fields && formInspection.fields.length > 0) {
+          const userResumeDoc = await Resume.findOne({ userId }).sort({ createdAt: -1 }).catch(() => null);
+          const candidateResume = application.resume?.tailoredResumeData || userResumeDoc?.parsedData || {};
+          const userProfile = await UserProfile.findOne({ userId }).catch(() => null);
+
+          const { resolvedAnswers, missingQuestions } = await resolveAllFormAnswers(formInspection.fields, {
+            userAnswers: application.form?.answers || [],
+            userProfile: userProfile || {},
+            user: { username: userProfile?.fullName, email: userProfile?.email },
+            resumeData: candidateResume || {},
+            job,
+            applicationId,
+          });
+
+          await fillFormFields(activePage, formInspection.fields, resolvedAnswers, {
+            resumePdfPath: application.resume?.pdfPath,
+          });
+          await verifyFilledFields(activePage, resolvedAnswers);
+
+          const reviewFields = formInspection.fields.map((f) => {
+            const match = resolvedAnswers.find((a) => a.questionId === f.questionId || a.fieldId === f.fieldId);
+            return {
+              questionId: f.questionId,
+              fieldId: f.fieldId,
+              question: f.question,
+              type: f.type,
+              answer: match ? match.answer : '',
+              source: match ? match.source : 'profile',
+              options: f.options || [],
+              required: Boolean(f.required),
+              isTermsAgreement: Boolean(f.isTermsAgreement),
+            };
+          });
+
+          const currentStorageState = await BrowserManager.captureStorageState(context).catch(() => null);
+
           await JobApplication.findByIdAndUpdate(applicationId, {
-            status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
-            'form.requiresHuman': false,
-            'form.fields': formInspection.fields || [],
+            status: APPLICATION_STATUS.WAITING_FOR_FINAL_REVIEW,
+            'form.fields': formInspection.fields,
+            'form.answers': resolvedAnswers,
+            'form.reviewFields': reviewFields,
+            'form.missingQuestions': missingQuestions,
+            'form.isAccountCreation': Boolean(formInspection.isAccountCreation),
+            'workflow.agentState.pendingHumanAction': {
+              reason: 'Review filled form before final submission',
+              savedUrl: activePage.url(),
+              savedStorageState: currentStorageState,
+            },
           });
-          await updateApplicationStatus(applicationId, APPLICATION_STATUS.WAITING_FOR_REVIEW, {
-            logMessage: `Employer application form loaded with ${formInspection.fields?.length || currentExtracted.formFieldsCount} fields. Ready for candidate review.`,
+
+          await updateApplicationStatus(applicationId, APPLICATION_STATUS.WAITING_FOR_FINAL_REVIEW, {
+            logMessage: `Employer application form loaded with ${formInspection.fields.length} fields. Verified via DOM check. Ready for candidate review.`,
           });
+
           return {
-            status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
-            message: `Employer application form opened on ${activePage.url()}. Tailored resume ready.`,
+            status: APPLICATION_STATUS.WAITING_FOR_FINAL_REVIEW,
+            message: `Employer application form filled and verified on ${activePage.url()}. Ready for candidate review.`,
             pageAnalysis: currentAnalysis,
           };
         }
