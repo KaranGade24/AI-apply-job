@@ -4,7 +4,7 @@ import { MODEL_NAME, MODEL_TEMPERATURE, resolveUserAiSettings } from '../../cons
 import { tools } from '../tools/all.tools.js';
 
 /**
- * Returns a Gemini model instance tailored to the user's settings.
+ * Returns a Gemini model instance tailored to the user's settings with automated fallback.
  * @param {string} [userId]
  * @returns {Promise<ChatGoogleGenerativeAI>}
  */
@@ -13,10 +13,13 @@ export const getGeminiModel = async (userId) => {
     ? await resolveUserAiSettings(userId) 
     : { model: MODEL_NAME, temperature: MODEL_TEMPERATURE };
 
+  const targetModel = model || MODEL_NAME;
+
   return new ChatGoogleGenerativeAI({
-    model,
+    model: targetModel,
     apiKey: GEMINI_API_KEY,
     temperature,
+    maxRetries: 2,
   });
 };
 
@@ -25,6 +28,7 @@ export const geminiModel = new ChatGoogleGenerativeAI({
   model: MODEL_NAME,
   apiKey: GEMINI_API_KEY,
   temperature: MODEL_TEMPERATURE,
+  maxRetries: 2,
 });
 
 // Bind tools to the default model for legacy compatibility

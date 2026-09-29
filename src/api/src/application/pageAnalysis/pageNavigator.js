@@ -158,29 +158,26 @@ export const navigatePortalWithAiDecision = async (page, analysis, context = nul
 
         // Check if a 2-stage modal/dialog opened (Job Details Dialog containing an inner Apply button)
         const innerModalApply = await activePage.evaluate(() => {
-          const dialogs = Array.from(
-            document.querySelectorAll(
-              '[role="dialog"], [aria-modal="true"], .modal, [class*="modal" i], [class*="drawer" i], [class*="popup" i], div[style*="z-index"]'
-            )
-          );
-          const visibleDialog = dialogs.find((d) => {
-            const style = window.getComputedStyle(d);
-            return style.display !== 'none' && style.visibility !== 'hidden' && d.offsetHeight > 100;
+          // Check if there are currently any visible form inputs
+          const visibleInputs = Array.from(document.querySelectorAll('input:not([type="hidden"]), textarea, select')).filter((el) => {
+            const style = window.getComputedStyle(el);
+            return style.display !== 'none' && style.visibility !== 'hidden' && el.offsetHeight > 0;
           });
 
-          if (visibleDialog) {
-            const inputs = visibleDialog.querySelectorAll('input:not([type="hidden"]), textarea, select');
-            // If the dialog is just job description (0 inputs) and has an "Apply" button:
-            if (inputs.length === 0) {
-              const innerBtn = Array.from(visibleDialog.querySelectorAll('button, a, [role="button"]')).find((b) => {
-                const text = (b.textContent || b.value || '').trim().toLowerCase();
-                return text === 'apply' || text.includes('apply now') || text.includes('apply for this');
-              });
-              if (innerBtn) {
-                innerBtn.scrollIntoView({ behavior: 'instant', block: 'center' });
-                innerBtn.click();
-                return { clickedInner: true, btnText: innerBtn.textContent.trim() };
-              }
+          // If NO form inputs are open yet, but an inner Apply button is visible (e.g. green APPLY button in JD modal):
+          if (visibleInputs.length === 0) {
+            const allButtons = Array.from(document.querySelectorAll('button, a, [role="button"], input[type="button"]')).filter((b) => {
+              const style = window.getComputedStyle(b);
+              const text = (b.textContent || b.value || '').trim();
+              const isVis = style.display !== 'none' && style.visibility !== 'hidden' && b.offsetHeight > 0;
+              return isVis && (/^apply$/i.test(text) || /^apply now$/i.test(text) || /^apply for this/i.test(text));
+            });
+
+            if (allButtons.length > 0) {
+              const targetBtn = allButtons[allButtons.length - 1]; // Pick the topmost / inner modal button
+              targetBtn.scrollIntoView({ behavior: 'instant', block: 'center' });
+              targetBtn.click();
+              return { clickedInner: true, btnText: targetBtn.textContent.trim() };
             }
           }
           return { clickedInner: false };
