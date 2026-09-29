@@ -56,9 +56,9 @@ export const verifyFilledFields = async (page, resolvedAnswers = []) => {
       let currentValue = '';
       let isFilled = false;
 
-      if (inputType === 'checkbox' || inputType === 'radio') {
-        isFilled = el.checked;
-        currentValue = el.checked ? 'checked' : '';
+      if (inputType === 'checkbox' || inputType === 'radio' || el.getAttribute('role') === 'checkbox') {
+        isFilled = el.checked || el.getAttribute('aria-checked') === 'true' || el.getAttribute('data-checked') === 'true';
+        currentValue = isFilled ? 'checked' : '';
       } else if (tagName === 'select') {
         currentValue = el.value || '';
         isFilled = currentValue !== '' && !currentValue.toLowerCase().includes('select');

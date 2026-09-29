@@ -553,18 +553,38 @@ export const submitFinalUnknownApplicationService = async (applicationId, userId
 
     // 1. If candidate confirmed/edited answers, ensure they are batch filled in DOM and verified
     if (Array.isArray(payload.confirmedAnswers) && payload.confirmedAnswers.length > 0) {
+      const fieldMetaMap = new Map();
+      (application.form?.fields || []).forEach((f) => {
+        if (f.questionId) fieldMetaMap.set(f.questionId, f);
+        if (f.fieldId) fieldMetaMap.set(f.fieldId, f);
+      });
+      (application.form?.reviewFields || []).forEach((f) => {
+        if (f.questionId) fieldMetaMap.set(f.questionId, f);
+        if (f.fieldId) fieldMetaMap.set(f.fieldId, f);
+      });
+
       const currentInspection = await inspectForm(page);
       const currentFields =
         currentInspection.fields && currentInspection.fields.length > 0
           ? currentInspection.fields
           : application.form?.fields || [];
 
-      const formattedAnswers = payload.confirmedAnswers.map((a) => ({
-        questionId: a.questionId,
-        fieldId: a.fieldId || a.questionId,
-        answer: a.answer,
-        source: 'user',
-      }));
+      (currentFields || []).forEach((f) => {
+        if (f.questionId) fieldMetaMap.set(f.questionId, f);
+        if (f.fieldId) fieldMetaMap.set(f.fieldId, f);
+      });
+
+      const formattedAnswers = payload.confirmedAnswers.map((a) => {
+        const meta = fieldMetaMap.get(a.questionId) || fieldMetaMap.get(a.fieldId) || {};
+        return {
+          questionId: a.questionId,
+          fieldId: meta.fieldId || a.fieldId || a.questionId,
+          question: meta.question || a.question,
+          answer: a.answer,
+          source: 'user',
+          type: meta.type || a.type,
+        };
+      });
 
       await fillFormFields(page, currentFields, formattedAnswers, {
         resumePdfPath: application.resume?.pdfPath,
@@ -627,15 +647,32 @@ export const submitFinalUnknownApplicationService = async (applicationId, userId
         await logError('submitFinalUnknownApplicationService', errorMsg);
       }
     } else if (nextBtn) {
-      // Branch B: Multi-step form -> Click Next, wait, loop back to inspectForm for next step!
+      // Branch B: Multi-step form -> Click Next / Create Account, wait for transition, and inspect new step
       await logJobEvent('submitFinalUnknownApplication', 'CLICK_NEXT', `Advancing stepper: clicking "${nextBtn.text}"`);
       const nextLocator = page.locator(nextBtn.selector || `button:has-text("${nextBtn.text}")`).first();
       await nextLocator.click({ timeout: 5000 }).catch(async () => {
         await nextLocator.click({ force: true, timeout: 3000 });
       });
 
-      await page.waitForLoadState('domcontentloaded').catch(() => {});
+      // Wait for account creation request / stepper advancement to process
+      await page.waitForTimeout(1500);
+      await Promise.race([
+        page.waitForSelector('#input-4, #input-5, input[type="password"]', { state: 'detached', timeout: 12000 }).catch(() => null),
+        page.waitForSelector('[data-automation-id="page-header"], [data-automation-id="legalNameSection"], [data-automation-id="contactInformation"], input:not([type="password"])', { timeout: 12000 }).catch(() => null),
+        page.waitForLoadState('networkidle', { timeout: 12000 }).catch(() => null),
+      ]);
       await page.waitForTimeout(2500);
+
+      // Check if page showed "Account already exists" or "Sign In"
+      const currentText = (await page.evaluate(() => document.body.innerText || '')).toLowerCase();
+      if (/account already exists|already have an account|sign in/i.test(currentText)) {
+        const signInBtn = page.locator('button:has-text("Sign In"), a:has-text("Sign In"), [data-automation-id="signInSubmitButton"]').first();
+        const hasSignIn = await signInBtn.isVisible({ timeout: 2000 }).catch(() => false);
+        if (hasSignIn) {
+          await signInBtn.click().catch(() => {});
+          await page.waitForTimeout(2500);
+        }
+      }
 
       // STEP 1: inspectForm() ONCE on new step -> get ALL fields
       const nextStepInspection = await inspectForm(page);
