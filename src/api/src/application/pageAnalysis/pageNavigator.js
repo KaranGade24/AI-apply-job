@@ -218,13 +218,51 @@ export const navigatePortalWithAiDecision = async (page, analysis, context = nul
       }
     }
 
-    // 3. Action: Modal Dialogs (e.g. "Start Your Application", "Autofill with Resume", "Apply Manually")
+    // 3. Action: Modal Dialogs (e.g. "Start Your Application", "Autofill with Resume", "Apply Manually", or JD Modal "APPLY")
     if (
       pageType === 'modal_application_form' ||
+      nextRecommendedAction === 'fill_form' ||
       analysis?.modalState?.isOpen ||
       analysis?.authGateway?.hasAutofillWithResume ||
       analysis?.authGateway?.hasApplyManually
     ) {
+      // Check if there is an inner Apply button visible (like the green APPLY button in JD modal)
+      const clickedInner = await page.evaluate(() => {
+        const visibleInputs = Array.from(document.querySelectorAll('input:not([type="hidden"]), textarea, select')).filter((el) => {
+          const style = window.getComputedStyle(el);
+          return style.display !== 'none' && style.visibility !== 'hidden' && el.offsetHeight > 0;
+        });
+
+        // If no inputs yet on screen, click any visible button with text APPLY
+        if (visibleInputs.length === 0) {
+          const allButtons = Array.from(document.querySelectorAll('button, a, [role="button"], input[type="button"]')).filter((b) => {
+            const style = window.getComputedStyle(b);
+            const text = (b.textContent || b.value || '').trim();
+            const isVis = style.display !== 'none' && style.visibility !== 'hidden' && b.offsetHeight > 0;
+            return isVis && (/^apply$/i.test(text) || /^apply now$/i.test(text) || /^apply for this/i.test(text));
+          });
+
+          if (allButtons.length > 0) {
+            const btn = allButtons[allButtons.length - 1];
+            btn.scrollIntoView({ behavior: 'instant', block: 'center' });
+            btn.click();
+            return { clicked: true, text: btn.textContent.trim() };
+          }
+        }
+        return { clicked: false };
+      });
+
+      if (clickedInner.clicked) {
+        await logJobEvent('pageNavigator', 'CLICK_MODAL_APPLY', `Clicked inner modal Apply button: "${clickedInner.text}"`);
+        await page.waitForTimeout(2500);
+        return {
+          success: true,
+          newPage: page,
+          navigated: true,
+          message: `Clicked inner modal Apply button: "${clickedInner.text}"`,
+        };
+      }
+
       const modalLocators = [
         page.locator('[data-automation-id="autofill-with-resume"]').first(),
         page.locator('button:has-text("Autofill with Resume")').first(),
@@ -234,6 +272,8 @@ export const navigatePortalWithAiDecision = async (page, analysis, context = nul
         page.locator('a:has-text("Apply Manually")').first(),
         page.locator('[role="dialog"] button:has-text("Apply")').first(),
         page.locator('.modal button:has-text("Apply")').first(),
+        page.locator('button:has-text("APPLY")').first(),
+        page.locator('button:has-text("Apply")').first(),
       ];
 
       for (const loc of modalLocators) {
