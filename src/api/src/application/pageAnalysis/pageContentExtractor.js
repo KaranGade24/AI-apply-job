@@ -270,6 +270,10 @@ export const extractPageContent = async (page) => {
 
       // 11. Extract Candidate Account / Auth Gateway States
       const allButtons = Array.from(document.querySelectorAll('button, a, [role="button"]'));
+      const hasApplyButton = Boolean(
+        document.querySelector('[data-automation-id="apply-button"], a[data-automation-id="apply-button"]') ||
+        allButtons.some((b) => /^(?:apply|apply now)$/i.test((b.textContent || '').trim()))
+      );
       const hasAutofillWithResume = Boolean(
         document.querySelector('[data-automation-id="autofill-with-resume"]') ||
         allButtons.some((b) => /autofill with resume/i.test(b.textContent || ''))
@@ -281,11 +285,13 @@ export const extractPageContent = async (page) => {
       const hasSocialApply = Boolean(
         document.querySelector('[data-automation-id*="linkedin" i], [data-automation-id*="indeed" i], [class*="linkedin" i]')
       );
-      const isAuthRequired = Boolean(
-        document.querySelector('input[type="password"], [data-automation-id*="signIn" i], [data-automation-id*="createAccount" i]')
+      const isAuthRequired = !hasApplyButton && !hasAutofillWithResume && !hasApplyManually && Boolean(
+        document.querySelector('input[type="password"]') ||
+        ((url.includes('/login') || url.includes('/signin')) && !url.includes('/job/'))
       );
 
       const authGateway = {
+        hasApplyButton,
         isAuthRequired,
         hasSocialApply,
         hasAutofillWithResume,

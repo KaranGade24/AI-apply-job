@@ -517,39 +517,72 @@ export const runNaukriApplication = async ({
     let formInspection = await inspectForm(activePage);
 
     // If input fields do not exist or less than 3 exist (< 3):
-    // Analyze rendered page content with Gemini AI LLM and execute next recommended action!
+    // Run multi-step autonomous loop (handling Apply button, modals like "Start Your Application", "Autofill with Resume", "Apply Manually", and forms)
     if (!formInspection.isQuestionnairePresent || (formInspection.fields && formInspection.fields.length < 3)) {
       await updateApplicationStatus(applicationId, APPLICATION_STATUS.ANALYZING_PORTAL, {
-        logMessage: `Page has ${formInspection.fields?.length || 0} fields (< 3). Analyzing rendered page with AI LLM...`,
+        logMessage: `Analyzing rendered page with AI LLM to advance application...`,
       });
 
-      const extracted = await extractPageContent(activePage);
-      const analysis = await classifyPageWithLlm(extracted, job, userId);
+      for (let loopStep = 1; loopStep <= 4; loopStep++) {
+        const extracted = await extractPageContent(activePage);
+        const analysis = await classifyPageWithLlm(extracted, job, userId);
 
-      await JobApplication.findByIdAndUpdate(applicationId, {
-        pageAnalysis: {
-          ...analysis,
-          pageTitle: extracted.title,
-          currentUrl: activePage.url(),
-          analyzedAt: new Date(),
-        },
-      });
+        await JobApplication.findByIdAndUpdate(applicationId, {
+          pageAnalysis: {
+            ...analysis,
+            pageTitle: extracted.title,
+            currentUrl: activePage.url(),
+            analyzedAt: new Date(),
+          },
+        });
 
-      await logJobEvent(
-        'naukriApplication',
-        'LLM_PAGE_ANALYSIS',
-        `Page classified as "${analysis.pageType}". Recommended action: "${analysis.nextRecommendedAction}" - ${analysis.summary}`
-      );
+        await logJobEvent(
+          'naukriApplication',
+          'LLM_PAGE_ANALYSIS',
+          `Loop step ${loopStep}: Page classified as "${analysis.pageType}". Recommended action: "${analysis.nextRecommendedAction}" - ${analysis.summary}`
+        );
 
-      // Branch 1: Accordion openings or apply button recommended by LLM
-      if (
-        analysis.pageType === 'job_listings_accordion' ||
-        analysis.nextRecommendedAction === 'click_opening_apply' ||
-        analysis.nextRecommendedAction === 'click_description_apply' ||
-        analysis.pageType === 'job_description_page'
-      ) {
+        // Branch 1: Direct Email Instructions with Reference ID or fallback email
+        if (
+          (analysis.pageType === 'email_instructions' ||
+            analysis.pageType === 'form_closed' ||
+            analysis.nextRecommendedAction === 'send_email' ||
+            analysis.nextRecommendedAction === 'form_closed_fallback_email') &&
+          analysis.emailContact?.email
+        ) {
+          const refId = analysis.emailContact.referenceId || analysis.matchedRole?.referenceId;
+          const subj = refId
+            ? `Application: ${job.title} (Ref: ${refId})`
+            : `Application: ${job.title}`;
+
+          await JobApplication.findByIdAndUpdate(applicationId, {
+            applicationMethod: 'email',
+            'email.recipient': analysis.emailContact.email,
+            'email.subject': subj,
+            'email.body': `Dear Hiring Team,\n\nI am applying for the ${job.title} position${refId ? ` (Reference ID: ${refId})` : ''} at ${job.company}. My tailored ATS resume is attached for your review.\n\nBest regards,\n${userDoc?.fullName || 'Applicant'}`,
+            status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
+          });
+
+          return {
+            status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
+            isCompanySite: true,
+            emailContact: analysis.emailContact,
+            message: `Employer specifies direct email applications${refId ? ` with Ref ID ${refId}` : ''}. Outreach draft prepared for your review.`,
+          };
+        }
+
+        // Branch 2: Check if active page has questionnaire fields
+        formInspection = await inspectForm(activePage);
+        if (formInspection.isQuestionnairePresent && formInspection.fields && formInspection.fields.length >= 2) {
+          await JobApplication.findByIdAndUpdate(applicationId, {
+            'form.fields': formInspection.fields,
+          });
+          break; // proceed to questionnaire answering
+        }
+
+        // Branch 3: Advance portal navigation (Click Apply, Modal "Autofill with Resume" / "Apply Manually", Stepper "Next")
         await updateApplicationStatus(applicationId, APPLICATION_STATUS.APPLYING, {
-          logMessage: `AI matched action: ${analysis.summary || 'Navigating portal'}. Executing...`,
+          logMessage: `AI advancing ${analysis.pageType} (Action: ${analysis.nextRecommendedAction || 'click_button'})...`,
         });
 
         const navResult = await navigatePortalWithAiDecision(activePage, analysis, context);
@@ -564,12 +597,7 @@ export const runNaukriApplication = async ({
           if (allPages.length > 1) {
             const externalOrGooglePage = allPages.find((p) => {
               const u = (p.url() || '').toLowerCase();
-              return (
-                u.includes('docs.google.com/forms') ||
-                u.includes('forms.gle') ||
-                u.includes('accounts.google.com') ||
-                (!u.includes('naukri.com') && !u.includes('about:blank') && u !== activePage.url().toLowerCase())
-              );
+              return !u.includes('naukri.com') && !u.includes('about:blank') && u !== activePage.url().toLowerCase();
             });
             if (externalOrGooglePage) {
               activePage = externalOrGooglePage;
@@ -578,161 +606,37 @@ export const runNaukriApplication = async ({
           }
         }
 
-        // Check if navigated page is a Google Form
-        const newUrl = (activePage.url() || '').toLowerCase();
-        if (
-          newUrl.includes('docs.google.com/forms') ||
-          newUrl.includes('forms.gle') ||
-          newUrl.includes('accounts.google.com')
-        ) {
-          const googleAuth = await detectGoogleAuthState(activePage);
-          if (googleAuth.isSignInRequired) {
-            let extractedFormUrl = activePage.url();
-            if (extractedFormUrl.includes('continue=')) {
-              try {
-                const urlObj = new URL(extractedFormUrl);
-                const cont = urlObj.searchParams.get('continue');
-                if (cont) extractedFormUrl = decodeURIComponent(cont);
-              } catch {}
-            }
-
-            await JobApplication.findByIdAndUpdate(applicationId, {
-              applicationMethod: 'googleForm',
-              status: APPLICATION_STATUS.GOOGLE_LOGIN_REQUIRED,
-              'form.requiresHuman': true,
-              'form.humanReason': 'google_login_required',
-              googleFormResult: {
-                googleFormUrl: extractedFormUrl,
-                loginRequired: true,
-                loginUrl: googleAuth.currentUrl || activePage.url(),
-                submitted: false,
-                formClosed: false,
-              },
-            });
-
-            await updateApplicationStatus(applicationId, APPLICATION_STATUS.GOOGLE_LOGIN_REQUIRED, {
-              logMessage:
-                'Google Sign-In required to access employer Google Form. Connect Google session or open form.',
-            });
-
-            throw new appError(
-              'Google Sign-In is required to access the employer application form. Please connect your Google session in the modal or sign in, then retry.',
-              401
-            );
-          }
-
-          let actualFormUrl = activePage.url();
-          if (actualFormUrl.includes('continue=')) {
-            try {
-              const urlObj = new URL(actualFormUrl);
-              const cont = urlObj.searchParams.get('continue');
-              if (cont) actualFormUrl = decodeURIComponent(cont);
-            } catch {}
-          }
-
-          await BrowserManager.closeSafely({ page: activePage, context, browser });
-
-          const gfResult = await handleGoogleFormApplication({
-            applicationId,
-            jobId: job._id,
-            userId,
-            googleFormUrl: actualFormUrl,
-          });
-
-          if (gfResult.submitted) {
-            return {
-              status: APPLICATION_STATUS.APPLIED,
-              message: 'Application submitted successfully via Google Form!',
-              data: gfResult,
-            };
-          } else if (gfResult.loginRequired) {
-            throw new appError('Google Sign-In is required to access or submit this form.', 401);
-          } else {
-            throw new appError(gfResult.message || 'Google Form could not be submitted.', 400);
-          }
+        if (!navResult.navigated) {
+          break;
         }
-
-        // Re-inspect form on the newly reached page!
-        formInspection = await inspectForm(activePage);
       }
 
-      // Branch 2: Email Instructions with Reference ID or fallback email
-      else if (
-        (analysis.pageType === 'email_instructions' ||
-          analysis.pageType === 'form_closed' ||
-          analysis.nextRecommendedAction === 'send_email' ||
-          analysis.nextRecommendedAction === 'form_closed_fallback_email') &&
-        analysis.emailContact?.email
-      ) {
-        const refId = analysis.emailContact.referenceId || analysis.matchedRole?.referenceId;
-        const subj = refId
-          ? `Application: ${job.title} (Ref: ${refId})`
-          : `Application: ${job.title}`;
+      // Re-inspect form after the navigation loop
+      formInspection = await inspectForm(activePage);
+
+      // If still no questionnaire fields on the final page, return the analyzed portal state gracefully (never throw 400)
+      if (!formInspection.isQuestionnairePresent || !formInspection.fields || formInspection.fields.length === 0) {
+        const finalExtracted = await extractPageContent(activePage);
+        const finalAnalysis = await classifyPageWithLlm(finalExtracted, job, userId);
+
+        await updateApplicationStatus(applicationId, APPLICATION_STATUS.WAITING_FOR_REVIEW, {
+          logMessage: `Employer portal active: ${finalAnalysis.summary || activePage.url()}`,
+        });
 
         await JobApplication.findByIdAndUpdate(applicationId, {
-          applicationMethod: 'email',
-          'email.recipient': analysis.emailContact.email,
-          'email.subject': subj,
-          'email.body': `Dear Hiring Team,\n\nI am applying for the ${job.title} position${refId ? ` (Reference ID: ${refId})` : ''} at ${job.company}. My tailored ATS resume is attached for your review.\n\nBest regards,\n${userDoc?.fullName || 'Applicant'}`,
           status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
+          pageAnalysis: {
+            ...finalAnalysis,
+            pageTitle: finalExtracted.title,
+            currentUrl: activePage.url(),
+            analyzedAt: new Date(),
+          },
         });
 
         return {
           status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
-          isCompanySite: true,
-          emailContact: analysis.emailContact,
-          message: `Employer specifies direct email applications${refId ? ` with Ref ID ${refId}` : ''}. Outreach draft prepared for your review.`,
-        };
-      }
-
-      // Branch 3: Form Closed / Expired
-      else if (analysis.pageType === 'form_closed' || analysis.isFormClosed) {
-        await JobApplication.findByIdAndUpdate(applicationId, {
-          status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
-          'form.requiresHuman': true,
-          'form.humanReason': 'form_closed',
-          'form.closedMessage': analysis.closedFormMessage || 'Employer application form is closed.',
-        });
-
-        return {
-          status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
-          message: `Employer form is closed: ${analysis.closedFormMessage || 'No longer accepting responses.'}`,
-        };
-      }
-
-      // Branch 4: Already applied detected by LLM
-      else if (analysis.pageType === 'already_applied') {
-        await updateApplicationStatus(applicationId, APPLICATION_STATUS.APPLIED, {
-          logMessage: 'LLM verified application was already submitted on this portal.',
-        });
-        await JobApplication.findByIdAndUpdate(applicationId, {
-          status: APPLICATION_STATUS.APPLIED,
-          'form.submittedAt': new Date(),
-        });
-        return {
-          status: APPLICATION_STATUS.APPLIED,
-          message: 'Application confirmed as already submitted.',
-        };
-      }
-
-      // Branch 5: Human review / External login required
-      else if (
-        analysis.nextRecommendedAction === 'human_review' ||
-        analysis.pageType === 'login_required' ||
-        analysis.pageType === 'external_ats'
-      ) {
-        await updateApplicationStatus(applicationId, APPLICATION_STATUS.HUMAN_REQUIRED, {
-          logMessage: `Human action required: ${analysis.summary}`,
-        });
-        await JobApplication.findByIdAndUpdate(applicationId, {
-          status: APPLICATION_STATUS.HUMAN_REQUIRED,
-          'form.requiresHuman': true,
-          'form.humanReason': analysis.pageType === 'login_required' ? 'login_required' : 'portal_requires_review',
-          'form.humanMessage': analysis.summary || analysis.actionReason,
-        });
-        return {
-          status: APPLICATION_STATUS.HUMAN_REQUIRED,
-          message: analysis.summary || 'Employer portal requires direct action.',
+          message: finalAnalysis.summary || 'Employer career portal reached. Ready to proceed.',
+          pageAnalysis: finalAnalysis,
         };
       }
     }
