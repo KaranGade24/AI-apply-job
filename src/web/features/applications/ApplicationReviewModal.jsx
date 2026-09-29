@@ -120,6 +120,65 @@ export const ApplicationReviewModal = ({
       job?.applicationMethod ||
       (job?.hrEmail ? 'email' : job?.applicationUrl?.includes('forms.gle') || job?.applicationUrl?.includes('docs.google.com/forms') ? 'googleForm' : 'email');
 
+  // Compute robust effective review fields from form.reviewFields, form.fields, or form.answers
+  const effectiveReviewFields =
+    application?.form?.reviewFields && application.form.reviewFields.length > 0
+      ? application.form.reviewFields
+      : application?.form?.fields && application.form.fields.length > 0
+      ? application.form.fields.map((f) => {
+          const match = (application.form?.answers || []).find(
+            (a) => a.questionId === f.questionId || a.fieldId === f.fieldId
+          );
+          return {
+            questionId: f.questionId || f.fieldId || f.name,
+            fieldId: f.fieldId || f.questionId,
+            question: f.question || f.name || 'Question',
+            type: f.type || 'text',
+            answer: match ? match.answer : f.currentValue ?? '',
+            source: match ? match.source : 'profile',
+            options: f.options || [],
+            required: Boolean(f.required),
+            isTermsAgreement: Boolean(f.isTermsAgreement),
+          };
+        })
+      : application?.form?.answers && application.form.answers.length > 0
+      ? application.form.answers.map((a) => ({
+          questionId: a.questionId,
+          fieldId: a.fieldId || a.questionId,
+          question: a.question || a.questionId || 'Question',
+          type: 'text',
+          answer: a.answer ?? '',
+          source: a.source || 'profile',
+          options: [],
+          required: false,
+          isTermsAgreement: false,
+        }))
+      : [];
+
+  useEffect(() => {
+    if (application?.form?.missingQuestions?.length > 0) {
+      setMissingAnswers((prev) => {
+        const next = { ...prev };
+        application.form.missingQuestions.forEach((q) => {
+          if (next[q.questionId] === undefined) next[q.questionId] = q.answer ?? '';
+        });
+        return next;
+      });
+    }
+
+    if (effectiveReviewFields.length > 0) {
+      setReviewAnswers((prev) => {
+        const next = { ...prev };
+        effectiveReviewFields.forEach((f) => {
+          if (next[f.questionId] === undefined) {
+            next[f.questionId] = f.answer ?? '';
+          }
+        });
+        return next;
+      });
+    }
+  }, [application, effectiveReviewFields.length]);
+
   useEffect(() => {
     if (!isOpen || !job) return;
 
@@ -144,6 +203,39 @@ export const ApplicationReviewModal = ({
           setRecipient(existingApp.email?.recipient || job.hrEmail || '');
           setSubject(existingApp.email?.subject || `Application for ${job.title} - Candidate`);
           setBody(existingApp.email?.body || '');
+
+          if (existingApp.form?.missingQuestions) {
+            const initMissing = {};
+            existingApp.form.missingQuestions.forEach((q) => {
+              initMissing[q.questionId] = q.answer ?? '';
+            });
+            setMissingAnswers((prev) => ({ ...initMissing, ...prev }));
+          }
+
+          const fieldsToInit = existingApp.form?.reviewFields?.length
+            ? existingApp.form.reviewFields
+            : existingApp.form?.fields?.length
+            ? existingApp.form.fields.map((f) => {
+                const ans = (existingApp.form?.answers || []).find(
+                  (a) => a.questionId === f.questionId || a.fieldId === f.fieldId
+                );
+                return {
+                  questionId: f.questionId || f.fieldId || f.name,
+                  answer: ans?.answer ?? f.currentValue ?? '',
+                };
+              })
+            : (existingApp.form?.answers || []).map((a) => ({
+                questionId: a.questionId,
+                answer: a.answer,
+              }));
+
+          if (fieldsToInit.length > 0) {
+            const initReview = {};
+            fieldsToInit.forEach((f) => {
+              initReview[f.questionId] = f.answer ?? '';
+            });
+            setReviewAnswers((prev) => ({ ...initReview, ...prev }));
+          }
         }
 
         // Fetch or preview draft details
@@ -176,16 +268,34 @@ export const ApplicationReviewModal = ({
             if (draftRes.data.application.form?.missingQuestions) {
               const initMissing = {};
               draftRes.data.application.form.missingQuestions.forEach((q) => {
-                initMissing[q.questionId] = '';
+                initMissing[q.questionId] = q.answer ?? '';
               });
-              setMissingAnswers(initMissing);
+              setMissingAnswers((prev) => ({ ...initMissing, ...prev }));
             }
-            if (draftRes.data.application.form?.reviewFields) {
+
+            const draftFields = draftRes.data.application.form?.reviewFields?.length
+              ? draftRes.data.application.form.reviewFields
+              : draftRes.data.application.form?.fields?.length
+              ? draftRes.data.application.form.fields.map((f) => {
+                  const ans = (draftRes.data.application.form?.answers || []).find(
+                    (a) => a.questionId === f.questionId || a.fieldId === f.fieldId
+                  );
+                  return {
+                    questionId: f.questionId || f.fieldId || f.name,
+                    answer: ans?.answer ?? f.currentValue ?? '',
+                  };
+                })
+              : (draftRes.data.application.form?.answers || []).map((a) => ({
+                  questionId: a.questionId,
+                  answer: a.answer,
+                }));
+
+            if (draftFields.length > 0) {
               const initReview = {};
-              draftRes.data.application.form.reviewFields.forEach((f) => {
+              draftFields.forEach((f) => {
                 initReview[f.questionId] = f.answer ?? '';
               });
-              setReviewAnswers(initReview);
+              setReviewAnswers((prev) => ({ ...initReview, ...prev }));
             }
           }
         }
@@ -360,7 +470,391 @@ export const ApplicationReviewModal = ({
     }
   };
 
-  // Refill live browser form with updated user answers and re-inspect fields
+  // Checkpoint 1 & 2 Interactive Form Renderer for all channels (Naukri, Workday, Company Site, Portal)
+  const renderFormCheckpoints = () => {
+    const hasMissing = application?.form?.missingQuestions && application.form.missingQuestions.length > 0;
+    const hasReview = effectiveReviewFields && effectiveReviewFields.length > 0;
+
+    if (!hasMissing && !hasReview) return null;
+
+    return (
+      <div className="space-y-4">
+        {/* CHECKPOINT 1: Missing Information / Questions Required By Employer */}
+        {hasMissing && (
+          <div className="p-5 rounded-xl border border-amber-200 bg-amber-50/40 space-y-4 shadow-xs">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="px-2 py-0.5 bg-amber-600 text-white rounded text-[10px] font-black uppercase tracking-wider">
+                    Checkpoint 1
+                  </span>
+                  <h3 className="text-sm font-bold text-slate-900">
+                    Additional Information Required by Employer
+                  </h3>
+                </div>
+                <p className="text-xs text-slate-600 mt-1">
+                  The employer questionnaire includes questions that could not be verified from your profile or resume. Please provide honest answers below.
+                </p>
+              </div>
+              <span className="text-xs font-bold text-amber-800 bg-amber-100 px-2.5 py-1 rounded-full shrink-0">
+                {application.form.missingQuestions.length} Question{application.form.missingQuestions.length > 1 ? 's' : ''}
+              </span>
+            </div>
+
+            <div className="space-y-3.5 pt-1">
+              {application.form.missingQuestions.map((q) => (
+                <div key={q.questionId} className="p-3.5 bg-white rounded-xl border border-slate-200 space-y-2">
+                  <label className="block text-xs font-bold text-slate-800">
+                    {q.question} {q.required && <span className="text-red-500">*</span>}
+                  </label>
+
+                  {q.options && q.options.length > 0 ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                      {q.options.map((opt) => (
+                        <label
+                          key={opt}
+                          className={`flex items-center gap-2.5 p-2 rounded-lg border text-xs cursor-pointer transition-colors ${
+                            missingAnswers[q.questionId] === opt
+                              ? 'border-blue-500 bg-blue-50/60 font-semibold text-blue-900'
+                              : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                          }`}
+                        >
+                          <input
+                            type="radio"
+                            name={q.questionId}
+                            value={opt}
+                            checked={missingAnswers[q.questionId] === opt}
+                            onChange={() =>
+                              setMissingAnswers((prev) => ({
+                                ...prev,
+                                [q.questionId]: opt,
+                              }))
+                            }
+                            className="text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
+                          />
+                          <span>{opt}</span>
+                        </label>
+                      ))}
+                    </div>
+                  ) : q.type === 'textarea' ? (
+                    <textarea
+                      rows={3}
+                      value={missingAnswers[q.questionId] || ''}
+                      onChange={(e) =>
+                        setMissingAnswers((prev) => ({
+                          ...prev,
+                          [q.questionId]: e.target.value,
+                        }))
+                      }
+                      placeholder={q.placeholder || 'Type your answer...'}
+                      className="w-full text-xs p-2.5 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:outline-hidden"
+                    />
+                  ) : q.type === 'checkbox' ? (
+                    <label className="flex items-start gap-2.5 p-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(missingAnswers[q.questionId])}
+                        onChange={(e) =>
+                          setMissingAnswers((prev) => ({
+                            ...prev,
+                            [q.questionId]: e.target.checked,
+                          }))
+                        }
+                        className="mt-0.5 text-blue-600 focus:ring-blue-500 rounded"
+                      />
+                      <span className="text-xs text-slate-700 font-medium">
+                        {q.placeholder || q.question}
+                      </span>
+                    </label>
+                  ) : q.type === 'password' ? (
+                    <div className="space-y-2">
+                      <div className="relative">
+                        <input
+                          type={showPasswords[q.questionId] ? 'text' : 'password'}
+                          value={missingAnswers[q.questionId] || ''}
+                          onChange={(e) =>
+                            setMissingAnswers((prev) => ({
+                              ...prev,
+                              [q.questionId]: e.target.value,
+                            }))
+                          }
+                          placeholder={q.placeholder || 'Enter password...'}
+                          className="w-full text-xs p-2.5 pr-9 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:outline-hidden font-mono"
+                        />
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setShowPasswords((prev) => ({
+                              ...prev,
+                              [q.questionId]: !prev[q.questionId],
+                            }))
+                          }
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                        >
+                          {showPasswords[q.questionId] ? (
+                            <EyeOff className="w-4 h-4" />
+                          ) : (
+                            <Eye className="w-4 h-4" />
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <input
+                      type={q.type === 'number' ? 'number' : 'text'}
+                      value={missingAnswers[q.questionId] || ''}
+                      onChange={(e) =>
+                        setMissingAnswers((prev) => ({
+                          ...prev,
+                          [q.questionId]: e.target.value,
+                        }))
+                      }
+                      placeholder={q.placeholder || 'Type your answer...'}
+                      className="w-full text-xs p-2.5 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:outline-hidden"
+                    />
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <div className="flex justify-end pt-2">
+              <Button
+                size="sm"
+                loading={actionLoading}
+                onClick={handleSubmitMissingAnswers}
+                className="bg-amber-600 hover:bg-amber-700 text-white font-bold gap-1.5 cursor-pointer"
+              >
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                Submit Answers & Continue
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* CHECKPOINT 2: Final Application Review & Interactive Form Refill */}
+        {hasReview && (
+          <div className="p-5 rounded-xl border border-blue-200 bg-blue-50/30 space-y-4 shadow-xs">
+            <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="px-2 py-0.5 bg-blue-700 text-white rounded text-[10px] font-black uppercase tracking-wider">
+                    {application?.form?.isAccountCreation ? 'Candidate Account' : 'Checkpoint 2'}
+                  </span>
+                  <h3 className="text-sm font-bold text-slate-900">
+                    {application?.form?.isAccountCreation
+                      ? 'Review & Confirm Candidate Account Credentials'
+                      : 'Review & Edit AI-Filled Application Form'}
+                  </h3>
+                </div>
+                <p className="text-xs text-slate-600 mt-1">
+                  {application?.form?.isAccountCreation
+                    ? 'AI prefilled your candidate account information into the employer portal. You can inspect/edit password, verify terms agreement, and confirm to proceed.'
+                    : 'Below is the exact information AI detected and filled into the employer form. You can edit any field, click "Refill in Browser" to re-populate, or "Confirm & Continue".'}
+                </p>
+              </div>
+              <span className="text-xs font-bold text-blue-800 bg-blue-100 px-2.5 py-1 rounded-full shrink-0">
+                {effectiveReviewFields.length} Filled Fields
+              </span>
+            </div>
+
+            <div className="space-y-3 pt-1">
+              {effectiveReviewFields.map((field) => (
+                <div key={field.questionId} className="p-3.5 bg-white rounded-xl border border-slate-200 space-y-2 shadow-2xs">
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-blue-600 shrink-0" />
+                      <span>{field.question}</span>
+                      {field.required && <span className="text-red-500">*</span>}
+                    </label>
+                    <span
+                      className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider ${
+                        field.source === 'profile'
+                          ? 'bg-blue-100 text-blue-800'
+                          : field.source === 'resume'
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : field.source === 'setting'
+                          ? 'bg-purple-100 text-purple-800'
+                          : field.source === 'ai'
+                          ? 'bg-amber-100 text-amber-800'
+                          : 'bg-slate-100 text-slate-800'
+                      }`}
+                    >
+                      {field.source === 'profile'
+                        ? 'From Profile'
+                        : field.source === 'resume'
+                        ? 'From Resume'
+                        : field.source === 'setting'
+                        ? 'Auto Setting'
+                        : field.source === 'ai'
+                        ? 'AI Grounded'
+                        : 'User Edit'}
+                    </span>
+                  </div>
+
+                  {field.options && field.options.length > 0 ? (
+                    <div className="space-y-1.5">
+                      <select
+                        value={reviewAnswers[field.questionId] ?? field.answer ?? ''}
+                        onChange={(e) =>
+                          setReviewAnswers((prev) => ({
+                            ...prev,
+                            [field.questionId]: e.target.value,
+                          }))
+                        }
+                        className="w-full text-xs p-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:outline-hidden bg-white font-medium"
+                      >
+                        {field.options.map((opt) => (
+                          <option key={opt} value={opt}>
+                            {opt}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ) : field.type === 'textarea' ? (
+                    <textarea
+                      rows={3}
+                      value={reviewAnswers[field.questionId] ?? field.answer ?? ''}
+                      onChange={(e) =>
+                        setReviewAnswers((prev) => ({
+                          ...prev,
+                          [field.questionId]: e.target.value,
+                        }))
+                      }
+                      placeholder={`Enter ${field.question}...`}
+                      className="w-full text-xs p-2.5 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:outline-hidden leading-relaxed font-medium"
+                    />
+                  ) : field.type === 'radio' && field.options && field.options.length > 0 ? (
+                    <div className="flex flex-wrap gap-3 pt-1">
+                      {field.options.map((opt) => (
+                        <label key={opt} className="flex items-center gap-2 cursor-pointer text-xs text-slate-700">
+                          <input
+                            type="radio"
+                            name={`radio-${field.questionId}`}
+                            value={opt}
+                            checked={(reviewAnswers[field.questionId] ?? field.answer) === opt}
+                            onChange={() =>
+                              setReviewAnswers((prev) => ({
+                                ...prev,
+                                [field.questionId]: opt,
+                              }))
+                            }
+                            className="text-blue-600 focus:ring-blue-500"
+                          />
+                          <span>{opt}</span>
+                        </label>
+                      ))}
+                    </div>
+                  ) : field.type === 'checkbox' || field.isTermsAgreement ? (
+                    <label className="flex items-center gap-2.5 p-2.5 bg-slate-50 hover:bg-slate-100 rounded-lg border border-slate-200 cursor-pointer transition-colors">
+                      <input
+                        type="checkbox"
+                        checked={
+                          (reviewAnswers[field.questionId] ?? field.answer) === 'true' ||
+                          (reviewAnswers[field.questionId] ?? field.answer) === true
+                        }
+                        onChange={(e) =>
+                          setReviewAnswers((prev) => ({
+                            ...prev,
+                            [field.questionId]: e.target.checked ? 'true' : 'false',
+                          }))
+                        }
+                        className="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500"
+                      />
+                      <span className="text-xs font-semibold text-slate-800">
+                        {field.question} <span className="text-emerald-700 font-bold ml-1.5">(Accepted / Agreed)</span>
+                      </span>
+                    </label>
+                  ) : field.type === 'password' || /password/i.test(field.question || '') ? (
+                    <div className="space-y-1">
+                      <input
+                        type="text"
+                        value={reviewAnswers[field.questionId] ?? field.answer ?? ''}
+                        onChange={(e) =>
+                          setReviewAnswers((prev) => ({
+                            ...prev,
+                            [field.questionId]: e.target.value,
+                          }))
+                        }
+                        placeholder="Portal account password..."
+                        className="w-full text-xs p-2.5 font-mono bg-amber-50/50 rounded-lg border border-amber-300 focus:ring-2 focus:ring-amber-500 focus:outline-hidden font-bold text-slate-900"
+                      />
+                      <p className="text-[10px] text-amber-800 font-medium">
+                        Portal-compliant password (8+ chars, uppercase, lowercase, number, symbol). Password & Verify Password fields receive this identical verified password.
+                      </p>
+                    </div>
+                  ) : (
+                    <input
+                      type={field.type === 'number' ? 'number' : 'text'}
+                      value={reviewAnswers[field.questionId] ?? field.answer ?? ''}
+                      onChange={(e) =>
+                        setReviewAnswers((prev) => ({
+                          ...prev,
+                          [field.questionId]: e.target.value,
+                        }))
+                      }
+                      placeholder={`Enter ${field.question}...`}
+                      className="w-full text-xs p-2.5 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:outline-hidden font-medium"
+                    />
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-blue-200/60">
+              <div className="flex items-center gap-2">
+                <Button
+                  size="xs"
+                  variant="outline"
+                  loading={savingAnswers}
+                  onClick={handleSaveAnswers}
+                  className="text-slate-700 border-slate-300 hover:bg-slate-100 font-bold gap-1 cursor-pointer"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  <span>Save Changes</span>
+                </Button>
+
+                <Button
+                  size="xs"
+                  loading={refillingForm}
+                  onClick={handleRefillForm}
+                  className="bg-amber-600 hover:bg-amber-700 text-white font-bold gap-1 cursor-pointer shadow-2xs"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${refillingForm ? 'animate-spin' : ''}`} />
+                  <span>Refill & Re-verify in Browser</span>
+                </Button>
+              </div>
+
+              <Button
+                size="sm"
+                loading={actionLoading}
+                onClick={handleConfirmFinal}
+                className="bg-blue-600 hover:bg-blue-700 text-white font-bold gap-1.5 cursor-pointer shadow-xs"
+              >
+                {application.form?.isAccountCreation ? (
+                  <>
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>Create Account & Continue</span>
+                  </>
+                ) : application.form?.hasStepper && !application.form?.isFinalStep ? (
+                  <>
+                    <span>Confirm & Next Step (Step {application.form?.currentStep || 1} of {application.form?.totalSteps || 2})</span>
+                    <ChevronRight className="w-4 h-4" />
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>{isNaukri && !application.form?.portalUrl ? 'Confirm & Apply on Naukri' : 'Confirm & Apply on Employer Portal'}</span>
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // Refills the live browser form using user-edited answers and re-runs DOM verification
   const handleRefillForm = async () => {
     if (!application?._id) return;
     setRefillingForm(true);
@@ -1236,380 +1730,8 @@ export const ApplicationReviewModal = ({
                         </div>
                       </div>
 
-                      {/* CHECKPOINT 1: Missing Information / Questions Required By Employer */}
-                      {application?.form?.missingQuestions?.length > 0 && (
-                        <div className="p-5 rounded-xl border border-amber-200 bg-amber-50/40 space-y-4 shadow-xs">
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <span className="px-2 py-0.5 bg-amber-600 text-white rounded text-[10px] font-black uppercase tracking-wider">
-                                  Checkpoint 1
-                                </span>
-                                <h3 className="text-sm font-bold text-slate-900">
-                                  Additional Information Required by Employer
-                                </h3>
-                              </div>
-                              <p className="text-xs text-slate-600 mt-1">
-                                The employer questionnaire includes questions that could not be verified from your profile or resume. Please provide honest answers below.
-                              </p>
-                            </div>
-                            <span className="text-xs font-bold text-amber-800 bg-amber-100 px-2.5 py-1 rounded-full shrink-0">
-                              {application.form.missingQuestions.length} Question{application.form.missingQuestions.length > 1 ? 's' : ''}
-                            </span>
-                          </div>
-
-                          <div className="space-y-3.5 pt-1">
-                            {application.form.missingQuestions.map((q) => (
-                              <div key={q.questionId} className="p-3.5 bg-white rounded-xl border border-slate-200 space-y-2">
-                                <label className="block text-xs font-bold text-slate-800">
-                                  {q.question} {q.required && <span className="text-red-500">*</span>}
-                                </label>
-
-                                {q.options && q.options.length > 0 ? (
-                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
-                                    {q.options.map((opt) => (
-                                      <label
-                                        key={opt}
-                                        className={`flex items-center gap-2.5 p-2 rounded-lg border text-xs cursor-pointer transition-colors ${
-                                          missingAnswers[q.questionId] === opt
-                                            ? 'border-blue-500 bg-blue-50/60 font-semibold text-blue-900'
-                                            : 'border-slate-200 hover:bg-slate-50 text-slate-700'
-                                        }`}
-                                      >
-                                        <input
-                                          type="radio"
-                                          name={q.questionId}
-                                          value={opt}
-                                          checked={missingAnswers[q.questionId] === opt}
-                                          onChange={() =>
-                                            setMissingAnswers((prev) => ({
-                                              ...prev,
-                                              [q.questionId]: opt,
-                                            }))
-                                          }
-                                          className="text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
-                                        />
-                                        <span>{opt}</span>
-                                      </label>
-                                    ))}
-                                  </div>
-                                ) : q.type === 'textarea' ? (
-                                  <textarea
-                                    rows={3}
-                                    value={missingAnswers[q.questionId] || ''}
-                                    onChange={(e) =>
-                                      setMissingAnswers((prev) => ({
-                                        ...prev,
-                                        [q.questionId]: e.target.value,
-                                      }))
-                                    }
-                                    placeholder={q.placeholder || 'Type your answer...'}
-                                    className="w-full text-xs p-2.5 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:outline-hidden"
-                                  />
-                                ) : q.type === 'checkbox' ? (
-                                  <label className="flex items-start gap-2.5 p-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 cursor-pointer">
-                                    <input
-                                      type="checkbox"
-                                      checked={Boolean(missingAnswers[q.questionId])}
-                                      onChange={(e) =>
-                                        setMissingAnswers((prev) => ({
-                                          ...prev,
-                                          [q.questionId]: e.target.checked,
-                                        }))
-                                      }
-                                      className="mt-0.5 text-blue-600 focus:ring-blue-500 rounded"
-                                    />
-                                    <span className="text-xs text-slate-700 font-medium">
-                                      {q.placeholder || q.question}
-                                    </span>
-                                  </label>
-                                ) : q.type === 'password' ? (
-                                  <div className="space-y-2">
-                                    <div className="relative">
-                                      <input
-                                        type={showPasswords[q.questionId] ? 'text' : 'password'}
-                                        value={missingAnswers[q.questionId] || ''}
-                                        onChange={(e) =>
-                                          setMissingAnswers((prev) => ({
-                                            ...prev,
-                                            [q.questionId]: e.target.value,
-                                          }))
-                                        }
-                                        placeholder={q.placeholder || 'Enter password...'}
-                                        className="w-full text-xs p-2.5 pr-9 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:outline-hidden font-mono"
-                                      />
-                                      <button
-                                        type="button"
-                                        onClick={() =>
-                                          setShowPasswords((prev) => ({
-                                            ...prev,
-                                            [q.questionId]: !prev[q.questionId],
-                                          }))
-                                        }
-                                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
-                                      >
-                                        {showPasswords[q.questionId] ? (
-                                          <EyeOff className="w-4 h-4" />
-                                        ) : (
-                                          <Eye className="w-4 h-4" />
-                                        )}
-                                      </button>
-                                    </div>
-                                    {Array.isArray(q.requirements) && q.requirements.length > 0 && (
-                                      <div className="p-2.5 bg-amber-50/70 border border-amber-200 rounded-lg space-y-1 text-xs text-slate-700">
-                                        <span className="text-[11px] font-bold text-amber-900 block">
-                                          Password Requirements:
-                                        </span>
-                                        <ul className="text-[11px] text-slate-600 list-disc list-inside space-y-0.5">
-                                          {q.requirements.map((req, rIdx) => (
-                                            <li key={rIdx}>{req}</li>
-                                          ))}
-                                        </ul>
-                                      </div>
-                                    )}
-                                  </div>
-                                ) : (
-                                  <input
-                                    type={q.type === 'number' ? 'number' : 'text'}
-                                    value={missingAnswers[q.questionId] || ''}
-                                    onChange={(e) =>
-                                      setMissingAnswers((prev) => ({
-                                        ...prev,
-                                        [q.questionId]: e.target.value,
-                                      }))
-                                    }
-                                    placeholder={q.placeholder || 'Type your answer...'}
-                                    className="w-full text-xs p-2.5 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:outline-hidden"
-                                  />
-                                )}
-                              </div>
-                            ))}
-                          </div>
-
-                          <div className="flex justify-end pt-2">
-                            <Button
-                              size="sm"
-                              loading={actionLoading}
-                              onClick={handleSubmitMissingAnswers}
-                              className="bg-amber-600 hover:bg-amber-700 text-white font-bold gap-1.5 cursor-pointer"
-                            >
-                              <CheckCircle2 className="w-3.5 h-3.5" />
-                              Submit Answers & Continue
-                            </Button>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* CHECKPOINT 2: Final Application Review & Interactive Form Refill */}
-                      {application?.form?.reviewFields?.length > 0 && (
-                        <div className="p-5 rounded-xl border border-blue-200 bg-blue-50/30 space-y-4 shadow-xs">
-                          <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <span className="px-2 py-0.5 bg-blue-700 text-white rounded text-[10px] font-black uppercase tracking-wider">
-                                  Checkpoint 2
-                                </span>
-                                <h3 className="text-sm font-bold text-slate-900">
-                                  Review & Edit AI-Filled Application Form
-                                </h3>
-                              </div>
-                              <p className="text-xs text-slate-600 mt-1">
-                                Below is the exact information AI detected and filled into the employer's form. You can edit any field, click <strong>"Refill in Browser"</strong> to re-populate the live form and re-inspect, or <strong>"Confirm & Apply"</strong> to complete your application.
-                              </p>
-                            </div>
-                            <span className="text-xs font-bold text-blue-800 bg-blue-100 px-2.5 py-1 rounded-full shrink-0">
-                              {application.form.reviewFields.length} Filled Fields
-                            </span>
-                          </div>
-
-                          <div className="space-y-3 pt-1">
-                            {application.form.reviewFields.map((field) => (
-                              <div key={field.questionId} className="p-3.5 bg-white rounded-xl border border-slate-200 space-y-2 shadow-2xs">
-                                <div className="flex items-center justify-between gap-2">
-                                  <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                                    <span className="w-1.5 h-1.5 rounded-full bg-blue-600 shrink-0" />
-                                    <span>{field.question}</span>
-                                  </label>
-                                  <span
-                                    className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider ${
-                                      field.source === 'profile'
-                                        ? 'bg-blue-100 text-blue-800'
-                                        : field.source === 'resume'
-                                        ? 'bg-emerald-100 text-emerald-800'
-                                        : field.source === 'ai'
-                                        ? 'bg-amber-100 text-amber-800'
-                                        : 'bg-purple-100 text-purple-800'
-                                    }`}
-                                  >
-                                    {field.source === 'profile'
-                                      ? 'From Profile'
-                                      : field.source === 'resume'
-                                      ? 'From Resume'
-                                      : field.source === 'ai'
-                                      ? 'AI Grounded'
-                                      : 'User Edit'}
-                                  </span>
-                                </div>
-
-                                {field.options && field.options.length > 0 ? (
-                                  <div className="space-y-1.5">
-                                    <select
-                                      value={reviewAnswers[field.questionId] ?? field.answer ?? ''}
-                                      onChange={(e) =>
-                                        setReviewAnswers((prev) => ({
-                                          ...prev,
-                                          [field.questionId]: e.target.value,
-                                        }))
-                                      }
-                                      className="w-full text-xs p-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:outline-hidden bg-white font-medium"
-                                    >
-                                      {field.options.map((opt) => (
-                                        <option key={opt} value={opt}>
-                                          {opt}
-                                        </option>
-                                      ))}
-                                    </select>
-                                  </div>
-                                ) : field.type === 'textarea' ? (
-                                  <textarea
-                                    rows={3}
-                                    value={reviewAnswers[field.questionId] ?? field.answer ?? ''}
-                                    onChange={(e) =>
-                                      setReviewAnswers((prev) => ({
-                                        ...prev,
-                                        [field.questionId]: e.target.value,
-                                      }))
-                                    }
-                                    placeholder={`Enter ${field.question}...`}
-                                    className="w-full text-xs p-2.5 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:outline-hidden leading-relaxed font-medium"
-                                  />
-                                ) : field.type === 'radio' && field.options && field.options.length > 0 ? (
-                                  <div className="flex flex-wrap gap-3 pt-1">
-                                    {field.options.map((opt) => (
-                                      <label key={opt} className="flex items-center gap-2 cursor-pointer text-xs text-slate-700">
-                                        <input
-                                          type="radio"
-                                          name={`radio-${field.questionId}`}
-                                          value={opt}
-                                          checked={(reviewAnswers[field.questionId] ?? field.answer) === opt}
-                                          onChange={() =>
-                                            setReviewAnswers((prev) => ({
-                                              ...prev,
-                                              [field.questionId]: opt,
-                                            }))
-                                          }
-                                          className="text-blue-600 focus:ring-blue-500"
-                                        />
-                                        <span>{opt}</span>
-                                      </label>
-                                    ))}
-                                  </div>
-                                ) : field.type === 'checkbox' || field.isTermsAgreement ? (
-                                  <label className="flex items-center gap-2.5 p-2.5 bg-slate-50 hover:bg-slate-100 rounded-lg border border-slate-200 cursor-pointer transition-colors">
-                                    <input
-                                      type="checkbox"
-                                      checked={
-                                        (reviewAnswers[field.questionId] ?? field.answer) === 'true' ||
-                                        (reviewAnswers[field.questionId] ?? field.answer) === true
-                                      }
-                                      onChange={(e) =>
-                                        setReviewAnswers((prev) => ({
-                                          ...prev,
-                                          [field.questionId]: e.target.checked ? 'true' : 'false',
-                                        }))
-                                      }
-                                      className="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500"
-                                    />
-                                    <span className="text-xs font-semibold text-slate-800">
-                                      {field.question} <span className="text-emerald-700 font-bold ml-1.5">(Accepted / Agreed)</span>
-                                    </span>
-                                  </label>
-                                ) : field.type === 'password' || /password/i.test(field.question || '') ? (
-                                  <div className="space-y-1">
-                                    <input
-                                      type="text"
-                                      value={reviewAnswers[field.questionId] ?? field.answer ?? ''}
-                                      onChange={(e) =>
-                                        setReviewAnswers((prev) => ({
-                                          ...prev,
-                                          [field.questionId]: e.target.value,
-                                        }))
-                                      }
-                                      placeholder="Portal account password..."
-                                      className="w-full text-xs p-2.5 font-mono bg-amber-50/50 rounded-lg border border-amber-300 focus:ring-2 focus:ring-amber-500 focus:outline-hidden font-bold text-slate-900"
-                                    />
-                                    <p className="text-[10px] text-amber-800 font-medium">
-                                      Portal-compliant password (8+ chars, uppercase, lowercase, number, symbol). Password & Verify Password fields receive this identical verified password.
-                                    </p>
-                                  </div>
-                                ) : (
-                                  <input
-                                    type={field.type === 'number' ? 'number' : 'text'}
-                                    value={reviewAnswers[field.questionId] ?? field.answer ?? ''}
-                                    onChange={(e) =>
-                                      setReviewAnswers((prev) => ({
-                                        ...prev,
-                                        [field.questionId]: e.target.value,
-                                      }))
-                                    }
-                                    placeholder={`Enter ${field.question}...`}
-                                    className="w-full text-xs p-2.5 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:outline-hidden font-medium"
-                                  />
-                                )}
-                              </div>
-                            ))}
-                          </div>
-
-                          <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-blue-200/60">
-                            <div className="flex items-center gap-2">
-                              <Button
-                                size="xs"
-                                variant="outline"
-                                loading={savingAnswers}
-                                onClick={handleSaveAnswers}
-                                className="text-slate-700 border-slate-300 hover:bg-slate-100 font-bold gap-1 cursor-pointer"
-                              >
-                                <Save className="w-3.5 h-3.5" />
-                                <span>Save Changes</span>
-                              </Button>
-
-                              <Button
-                                size="xs"
-                                loading={refillingForm}
-                                onClick={handleRefillForm}
-                                className="bg-amber-600 hover:bg-amber-700 text-white font-bold gap-1 cursor-pointer shadow-2xs"
-                              >
-                                <RefreshCw className={`w-3.5 h-3.5 ${refillingForm ? 'animate-spin' : ''}`} />
-                                <span>Refill & Re-verify in Browser</span>
-                              </Button>
-                            </div>
-
-                            <Button
-                              size="sm"
-                              loading={actionLoading}
-                              onClick={handleConfirmFinal}
-                              className="bg-blue-600 hover:bg-blue-700 text-white font-bold gap-1.5 cursor-pointer shadow-xs"
-                            >
-                              {application.form?.isAccountCreation ? (
-                                <>
-                                  <CheckCircle2 className="w-3.5 h-3.5" />
-                                  <span>Create Account & Continue</span>
-                                </>
-                              ) : application.form?.hasStepper && !application.form?.isFinalStep ? (
-                                <>
-                                  <span>Confirm & Next Step (Step {application.form?.currentStep || 1} of {application.form?.totalSteps || 2})</span>
-                                  <ChevronRight className="w-4 h-4" />
-                                </>
-                              ) : (
-                                <>
-                                  <CheckCircle2 className="w-3.5 h-3.5" />
-                                  <span>{isNaukri && !application.form?.portalUrl ? 'Confirm & Apply on Naukri' : 'Confirm & Apply on Employer Portal'}</span>
-                                </>
-                              )}
-                            </Button>
-                          </div>
-                        </div>
-                      )}
+                      {/* Checkpoint 1 & 2 Interactive Forms */}
+                      {renderFormCheckpoints()}
 
                       {/* Tailored ATS Resume Summary */}
                       <div className="p-4 rounded-xl border border-slate-200 bg-white space-y-3">
@@ -1664,6 +1786,9 @@ export const ApplicationReviewModal = ({
                           </a>
                         </div>
                       </div>
+
+                      {/* Checkpoint 1 & 2 Interactive Forms for Company Site (Workday / ATS) */}
+                      {renderFormCheckpoints()}
 
                       {/* AI Page & Portal Intelligence Card */}
                       <div className="p-4 rounded-xl border border-indigo-200 bg-linear-to-br from-indigo-50/70 via-white to-purple-50/50 space-y-3.5 shadow-xs">

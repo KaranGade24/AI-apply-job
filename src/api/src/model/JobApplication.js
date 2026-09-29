@@ -101,6 +101,11 @@ const jobApplicationSchema = new mongoose.Schema(
     form: {
       currentStep: { type: Number, default: 1 },
       totalSteps: { type: Number, default: 1 },
+      isAccountCreation: { type: Boolean, default: false },
+      isFinalStep: { type: Boolean, default: false },
+      hasStepper: { type: Boolean, default: false },
+      portalUrl: { type: String, default: "" },
+      fields: [{ type: mongoose.Schema.Types.Mixed }],
       missingQuestions: [
         {
           questionId: { type: String, required: true },
@@ -132,6 +137,8 @@ const jobApplicationSchema = new mongoose.Schema(
           answer: { type: mongoose.Schema.Types.Mixed },
           source: { type: String, default: "profile" },
           options: [{ type: String }],
+          required: { type: Boolean, default: false },
+          isTermsAgreement: { type: Boolean, default: false },
         },
       ],
       requiresHuman: { type: Boolean, default: false },
