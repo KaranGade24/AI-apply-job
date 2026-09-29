@@ -265,16 +265,27 @@ export const inspectForm = async (page) => {
           });
         }
 
-        const fieldKey = el.name || el.id || autoId || `field_${counter}`;
+        const fieldKey = el.name || el.id || autoId || el.getAttribute('placeholder') || `field_${counter}`;
         if (!seenNames.has(fieldKey)) {
           seenNames.add(fieldKey);
+          const placeholder = el.getAttribute('placeholder') || '';
+          const fieldSelector = el.id
+            ? `#${el.id}`
+            : el.name
+            ? `[name="${el.name}"]`
+            : autoId
+            ? `[data-automation-id="${autoId}"]`
+            : placeholder
+            ? `[placeholder="${placeholder}"]`
+            : `input_${counter}`;
+
           fields.push({
-            fieldId: el.id ? `#${el.id}` : el.name ? `[name="${el.name}"]` : autoId ? `[data-automation-id="${autoId}"]` : `input_${counter}`,
-            name: el.name || el.id || autoId || '',
+            fieldId: fieldSelector,
+            name: el.name || el.id || autoId || placeholder || '',
             dataAutomationId: autoId,
             type: detectedType,
             question: questionText,
-            placeholder: el.getAttribute('placeholder') || '',
+            placeholder,
             required: el.required || el.getAttribute('aria-required') === 'true' || questionText.includes('*'),
             options,
             currentValue: el.value || '',

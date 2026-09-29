@@ -154,7 +154,46 @@ export const navigatePortalWithAiDecision = async (page, analysis, context = nul
           }
         }
 
-        await activePage.waitForTimeout(2000);
+        await activePage.waitForTimeout(1500);
+
+        // Check if a 2-stage modal/dialog opened (Job Details Dialog containing an inner Apply button)
+        const innerModalApply = await activePage.evaluate(() => {
+          const dialogs = Array.from(
+            document.querySelectorAll(
+              '[role="dialog"], [aria-modal="true"], .modal, [class*="modal" i], [class*="drawer" i], [class*="popup" i], div[style*="z-index"]'
+            )
+          );
+          const visibleDialog = dialogs.find((d) => {
+            const style = window.getComputedStyle(d);
+            return style.display !== 'none' && style.visibility !== 'hidden' && d.offsetHeight > 100;
+          });
+
+          if (visibleDialog) {
+            const inputs = visibleDialog.querySelectorAll('input:not([type="hidden"]), textarea, select');
+            // If the dialog is just job description (0 inputs) and has an "Apply" button:
+            if (inputs.length === 0) {
+              const innerBtn = Array.from(visibleDialog.querySelectorAll('button, a, [role="button"]')).find((b) => {
+                const text = (b.textContent || b.value || '').trim().toLowerCase();
+                return text === 'apply' || text.includes('apply now') || text.includes('apply for this');
+              });
+              if (innerBtn) {
+                innerBtn.scrollIntoView({ behavior: 'instant', block: 'center' });
+                innerBtn.click();
+                return { clickedInner: true, btnText: innerBtn.textContent.trim() };
+              }
+            }
+          }
+          return { clickedInner: false };
+        });
+
+        if (innerModalApply.clickedInner) {
+          await logJobEvent(
+            'pageNavigator',
+            'CLICK_MODAL_APPLY',
+            `Clicked inner modal Apply button: "${innerModalApply.btnText}" to open Application Form`
+          );
+          await activePage.waitForTimeout(2000);
+        }
 
         return {
           success: true,
