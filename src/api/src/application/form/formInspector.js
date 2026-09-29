@@ -149,6 +149,10 @@ export const inspectForm = async (page) => {
         // Skip truly hidden/invisible elements
         if (!isElementVisible(el)) return;
 
+        // Ignore newsletter, footer subscription, or cookie banner inputs
+        const isNewsletter = el.closest('footer, [class*="newsletter" i], [class*="subscribe" i], [id*="newsletter" i], [id*="subscribe" i], form[action*="newsletter" i], form[action*="subscribe" i], [class*="cookie" i]');
+        if (isNewsletter) return;
+
         const tagName = el.tagName.toLowerCase();
         const inputType = (el.getAttribute('type') || '').toLowerCase();
         const autoId = el.getAttribute('data-automation-id') || '';

@@ -466,6 +466,26 @@ export const confirmFinalApplicationService = async (applicationId, userId, payl
       `User confirmed final application ${applicationId}. Submitting...`
     );
 
+    // 1. Direct Email Application (e.g. InnoWise or employer specifies email / mailto)
+    if (
+      application.applicationMethod === 'email' ||
+      (application.email?.recipient && (!application.form?.fields || application.form.fields.length === 0))
+    ) {
+      await logJobEvent(
+        'confirmFinalApplicationService',
+        'SEND_EMAIL_APPLICATION',
+        `Dispatching direct application email to ${application.email.recipient}...`
+      );
+
+      return await sendDirectRoleEmailService(applicationId, userId, {
+        recipient: payload.emailRecipient || application.email.recipient,
+        subject: payload.emailSubject || application.email.subject,
+        body: payload.emailBody || application.email.body,
+        pdfPath: application.resume?.pdfPath,
+        roleTitle: application.jobId?.title,
+      });
+    }
+
     const hasExternalPortal = Boolean(
       application.workflow?.agentState?.pendingHumanAction?.savedUrl &&
       !application.workflow?.agentState?.pendingHumanAction?.savedUrl.includes('naukri.com')

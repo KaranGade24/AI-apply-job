@@ -27,13 +27,16 @@ const NEXT_BUTTON_SELECTORS = [
  * @returns {Promise<{ locator: import('playwright').Locator|null, isFinalSubmit: boolean, text: string }>}
  */
 export const findSubmitOrNextButton = async (page) => {
-  // Check submit selectors first
+  // Check submit selectors first, ignoring newsletter or subscription buttons
   for (const sel of SUBMIT_BUTTON_SELECTORS) {
     const loc = page.locator(sel).first();
     const visible = await loc.isVisible().catch(() => false);
     if (visible) {
-      const text = await loc.innerText().catch(() => 'Submit');
-      return { locator: loc, isFinalSubmit: true, text: text.trim() };
+      const text = (await loc.innerText().catch(() => 'Submit')).trim();
+      if (/subscribe|sign up for updates|newsletter/i.test(text)) {
+        continue;
+      }
+      return { locator: loc, isFinalSubmit: true, text };
     }
   }
 
@@ -42,8 +45,11 @@ export const findSubmitOrNextButton = async (page) => {
     const loc = page.locator(sel).first();
     const visible = await loc.isVisible().catch(() => false);
     if (visible) {
-      const text = await loc.innerText().catch(() => 'Next');
-      return { locator: loc, isFinalSubmit: false, text: text.trim() };
+      const text = (await loc.innerText().catch(() => 'Next')).trim();
+      if (/subscribe|sign up for updates|newsletter/i.test(text)) {
+        continue;
+      }
+      return { locator: loc, isFinalSubmit: false, text };
     }
   }
 
