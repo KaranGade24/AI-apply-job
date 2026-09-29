@@ -269,11 +269,27 @@ export const extractPageContent = async (page) => {
       });
 
       // 11. Extract Candidate Account / Auth Gateway States
+      const allButtons = Array.from(document.querySelectorAll('button, a, [role="button"]'));
+      const hasAutofillWithResume = Boolean(
+        document.querySelector('[data-automation-id="autofill-with-resume"]') ||
+        allButtons.some((b) => /autofill with resume/i.test(b.textContent || ''))
+      );
+      const hasApplyManually = Boolean(
+        document.querySelector('[data-automation-id="apply-manually"]') ||
+        allButtons.some((b) => /apply manually/i.test(b.textContent || ''))
+      );
+      const hasSocialApply = Boolean(
+        document.querySelector('[data-automation-id*="linkedin" i], [data-automation-id*="indeed" i], [class*="linkedin" i]')
+      );
+      const isAuthRequired = Boolean(
+        document.querySelector('input[type="password"], [data-automation-id*="signIn" i], [data-automation-id*="createAccount" i]')
+      );
+
       const authGateway = {
-        isAuthRequired: Boolean(document.querySelector('input[type="password"], [data-automation-id*="signIn" i], [data-automation-id*="createAccount" i]')),
-        hasSocialApply: Boolean(document.querySelector('[data-automation-id*="linkedin" i], [data-automation-id*="indeed" i], [class*="linkedin" i]')),
-        hasAutofillWithResume: Boolean(document.querySelector('[data-automation-id="autofill-with-resume"], button:has-text("Autofill with Resume")')),
-        hasApplyManually: Boolean(document.querySelector('[data-automation-id="apply-manually"], button:has-text("Apply Manually")')),
+        isAuthRequired,
+        hasSocialApply,
+        hasAutofillWithResume,
+        hasApplyManually,
       };
 
       // 12. Collect ALL interactive action buttons and links

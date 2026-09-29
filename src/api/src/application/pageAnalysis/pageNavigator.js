@@ -168,33 +168,74 @@ export const navigatePortalWithAiDecision = async (page, analysis, context = nul
       }
     }
 
-    // 3. Action: External ATS (Workday, Greenhouse, Lever, SmartRecruiters, Taleo, etc.)
+    // 3. Action: Modal Dialogs (e.g. "Start Your Application", "Autofill with Resume", "Apply Manually")
+    if (
+      pageType === 'modal_application_form' ||
+      analysis?.modalState?.isOpen ||
+      analysis?.authGateway?.hasAutofillWithResume ||
+      analysis?.authGateway?.hasApplyManually
+    ) {
+      const modalLocators = [
+        page.locator('[data-automation-id="autofill-with-resume"]').first(),
+        page.locator('button:has-text("Autofill with Resume")').first(),
+        page.locator('a:has-text("Autofill with Resume")').first(),
+        page.locator('[data-automation-id="apply-manually"]').first(),
+        page.locator('button:has-text("Apply Manually")').first(),
+        page.locator('a:has-text("Apply Manually")').first(),
+        page.locator('[role="dialog"] button:has-text("Apply")').first(),
+        page.locator('.modal button:has-text("Apply")').first(),
+      ];
+
+      for (const loc of modalLocators) {
+        const visible = await loc.isVisible().catch(() => false);
+        if (visible) {
+          const locText = (await loc.textContent().catch(() => 'Modal Action')) || 'Modal Action';
+          await logJobEvent('pageNavigator', 'CLICK_MODAL_OPTION', `Clicking modal action: "${locText.trim()}"`);
+          await loc.click().catch(() => {});
+          await page.waitForTimeout(3000);
+          return {
+            success: true,
+            newPage: page,
+            navigated: true,
+            message: `Clicked modal option: "${locText.trim()}"`,
+          };
+        }
+      }
+    }
+
+    // 4. Action: External ATS (Workday, Greenhouse, Lever, SmartRecruiters, Taleo, etc.)
     if (
       nextRecommendedAction === 'fill_form' ||
       nextRecommendedAction === 'click_button' ||
-      pageType === 'external_ats'
+      nextRecommendedAction === 'click_opening_apply' ||
+      pageType === 'external_ats' ||
+      pageType === 'multi_step_wizard'
     ) {
       const atsApplyLocators = [
-        page.locator('[data-automation-id="apply-button"]').first(),
         page.locator('[data-automation-id="autofill-with-resume"]').first(),
-        page.locator('[data-automation-id="apply-manually"]').first(),
-        page.locator('a[data-automation-id="apply-button"]').first(),
-        page.locator('button:has-text("Apply Manually")').first(),
-        page.locator('a:has-text("Apply Manually")').first(),
         page.locator('button:has-text("Autofill with Resume")').first(),
         page.locator('a:has-text("Autofill with Resume")').first(),
+        page.locator('[data-automation-id="apply-manually"]').first(),
+        page.locator('button:has-text("Apply Manually")').first(),
+        page.locator('a:has-text("Apply Manually")').first(),
+        page.locator('[data-automation-id="apply-button"]').first(),
+        page.locator('a[data-automation-id="apply-button"]').first(),
         page.locator('button:has-text("Apply Now")').first(),
         page.locator('a:has-text("Apply Now")').first(),
         page.locator('button:has-text("Apply")').first(),
         page.locator('a:has-text("Apply")').first(),
         page.locator('[role="button"]:has-text("Apply")').first(),
+        page.locator('button:has-text("Next")').first(),
+        page.locator('button:has-text("Continue")').first(),
+        page.locator('button:has-text("Save & Continue")').first(),
         page.locator('a[href*="apply"]').first(),
       ];
 
       for (const loc of atsApplyLocators) {
         const visible = await loc.isVisible().catch(() => false);
         if (visible) {
-          await logJobEvent('pageNavigator', 'CLICK_ATS_APPLY', 'Clicking ATS / Workday Apply button');
+          const btnName = (await loc.textContent().catch(() => 'ATS Action')) || 'ATS Action';
+          await logJobEvent('pageNavigator', 'CLICK_ATS_APPLY', `Clicking ATS action: "${btnName.trim()}"`);
 
           let newPagePromise = null;
           if (context) {
@@ -217,7 +258,7 @@ export const navigatePortalWithAiDecision = async (page, analysis, context = nul
             success: true,
             newPage: activePage,
             navigated: true,
-            message: 'Clicked ATS Apply button',
+            message: `Clicked ATS button: "${btnName.trim()}"`,
           };
         }
       }

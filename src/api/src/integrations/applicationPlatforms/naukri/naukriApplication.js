@@ -235,73 +235,122 @@ export const runNaukriApplication = async ({
         },
       });
 
-      // If portal renders a listings/accordion directory, job description, or external ATS page
-      if (
-        analysis.pageType === 'job_listings_accordion' ||
-        analysis.pageType === 'external_ats' ||
-        analysis.pageType === 'job_description_page' ||
-        analysis.nextRecommendedAction === 'click_opening_apply' ||
-        analysis.nextRecommendedAction === 'fill_form'
-      ) {
-        await updateApplicationStatus(applicationId, APPLICATION_STATUS.APPLYING, {
-          logMessage: `AI navigating ${analysis.pageType} portal for "${analysis.matchedRole?.title || job.title}"...`,
+      // Execute multi-step autonomous portal loop (handling modals like "Start Your Application", "Autofill with Resume", "Apply Manually", and forms)
+      for (let loopStep = 0; loopStep < 4; loopStep++) {
+        const currentExtracted = await extractPageContent(activePage);
+        const currentAnalysis = await classifyPageWithLlm(currentExtracted, job, userId);
+
+        await JobApplication.findByIdAndUpdate(applicationId, {
+          applicationMethod: 'company_site',
+          pageAnalysis: {
+            ...currentAnalysis,
+            pageTitle: currentExtracted.title,
+            currentUrl: activePage.url(),
+            analyzedAt: new Date(),
+          },
         });
 
-        const navResult = await navigatePortalWithAiDecision(activePage, analysis, context);
+        // Check if email instructions with reference ID or closed form fallback were detected
+        if (
+          (currentAnalysis.pageType === 'email_instructions' ||
+            currentAnalysis.pageType === 'form_closed' ||
+            currentAnalysis.nextRecommendedAction === 'send_email' ||
+            currentAnalysis.nextRecommendedAction === 'form_closed_fallback_email') &&
+          currentAnalysis.emailContact?.email
+        ) {
+          const refId = currentAnalysis.emailContact.referenceId || currentAnalysis.matchedRole?.referenceId;
+          const subj = refId
+            ? `Application: ${job.title} (Ref: ${refId})`
+            : `Application: ${job.title}`;
+
+          await JobApplication.findByIdAndUpdate(applicationId, {
+            applicationMethod: 'email',
+            'email.recipient': currentAnalysis.emailContact.email,
+            'email.subject': subj,
+            'email.body': `Dear Hiring Team,\n\nI am applying for the ${job.title} position${refId ? ` (Reference ID: ${refId})` : ''} at ${job.company}. My tailored ATS resume is attached for your review.\n\nBest regards,\n${userDoc?.fullName || 'Applicant'}`,
+            status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
+          });
+
+          return {
+            status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
+            isCompanySite: true,
+            emailContact: currentAnalysis.emailContact,
+            message: `Employer specifies email applications with Ref ID ${refId || 'N/A'}. Prepared outreach draft.`,
+          };
+        }
+
+        // Check if application form is reached with input fields
+        if (currentExtracted.formFieldsCount > 0) {
+          const formInspection = await inspectForm(activePage);
+          await JobApplication.findByIdAndUpdate(applicationId, {
+            status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
+            'form.requiresHuman': false,
+            'form.fields': formInspection.fields || [],
+          });
+          await updateApplicationStatus(applicationId, APPLICATION_STATUS.WAITING_FOR_REVIEW, {
+            logMessage: `Employer application form loaded with ${formInspection.fields?.length || currentExtracted.formFieldsCount} fields. Ready for candidate review.`,
+          });
+          return {
+            status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
+            message: `Employer application form opened on ${activePage.url()}. Tailored resume ready.`,
+            pageAnalysis: currentAnalysis,
+          };
+        }
+
+        // Check if candidate auth gateway / account creation is required
+        if (currentAnalysis.pageType === 'ats_account_gateway' || currentExtracted.authGateway?.isAuthRequired) {
+          await updateApplicationStatus(applicationId, APPLICATION_STATUS.WAITING_FOR_REVIEW, {
+            logMessage: `Employer requires candidate account sign-in on ${activePage.url()}`,
+          });
+          return {
+            status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
+            message: `Employer portal requires candidate account creation/login. Direct portal link and tailored profile ready.`,
+            pageAnalysis: currentAnalysis,
+          };
+        }
+
+        // Navigate / Click modal action or apply trigger
+        await updateApplicationStatus(applicationId, APPLICATION_STATUS.APPLYING, {
+          logMessage: `AI advancing ${currentAnalysis.pageType} (Action: ${currentAnalysis.nextRecommendedAction || 'navigate'})...`,
+        });
+
+        const navResult = await navigatePortalWithAiDecision(activePage, currentAnalysis, context);
         if (navResult.newPage) {
           activePage = navResult.newPage;
         }
         await activePage.waitForTimeout(2500);
 
-        // Check if a new tab or popup was opened in context
+        // Check if popup/redirect tab opened
         if (context) {
           const allPages = context.pages();
           if (allPages.length > 1) {
-            const externalOrGooglePage = allPages.find((p) => {
+            const extPage = allPages.find((p) => {
               const u = (p.url() || '').toLowerCase();
-              return (
-                u.includes('docs.google.com/forms') ||
-                u.includes('forms.gle') ||
-                u.includes('accounts.google.com') ||
-                (!u.includes('naukri.com') && !u.includes('about:blank') && u !== activePage.url().toLowerCase())
-              );
+              return !u.includes('naukri.com') && !u.includes('about:blank') && u !== activePage.url().toLowerCase();
             });
-            if (externalOrGooglePage) {
-              activePage = externalOrGooglePage;
+            if (extPage) {
+              activePage = extPage;
               await activePage.waitForLoadState('domcontentloaded').catch(() => {});
             }
           }
         }
+
+        if (!navResult.navigated) {
+          break;
+        }
       }
 
-      // If email instructions with reference ID or closed form fallback were detected
-      if (
-        (analysis.pageType === 'email_instructions' ||
-          analysis.pageType === 'form_closed' ||
-          analysis.nextRecommendedAction === 'send_email' ||
-          analysis.nextRecommendedAction === 'form_closed_fallback_email') &&
-        analysis.emailContact?.email
-      ) {
-        const refId = analysis.emailContact.referenceId || analysis.matchedRole?.referenceId;
-        const subj = refId
-          ? `Application: ${job.title} (Ref: ${refId})`
-          : `Application: ${job.title}`;
-
-        await JobApplication.findByIdAndUpdate(applicationId, {
-          applicationMethod: 'email',
-          'email.recipient': analysis.emailContact.email,
-          'email.subject': subj,
-          'email.body': `Dear Hiring Team,\n\nI am applying for the ${job.title} position${refId ? ` (Reference ID: ${refId})` : ''} at ${job.company}. My tailored ATS resume is attached for your review.\n\nBest regards,\n${userDoc?.fullName || 'Applicant'}`,
-          status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
-        });
-
-        return {
-          status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
-          isCompanySite: true,
-          emailContact: analysis.emailContact,
-          message: `Employer specifies email applications with Ref ID ${refId || 'N/A'}. Prepared outreach draft.`,
-        };
-      }
+      // Return final portal state gracefully
+      const finalExt = await extractPageContent(activePage);
+      const finalAnalysis = await classifyPageWithLlm(finalExt, job, userId);
+      await updateApplicationStatus(applicationId, APPLICATION_STATUS.WAITING_FOR_REVIEW, {
+        logMessage: `Employer portal active: ${finalAnalysis.summary || activePage.url()}`,
+      });
+      return {
+        status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
+        message: finalAnalysis.summary || 'Employer career portal reached. Ready to proceed.',
+        pageAnalysis: finalAnalysis,
+      };
     } else {
       if (!applyAction.hasApply) {
         // In case apply button has already turned into "Applied" or unavailable
@@ -923,41 +972,46 @@ export const runNaukriApplication = async ({
           };
         }
 
-        // Run LLM page classifier on the external company site / Workday
-        const extractedExt = await extractPageContent(activePage);
-        const analysisExt = await classifyPageWithLlm(extractedExt, job, userId);
+        // Run multi-step autonomous loop on the external company site / Workday
+        for (let loopStep = 0; loopStep < 4; loopStep++) {
+          const extractedExt = await extractPageContent(activePage);
+          const analysisExt = await classifyPageWithLlm(extractedExt, job, userId);
 
-        await JobApplication.findByIdAndUpdate(applicationId, {
-          applicationMethod: 'company_site',
-          pageAnalysis: {
-            ...analysisExt,
-            pageTitle: extractedExt.title,
-            currentUrl: activePage.url(),
-            analyzedAt: new Date(),
-          },
-        });
-
-        // If it's an ATS (e.g. Workday), single job description, or listings accordion, navigate and click Apply
-        if (
-          analysisExt.pageType === 'external_ats' ||
-          analysisExt.pageType === 'job_description_page' ||
-          analysisExt.pageType === 'job_listings_accordion' ||
-          analysisExt.nextRecommendedAction === 'click_opening_apply' ||
-          analysisExt.nextRecommendedAction === 'fill_form'
-        ) {
-          await updateApplicationStatus(applicationId, APPLICATION_STATUS.APPLYING, {
-            logMessage: `Clicking Apply on employer portal (${analysisExt.matchedRole?.title || job.title})...`,
+          await JobApplication.findByIdAndUpdate(applicationId, {
+            applicationMethod: 'company_site',
+            pageAnalysis: {
+              ...analysisExt,
+              pageTitle: extractedExt.title,
+              currentUrl: activePage.url(),
+              analyzedAt: new Date(),
+            },
           });
 
-          const navResult = await navigatePortalWithAiDecision(activePage, analysisExt, context);
-          if (navResult.newPage) {
-            activePage = navResult.newPage;
+          // Check if email instructions detected
+          if (
+            (analysisExt.pageType === 'email_instructions' ||
+              analysisExt.pageType === 'form_closed' ||
+              analysisExt.nextRecommendedAction === 'send_email' ||
+              analysisExt.nextRecommendedAction === 'form_closed_fallback_email') &&
+            analysisExt.emailContact?.email
+          ) {
+            const refId = analysisExt.emailContact.referenceId || analysisExt.matchedRole?.referenceId;
+            await JobApplication.findByIdAndUpdate(applicationId, {
+              applicationMethod: 'email',
+              'email.recipient': analysisExt.emailContact.email,
+              'email.subject': `Application: ${job.title}${refId ? ` (Ref: ${refId})` : ''}`,
+              'email.body': `Dear Hiring Team,\n\nI am applying for the ${job.title} position at ${job.company}.${refId ? ` (Reference ID: ${refId})` : ''}\n\nBest regards,\n${userDoc?.fullName || 'Applicant'}`,
+              status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
+            });
+            return {
+              status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
+              message: `Employer specifies direct email application. Draft ready for review.`,
+              pageAnalysis: analysisExt,
+            };
           }
-          await activePage.waitForTimeout(3000);
 
-          // Check if post-apply page is an application form or confirmed submission
-          const postExtNavExtracted = await extractPageContent(activePage);
-          if (postExtNavExtracted.formFieldsCount > 0) {
+          // Check if application form is loaded with fields
+          if (extractedExt.formFieldsCount > 0) {
             const formInspection = await inspectForm(activePage);
             await JobApplication.findByIdAndUpdate(applicationId, {
               status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
@@ -966,7 +1020,7 @@ export const runNaukriApplication = async ({
             });
 
             await updateApplicationStatus(applicationId, APPLICATION_STATUS.WAITING_FOR_REVIEW, {
-              logMessage: `Employer application form loaded with ${formInspection.fields?.length || postExtNavExtracted.formFieldsCount} fields. Ready for candidate review.`,
+              logMessage: `Employer application form loaded with ${formInspection.fields?.length || extractedExt.formFieldsCount} fields. Ready for candidate review.`,
             });
             return {
               status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
@@ -974,29 +1028,45 @@ export const runNaukriApplication = async ({
               pageAnalysis: analysisExt,
             };
           }
-        } else if (analysisExt.emailContact?.email) {
-          const refId = analysisExt.emailContact.referenceId || analysisExt.matchedRole?.referenceId;
-          await JobApplication.findByIdAndUpdate(applicationId, {
-            applicationMethod: 'email',
-            'email.recipient': analysisExt.emailContact.email,
-            'email.subject': `Application: ${job.title}${refId ? ` (Ref: ${refId})` : ''}`,
-            'email.body': `Dear Hiring Team,\n\nI am applying for the ${job.title} position at ${job.company}.${refId ? ` (Reference ID: ${refId})` : ''}\n\nBest regards,\n${userDoc?.fullName || 'Applicant'}`,
-            status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
+
+          // Check if candidate auth gateway required
+          if (analysisExt.pageType === 'ats_account_gateway' || extractedExt.authGateway?.isAuthRequired) {
+            await updateApplicationStatus(applicationId, APPLICATION_STATUS.WAITING_FOR_REVIEW, {
+              logMessage: `Employer requires candidate account sign-in on ${activePage.url()}`,
+            });
+            return {
+              status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
+              message: `Employer portal requires candidate account creation/login. Direct portal link and tailored profile ready.`,
+              pageAnalysis: analysisExt,
+            };
+          }
+
+          // Advance / Click action
+          await updateApplicationStatus(applicationId, APPLICATION_STATUS.APPLYING, {
+            logMessage: `AI advancing ${analysisExt.pageType} (Action: ${analysisExt.nextRecommendedAction || 'navigate'})...`,
           });
-          return {
-            status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
-            message: `Employer specifies direct email application. Draft ready for review.`,
-          };
+
+          const navResult = await navigatePortalWithAiDecision(activePage, analysisExt, context);
+          if (navResult.newPage) {
+            activePage = navResult.newPage;
+          }
+          await activePage.waitForTimeout(2500);
+
+          if (!navResult.navigated) {
+            break;
+          }
         }
 
-        // Return gracefully with the analyzed company portal state
+        // Return gracefully with the final analyzed company portal state
+        const finalExtAfterLoop = await extractPageContent(activePage);
+        const finalAnalysisAfterLoop = await classifyPageWithLlm(finalExtAfterLoop, job, userId);
         await updateApplicationStatus(applicationId, APPLICATION_STATUS.WAITING_FOR_REVIEW, {
-          logMessage: `Employer portal active: ${analysisExt.summary || activePage.url()}`,
+          logMessage: `Employer portal active: ${finalAnalysisAfterLoop.summary || activePage.url()}`,
         });
         return {
           status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
-          message: analysisExt.summary || 'Employer career portal reached. Ready to proceed.',
-          pageAnalysis: analysisExt,
+          message: finalAnalysisAfterLoop.summary || 'Employer career portal reached. Ready to proceed.',
+          pageAnalysis: finalAnalysisAfterLoop,
         };
       }
 
