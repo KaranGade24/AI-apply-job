@@ -23,6 +23,10 @@ import { runNaukriApplication } from "../integrations/applicationPlatforms/naukr
 import { runGoogleFormApplication } from "../application/methods/googleFormApplicationMethod.js";
 import { runUnknownApplicationMethod } from "../application/methods/unknownApplicationMethod.js";
 import { submitForm } from "../application/form/formSubmitter.js";
+import { inspectForm } from "../application/form/formInspector.js";
+import { fillFormFields } from "../application/form/formFiller.js";
+import { verifyFilledFields } from "../application/form/formVerifier.js";
+import { resolveAllFormAnswers } from "../application/answer/answerResolver.js";
 import { extractPageContent } from "../application/pageAnalysis/pageContentExtractor.js";
 import { classifyPageWithLlm } from "../application/pageAnalysis/pageClassifierLlm.js";
 import { navigatePortalWithAiDecision } from "../application/pageAnalysis/pageNavigator.js";
@@ -483,7 +487,8 @@ export const confirmFinalApplicationService = async (applicationId, userId, payl
 
 /**
  * Checkpoint 2 for generic UNKNOWN applications:
- * Clicks the final submit button on the review page, verifies submission, and marks APPLIED.
+ * Clicks Next to progress multi-step forms (looping back to inspectForm for the next step),
+ * or clicks the final submit button on the review page, verifies submission, and marks APPLIED.
  */
 export const submitFinalUnknownApplicationService = async (applicationId, userId, payload = {}) => {
   const application = await JobApplication.findById(applicationId).populate('jobId');
@@ -508,7 +513,7 @@ export const submitFinalUnknownApplicationService = async (applicationId, userId
   }
 
   await updateApplicationStatus(applicationId, APPLICATION_STATUS.SUBMITTING, {
-    logMessage: "Submitting application on employer portal after candidate confirmation...",
+    logMessage: "Processing application in browser after candidate confirmation...",
   });
 
   const savedUrl =
@@ -535,34 +540,195 @@ export const submitFinalUnknownApplicationService = async (applicationId, userId
     await page.goto(savedUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
     await page.waitForTimeout(2000);
 
-    const submitResult = await submitForm(page);
+    // 1. If candidate confirmed/edited answers, ensure they are batch filled in DOM and verified
+    if (Array.isArray(payload.confirmedAnswers) && payload.confirmedAnswers.length > 0) {
+      const currentInspection = await inspectForm(page);
+      const currentFields = currentInspection.fields || [];
+      const formattedAnswers = payload.confirmedAnswers.map((a) => ({
+        questionId: a.questionId,
+        fieldId: a.fieldId || a.questionId,
+        answer: a.answer,
+        source: 'user',
+      }));
 
-    if (submitResult.submitted && (submitResult.successDetected || !submitResult.errorMessage)) {
-      await updateApplicationStatus(applicationId, APPLICATION_STATUS.APPLIED, {
-        logMessage: "Application confirmed and successfully submitted to employer portal!",
+      await fillFormFields(page, currentFields, formattedAnswers, {
+        resumePdfPath: application.resume?.pdfPath,
+      });
+      await verifyFilledFields(page, formattedAnswers);
+    }
+
+    // 2. inspectForm() ONCE to check current step buttons & state
+    const formInspection = await inspectForm(page);
+    const buttons = formInspection.buttons || [];
+    const nextBtn = buttons.find((b) => b.type === 'create_account' || b.type === 'next');
+    const submitBtn = buttons.find((b) => b.type === 'submit');
+
+    const isFinalStep =
+      (!nextBtn && Boolean(submitBtn)) ||
+      (formInspection.stepperState?.hasStepper &&
+        formInspection.stepperState?.currentStep >= formInspection.stepperState?.totalSteps) ||
+      /review/i.test(formInspection.stepperState?.activeStepName || '');
+
+    // Branch A: Final Step -> Submit application
+    if (isFinalStep && submitBtn) {
+      await logJobEvent('submitFinalUnknownApplication', 'FINAL_SUBMIT', `Clicking final submit button...`);
+      const submitResult = await submitForm(page);
+
+      if (submitResult.submitted && (submitResult.successDetected || !submitResult.errorMessage)) {
+        await updateApplicationStatus(applicationId, APPLICATION_STATUS.APPLIED, {
+          logMessage: "Application confirmed and successfully submitted to employer portal!",
+        });
+
+        await JobApplication.findByIdAndUpdate(applicationId, {
+          'form.submittedAt': new Date(),
+          status: APPLICATION_STATUS.APPLIED,
+        });
+
+        await logJobEvent(
+          'submitFinalUnknownApplicationService',
+          'APPLIED',
+          `Application ${applicationId} submitted successfully.`
+        );
+      } else {
+        const errorMsg = submitResult.errorMessage || "Submission button clicked but confirmation not detected.";
+        await updateApplicationStatus(applicationId, APPLICATION_STATUS.WAITING_FOR_FINAL_REVIEW, {
+          logMessage: `Submission issue: ${errorMsg}. Please review.`,
+        });
+        await logError('submitFinalUnknownApplicationService', errorMsg);
+      }
+    } else if (nextBtn) {
+      // Branch B: Multi-step form -> Click Next, wait, loop back to inspectForm for next step!
+      await logJobEvent('submitFinalUnknownApplication', 'CLICK_NEXT', `Advancing stepper: clicking "${nextBtn.text}"`);
+      const nextLocator = page.locator(nextBtn.selector || `button:has-text("${nextBtn.text}")`).first();
+      await nextLocator.click({ timeout: 5000 }).catch(async () => {
+        await nextLocator.click({ force: true, timeout: 3000 });
       });
 
-      await JobApplication.findByIdAndUpdate(applicationId, {
-        'form.submittedAt': new Date(),
-        status: APPLICATION_STATUS.APPLIED,
-      });
+      await page.waitForLoadState('domcontentloaded').catch(() => {});
+      await page.waitForTimeout(2500);
 
-      await logJobEvent(
-        'submitFinalUnknownApplicationService',
-        'APPLIED',
-        `Application ${applicationId} submitted successfully.`
-      );
-    } else {
-      const errorMsg = submitResult.errorMessage || "Submission button clicked but confirmation not detected.";
-      await updateApplicationStatus(applicationId, APPLICATION_STATUS.WAITING_FOR_FINAL_REVIEW, {
-        logMessage: `Submission issue: ${errorMsg}. Please review.`,
-      });
-      await logError('submitFinalUnknownApplicationService', errorMsg);
+      // STEP 1: inspectForm() ONCE on new step -> get ALL fields
+      const nextStepInspection = await inspectForm(page);
+      const nextStepFields = nextStepInspection.fields || [];
+
+      if (nextStepFields.length > 0) {
+        // STEP 2: Resolve answers: deterministic profile/resume + ONE batch LLM call for subjective questions
+        const candidateResume = application.resume?.tailoredResumeData || (await getActiveResumeByUserId(userId));
+        const userProfile = await findUserProfileByUserId(userId);
+
+        const { resolvedAnswers, missingQuestions } = await resolveAllFormAnswers(nextStepFields, {
+          userAnswers: application.form?.answers || [],
+          userProfile: userProfile || {},
+          user: { username: userProfile?.fullName, email: userProfile?.email },
+          resumeData: candidateResume || {},
+          job: application.jobId,
+          applicationId,
+        });
+
+        // STEP 3: If any unresolved required fields, pause and send to user
+        if (missingQuestions.length > 0) {
+          const newStorageState = await BrowserManager.captureStorageState(context).catch(() => null);
+          await JobApplication.findByIdAndUpdate(applicationId, {
+            'form.fields': nextStepFields,
+            'form.answers': resolvedAnswers,
+            'form.missingQuestions': missingQuestions,
+            'form.currentStep': nextStepInspection.stepperState?.currentStep || 2,
+            'form.totalSteps': nextStepInspection.stepperState?.totalSteps || 2,
+            status: APPLICATION_STATUS.WAITING_FOR_USER,
+            'workflow.agentState.pendingHumanAction': {
+              reason: 'Unresolved questions require candidate input',
+              savedUrl: page.url(),
+              savedStorageState: newStorageState || savedStorageState,
+            },
+          });
+
+          await updateApplicationStatus(applicationId, APPLICATION_STATUS.WAITING_FOR_USER, {
+            logMessage: `${missingQuestions.length} questions on next step require your input.`,
+          });
+
+          return await findApplicationById(applicationId);
+        }
+
+        // STEP 4: Batch fill ALL fields via Playwright
+        await fillFormFields(page, nextStepFields, resolvedAnswers, {
+          resumePdfPath: application.resume?.pdfPath,
+        });
+
+        // STEP 5: Verify ALL fields filled via DOM check (NO LLM)
+        const verification = await verifyFilledFields(page, resolvedAnswers);
+        if (!verification.allFilled && verification.emptyFields?.length > 0) {
+          // Retry empty fields once
+          const retryAnswers = resolvedAnswers.filter((a) =>
+            verification.emptyFields.some((e) => e.fieldId === a.fieldId || e.questionId === a.questionId)
+          );
+          if (retryAnswers.length > 0) {
+            await fillFormFields(page, nextStepFields, retryAnswers, {
+              resumePdfPath: application.resume?.pdfPath,
+            });
+            await verifyFilledFields(page, retryAnswers);
+          }
+        }
+
+        // STEP 6: Send all filled questions to user in frontend to verify filled info is correct or need to edit
+        const nextReviewFields = nextStepFields.map((f) => {
+          const match = resolvedAnswers.find((a) => a.questionId === f.questionId || a.fieldId === f.fieldId);
+          return {
+            questionId: f.questionId,
+            fieldId: f.fieldId,
+            question: f.question,
+            type: f.type,
+            answer: match ? match.answer : '',
+            source: match ? match.source : 'profile',
+            options: f.options || [],
+            required: Boolean(f.required),
+          };
+        });
+
+        const nextButtons = nextStepInspection.buttons || [];
+        const isNextStepFinal =
+          (!nextButtons.some((b) => b.type === 'next' || b.type === 'create_account') &&
+            Boolean(nextButtons.some((b) => b.type === 'submit'))) ||
+          (nextStepInspection.stepperState?.hasStepper &&
+            nextStepInspection.stepperState?.currentStep >= nextStepInspection.stepperState?.totalSteps);
+
+        const newStorageState = await BrowserManager.captureStorageState(context).catch(() => null);
+
+        await JobApplication.findByIdAndUpdate(applicationId, {
+          'form.fields': nextStepFields,
+          'form.answers': resolvedAnswers,
+          'form.reviewFields': nextReviewFields,
+          'form.missingQuestions': [],
+          'form.currentStep': nextStepInspection.stepperState?.currentStep || 2,
+          'form.totalSteps': nextStepInspection.stepperState?.totalSteps || 2,
+          'form.isFinalStep': isNextStepFinal,
+          status: APPLICATION_STATUS.WAITING_FOR_FINAL_REVIEW,
+          'workflow.agentState.pendingHumanAction': {
+            reason: 'Review filled step before continuing',
+            savedUrl: page.url(),
+            savedStorageState: newStorageState || savedStorageState,
+          },
+        });
+
+        await updateApplicationStatus(applicationId, APPLICATION_STATUS.WAITING_FOR_FINAL_REVIEW, {
+          logMessage: `Next step (${nextStepInspection.stepperState?.currentStep || 2}) filled and verified via DOM check. Awaiting candidate review/edit before continuing.`,
+        });
+      } else {
+        // If no fields on page after Next, check if submission succeeded
+        if (nextStepInspection.isAlreadyApplied) {
+          await updateApplicationStatus(applicationId, APPLICATION_STATUS.APPLIED, {
+            logMessage: "Application confirmed and successfully submitted to employer portal!",
+          });
+          await JobApplication.findByIdAndUpdate(applicationId, {
+            'form.submittedAt': new Date(),
+            status: APPLICATION_STATUS.APPLIED,
+          });
+        }
+      }
     }
   } catch (err) {
     await logError('submitFinalUnknownApplicationService', err.message);
     await updateApplicationStatus(applicationId, APPLICATION_STATUS.WAITING_FOR_FINAL_REVIEW, {
-      logMessage: `Error submitting application: ${err.message}`,
+      logMessage: `Error processing application: ${err.message}`,
     });
   } finally {
     await BrowserManager.closeSafely({ page, context, browser });
@@ -610,6 +776,95 @@ export const saveEditedAnswersService = async (applicationId, userId, answers = 
 };
 
 /**
+ * Refills unknown application form in live browser with user's updated answers and re-verifies via DOM check
+ */
+export const refillUnknownApplicationFormService = async (applicationId, userId, answers = []) => {
+  const application = await JobApplication.findById(applicationId).populate('jobId');
+  if (!application) throw new appError("Application not found", 404);
+
+  const savedUrl =
+    application.workflow?.agentState?.pendingHumanAction?.savedUrl ||
+    application.jobId?.applicationUrl ||
+    application.jobId?.sourceUrl;
+
+  const savedStorageState =
+    application.workflow?.agentState?.pendingHumanAction?.savedStorageState || null;
+
+  let browser = null;
+  let context = null;
+  let page = null;
+
+  try {
+    const session = await BrowserManager.launchWithSession({
+      storageState: savedStorageState,
+      headless: true,
+    });
+    browser = session.browser;
+    context = session.context;
+    page = session.page;
+
+    await page.goto(savedUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await page.waitForTimeout(1500);
+
+    // 1. inspectForm() ONCE to get ALL fields
+    const formInspection = await inspectForm(page);
+    const formFields = formInspection.fields || [];
+
+    // 2. Format answers map
+    const formattedAnswers = answers.map((a) => ({
+      questionId: a.questionId,
+      fieldId: a.fieldId || a.questionId,
+      answer: a.answer,
+      source: 'user',
+    }));
+
+    // 3. Batch fill ALL fields via Playwright
+    await fillFormFields(page, formFields, formattedAnswers, {
+      resumePdfPath: application.resume?.pdfPath,
+    });
+
+    // 4. Verify ALL fields filled (DOM check, NO LLM)
+    const verification = await verifyFilledFields(page, formattedAnswers);
+
+    // 5. Update reviewFields
+    const updatedReview = formFields.map((f) => {
+      const match = formattedAnswers.find((a) => a.questionId === f.questionId || a.fieldId === f.fieldId);
+      const existing = (application.form?.reviewFields || []).find((r) => r.questionId === f.questionId);
+      return {
+        questionId: f.questionId,
+        fieldId: f.fieldId,
+        question: f.question,
+        type: f.type,
+        answer: match ? match.answer : existing ? existing.answer : '',
+        source: match ? 'user' : existing ? existing.source : 'profile',
+        options: f.options || [],
+        required: Boolean(f.required),
+      };
+    });
+
+    const newStorageState = await BrowserManager.captureStorageState(context).catch(() => null);
+
+    await JobApplication.findByIdAndUpdate(applicationId, {
+      'form.fields': formFields,
+      'form.reviewFields': updatedReview,
+      'form.answers': formattedAnswers,
+      'workflow.agentState.pendingHumanAction.savedStorageState': newStorageState || savedStorageState,
+      'workflow.agentState.pendingHumanAction.savedUrl': page.url(),
+    });
+
+    await logJobEvent(
+      'refillUnknownApplicationFormService',
+      'REFILL_COMPLETE',
+      `Form refilled. DOM check: ${verification.filledCount}/${formFields.length} verified filled (zero LLM).`
+    );
+  } finally {
+    await BrowserManager.closeSafely({ page, context, browser });
+  }
+
+  return await findApplicationById(applicationId);
+};
+
+/**
  * Refills the application form in the live browser with user's updated answers and re-inspects the form
  * @param {string} applicationId
  * @param {string} userId
@@ -633,15 +888,19 @@ export const refillApplicationFormService = async (applicationId, userId, answer
       `Refilling form in browser for application ${applicationId} with ${answers.length} updated answers...`
     );
 
-    // Run Naukri application with confirmSubmission = false to re-fill and re-inspect
-    await runNaukriApplication({
-      applicationId,
-      userId,
-      finalEditedAnswers: answers,
-      confirmSubmission: false,
-    });
+    const isNaukri = Boolean(application.naukriDetails?.jobId || application.job?.source === 'naukri');
+    if (isNaukri) {
+      await runNaukriApplication({
+        applicationId,
+        userId,
+        finalEditedAnswers: answers,
+        confirmSubmission: false,
+      });
+      return await findApplicationById(applicationId);
+    }
 
-    return await findApplicationById(applicationId);
+    // Generic UNKNOWN career portal:
+    return await refillUnknownApplicationFormService(applicationId, userId, answers);
   } catch (error) {
     await logError('applicationService.refillApplicationFormService', error.message);
     throw error;

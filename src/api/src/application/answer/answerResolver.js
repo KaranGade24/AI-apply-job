@@ -1,6 +1,6 @@
 import { resolveFromProfile } from './profileAnswerResolver.js';
 import { resolveFromResume } from './resumeAnswerResolver.js';
-import { resolveFromAi } from './aiAnswerResolver.js';
+import { resolveFromAi, resolveBatchAiAnswers } from './aiAnswerResolver.js';
 import { resolveFromHuman, persistMissingQuestionsForUser } from './humanAnswerResolver.js';
 import { classifyQuestionCategory, normalizeQuestionText } from '../form/formNormalizer.js';
 import { FIELD_TYPES, QUESTION_CATEGORIES } from '../form/fieldTypes.js';
@@ -40,6 +40,7 @@ export const resolveAllFormAnswers = async (fields = [], context = {}) => {
 
   const resolvedAnswers = [];
   const missingQuestions = [];
+  const subjectiveFieldsToBatch = [];
 
   // Map of previously supplied answers by questionId or fieldId
   const priorAnswerMap = new Map();
@@ -101,7 +102,7 @@ export const resolveAllFormAnswers = async (fields = [], context = {}) => {
       continue;
     }
 
-    // Level 1: Deterministic User Profile
+    // Level 1: Deterministic User Profile (NO LLM)
     const profileRes = resolveFromProfile(field, userProfile, user, userSetting);
     if (profileRes.resolved) {
       resolvedAnswers.push({
@@ -118,7 +119,7 @@ export const resolveAllFormAnswers = async (fields = [], context = {}) => {
       continue;
     }
 
-    // Level 2 & 3: Verified Resume facts
+    // Level 2: Verified Resume facts (NO LLM)
     const resumeRes = resolveFromResume(field, resumeData, job);
     if (resumeRes.resolved) {
       resolvedAnswers.push({
@@ -135,7 +136,7 @@ export const resolveAllFormAnswers = async (fields = [], context = {}) => {
       continue;
     }
 
-    // Level 3: User Settings (Notice period, Relocation preferences)
+    // Level 3: User Settings (Notice period, Relocation preferences - NO LLM)
     const category = classifyQuestionCategory(field.question);
     if (category === QUESTION_CATEGORIES.NOTICE_PERIOD) {
       const notice = userSetting?.noticePeriod || 'Immediate';
@@ -159,26 +160,14 @@ export const resolveAllFormAnswers = async (fields = [], context = {}) => {
       continue;
     }
 
-    // Level 4: Subjective AI reasoning (for open-ended pitch or motivation questions)
+    // Level 4: Subjective AI questions (e.g. "Why are you interested in this position?")
+    // Collect for ONE single batch LLM call across all subjective questions on this page
     if (category === QUESTION_CATEGORIES.SUBJECTIVE) {
-      const aiRes = await resolveFromAi(field, { job, userProfile, resumeData });
-      if (aiRes.resolved) {
-        resolvedAnswers.push({
-          questionId: qId,
-          fieldId: fId,
-          question: field.question,
-          type: field.type,
-          answer: aiRes.value,
-          source: aiRes.source,
-          confidence: aiRes.confidence,
-          userConfirmed: false,
-          options: field.options || [],
-        });
-        continue;
-      }
+      subjectiveFieldsToBatch.push(field);
+      continue;
     }
 
-    // Level 6: Ambiguous / Unknown question -> DO NOT GUESS! Flag as Missing Question (Checkpoint 1)
+    // Level 5: Ambiguous / Unknown question -> DO NOT GUESS! Flag as Missing Question (Checkpoint 1)
     missingQuestions.push({
       questionId: qId,
       fieldId: fId,
@@ -188,6 +177,46 @@ export const resolveAllFormAnswers = async (fields = [], context = {}) => {
       options: field.options || [],
       placeholder: field.placeholder || '',
     });
+  }
+
+  // Resolve ALL subjective questions in ONE single batch LLM call
+  if (subjectiveFieldsToBatch.length > 0) {
+    const batchAiAnswers = await resolveBatchAiAnswers(subjectiveFieldsToBatch, {
+      job,
+      userProfile,
+      resumeData,
+    });
+
+    for (const field of subjectiveFieldsToBatch) {
+      const qId = field.questionId;
+      const fId = field.fieldId;
+      const answer = batchAiAnswers[qId] || batchAiAnswers[fId];
+
+      if (answer && String(answer).trim().length > 0) {
+        resolvedAnswers.push({
+          questionId: qId,
+          fieldId: fId,
+          question: field.question,
+          type: field.type,
+          answer: String(answer).trim(),
+          source: 'ai',
+          confidence: 0.92,
+          userConfirmed: false,
+          options: field.options || [],
+        });
+      } else {
+        // If AI could not resolve, send as missing question to user
+        missingQuestions.push({
+          questionId: qId,
+          fieldId: fId,
+          question: field.question,
+          type: field.type,
+          required: Boolean(field.required),
+          options: field.options || [],
+          placeholder: field.placeholder || '',
+        });
+      }
+    }
   }
 
   // Level 6: Persist missing questions if requested

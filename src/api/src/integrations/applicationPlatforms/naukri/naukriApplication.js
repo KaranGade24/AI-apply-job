@@ -10,6 +10,7 @@ import {
 import { inspectForm } from '../../../application/form/formInspector.js';
 import { resolveAllFormAnswers } from '../../../application/answer/answerResolver.js';
 import { executeBrowserActions } from '../../../application/browser/browserActionExecutor.js';
+import { verifyFilledFields } from '../../../application/form/formVerifier.js';
 import { validateBrowserActionPlan } from '../../../application/browser/browserActionValidator.js';
 import {
   APPLICATION_STATUS,
@@ -719,6 +720,14 @@ export const runNaukriApplication = async ({
         await executeBrowserActions(activePage, actions, {
           resumePdfPath: application.resume?.pdfPath,
         });
+
+        // Verify ALL fields filled via DOM check (NO LLM)
+        const verification = await verifyFilledFields(activePage, resolvedAnswers);
+        await logJobEvent(
+          'naukriApplication',
+          'DOM_VERIFIED',
+          `Verification: ${verification.filledCount}/${formInspection.fields.length} fields filled via DOM check (zero LLM calls). Empty: ${verification.emptyFields.length}`
+        );
       }
 
       // CHECKPOINT 2: Final Review Before Submission

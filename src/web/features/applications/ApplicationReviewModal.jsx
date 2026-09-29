@@ -314,10 +314,22 @@ export const ApplicationReviewModal = ({
       const res = await confirmFinalApplicationApi(application._id, formatted);
       if (res?.data) {
         setApplication(res.data);
-        setCurrentStatus(res.data.status || 'Applied');
-        setSelectedStatus(res.data.status || 'Applied');
+        const newStatus = res.data.status || 'Applied';
+        setCurrentStatus(newStatus);
+        setSelectedStatus(newStatus);
+        if (res.data.form?.reviewFields) {
+          const initReview = {};
+          res.data.form.reviewFields.forEach((f) => {
+            initReview[f.questionId] = f.answer ?? '';
+          });
+          setReviewAnswers(initReview);
+        }
+        showToast(
+          newStatus.toLowerCase() === 'applied'
+            ? (isNaukri ? 'Application verified and submitted successfully on Naukri!' : 'Application verified and submitted successfully on employer portal!')
+            : `Step confirmed! Advanced to Step ${res.data.form?.currentStep || 2}. Review filled fields below.`
+        );
       }
-      showToast('Application verified and submitted successfully on Naukri!');
       if (onApplicationUpdated) onApplicationUpdated();
     } catch (err) {
       showToast('Submission error: ' + (err.message || 'Please retry'));
@@ -1540,8 +1552,17 @@ export const ApplicationReviewModal = ({
                               onClick={handleConfirmFinal}
                               className="bg-blue-600 hover:bg-blue-700 text-white font-bold gap-1.5 cursor-pointer shadow-xs"
                             >
-                              <CheckCircle2 className="w-3.5 h-3.5" />
-                              <span>Confirm & Apply on Naukri</span>
+                              {application.form?.hasStepper && !application.form?.isFinalStep ? (
+                                <>
+                                  <span>Confirm & Next Step (Step {application.form?.currentStep || 1} of {application.form?.totalSteps || 2})</span>
+                                  <ChevronRight className="w-4 h-4" />
+                                </>
+                              ) : (
+                                <>
+                                  <CheckCircle2 className="w-3.5 h-3.5" />
+                                  <span>{isNaukri ? 'Confirm & Apply on Naukri' : 'Confirm & Apply on Portal'}</span>
+                                </>
+                              )}
                             </Button>
                           </div>
                         </div>

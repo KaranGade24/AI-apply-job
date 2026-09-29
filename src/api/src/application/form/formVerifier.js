@@ -32,7 +32,20 @@ export const verifyFilledFields = async (page, resolvedAnswers = []) => {
         continue;
       }
 
-      const el = document.querySelector(selector);
+      let el = null;
+      try {
+        el = document.querySelector(selector);
+      } catch (e) {
+        // Invalid selector syntax fallback
+      }
+
+      if (!el && selector) {
+        el = document.getElementById(selector) ||
+          document.querySelector(`[name="${selector}"]`) ||
+          document.querySelector(`[data-automation-id="${selector}"]`) ||
+          document.querySelector(`[aria-label*="${field.question?.slice(0, 30) || ''}"]`);
+      }
+
       if (!el) {
         results.push({ ...field, currentValue: '', isFilled: false, reason: 'not_found' });
         continue;

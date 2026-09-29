@@ -302,18 +302,7 @@ const executeFormMode = async (page, state, job, candidateInfo, userId, applicat
     ];
     state.formState.unresolvedQuestions = [];
 
-    // Persist form state to DB
-    if (applicationId) {
-      await JobApplication.findByIdAndUpdate(applicationId, {
-        'form.fields': formFields,
-        'form.answers': resolvedAnswers,
-        'form.missingQuestions': [],
-        'form.currentStep': state.formState.currentStep,
-        'form.totalSteps': state.formState.totalSteps,
-      });
-    }
-
-    // ── STEP 7: Check for progression button ───────────────────────────
+    // ── STEP 7: Check for progression button (Next vs Submit) ───────────
     const buttons = formInspection.buttons || [];
     const nextBtn = buttons.find((b) => b.type === 'create_account' || b.type === 'next');
     const submitBtn = buttons.find((b) => b.type === 'submit');
@@ -324,84 +313,54 @@ const executeFormMode = async (page, state, job, candidateInfo, userId, applicat
       /review/i.test(formInspection.stepperState?.activeStepName || '') ||
       (!nextBtn && Boolean(submitBtn));
 
-    if (isFinalReviewStep) {
-      // ── STEP 8: Final Review — pause for candidate confirmation ──────
-      const reviewFields = (state.formState.answeredQuestions || []).map((a) => ({
-        questionId: a.questionId,
-        fieldId: a.fieldId,
-        question: a.question,
-        type: 'text',
-        answer: a.answer,
-        source: a.source || 'ai',
-      }));
-
-      if (applicationId) {
-        await JobApplication.findByIdAndUpdate(applicationId, {
-          'form.reviewFields': reviewFields,
-          'form.answers': state.formState.answeredQuestions,
-          status: APPLICATION_STATUS.WAITING_FOR_FINAL_REVIEW,
-        });
-      }
-
-      await logJobEvent('agentLoop', 'FORM_MODE_COMPLETE', `Form filled across ${stepIteration} steps. Ready for final candidate review.`);
-      return { completed: true, isFinalReviewReady: true, formFields, reviewFields };
-    }
-
-    if (!nextBtn) {
-      // No next button and not final review — break to main loop
-      await logJobEvent('agentLoop', 'FORM_NO_NEXT', 'No next/submit button found. Returning to main loop.');
-      return { completed: false, hasUnresolved: false, formFields };
-    }
-
-    // ── Click Next and advance to the next step ────────────────────────
-    await logJobEvent('agentLoop', 'STEP_PROGRESSION', `Advancing step: clicking "${nextBtn.text}"`);
-    const btnLocator = page.locator(nextBtn.selector || `button:has-text("${nextBtn.text}")`).first();
-    await btnLocator.click({ timeout: 5000 }).catch(async () => {
-      await btnLocator.click({ force: true, timeout: 3000 });
+    // ── STEP 8: Send all filled questions to user in frontend to verify filled info is correct or edit ──
+    const stepReviewFields = formFields.map((f) => {
+      const match = resolvedAnswers.find((a) => a.questionId === f.questionId || a.fieldId === f.fieldId);
+      return {
+        questionId: f.questionId,
+        fieldId: f.fieldId,
+        question: f.question,
+        type: f.type,
+        answer: match ? match.answer : '',
+        source: match ? match.source : 'profile',
+        options: f.options || [],
+        required: Boolean(f.required),
+      };
     });
 
-    await page.waitForTimeout(3000);
-    await page.waitForLoadState('domcontentloaded').catch(() => {});
+    if (applicationId) {
+      await JobApplication.findByIdAndUpdate(applicationId, {
+        'form.fields': formFields,
+        'form.answers': resolvedAnswers,
+        'form.reviewFields': stepReviewFields,
+        'form.missingQuestions': [],
+        'form.currentStep': state.formState.currentStep,
+        'form.totalSteps': state.formState.totalSteps,
+        'form.isFinalStep': isFinalReviewStep,
+        'form.hasStepper': Boolean(formInspection.stepperState?.hasStepper),
+        status: APPLICATION_STATUS.WAITING_FOR_FINAL_REVIEW,
+      });
 
-    // Check for error banner on page (e.g. password mismatch or weak password)
-    const errorEl = page.locator('.error, .alert-danger, [role="alert"], [class*="error" i], .field-validation-error').first();
-    const hasError = await errorEl.isVisible().catch(() => false);
-    if (hasError) {
-      const errorMsg = await errorEl.innerText().catch(() => 'Validation error displayed');
-      await logJobEvent('agentLoop', 'STEP_ERROR', `Error advancing at step ${state.formState.currentStep}: ${errorMsg}`);
-
-      // Persist unresolved state so user sees the error
-      state.formState.unresolvedQuestions = [{
-        questionId: 'step_error',
-        fieldId: 'step_error',
-        question: `Step ${state.formState.currentStep} Error: ${errorMsg}`,
-        type: 'text',
-        required: true,
-      }];
-
-      if (applicationId) {
-        await JobApplication.findByIdAndUpdate(applicationId, {
-          'form.missingQuestions': state.formState.unresolvedQuestions,
-        });
-      }
-
-      return {
-        completed: false,
-        hasUnresolved: true,
-        errorMessage: errorMsg,
-        formFields,
-      };
+      await updateApplicationStatus(applicationId, APPLICATION_STATUS.WAITING_FOR_FINAL_REVIEW, {
+        logMessage: isFinalReviewStep
+          ? `All application fields filled and verified (DOM check, NO LLM). Awaiting candidate review before submission.`
+          : `Step ${state.formState.currentStep} filled and verified (DOM check, NO LLM). Awaiting candidate review/edit before clicking Next.`,
+      });
     }
 
     await logJobEvent(
       'agentLoop',
-      'STEP_ADVANCED',
-      `Successfully advanced past step ${state.formState.currentStep}. Looping for next step...`,
+      'STEP_FILLED_AWAITING_REVIEW',
+      `Step ${state.formState.currentStep}: ${stepReviewFields.length} fields filled and verified via DOM check. Sent to frontend for candidate verification.`
     );
 
-    await persistState(applicationId, state);
-
-    // Continue the while loop → inspectForm for the next page/step
+    return {
+      completed: isFinalReviewStep,
+      isWaitingUserReview: true,
+      isFinalReviewReady: isFinalReviewStep,
+      formFields,
+      reviewFields: stepReviewFields,
+    };
   }
 
   // Safety: max step iterations reached
@@ -590,21 +549,17 @@ export const executeAgentLoop = async ({
 
 
 
-        if (formResult.completed) {
-          // Form filled across all steps → pause at WAITING_FOR_FINAL_REVIEW
+        if (formResult.completed || formResult.isWaitingUserReview) {
+          // Form step filled and verified via DOM check → pause at WAITING_FOR_FINAL_REVIEW for user verification/edits
           const storageState = await BrowserManager.captureStorageState(context).catch(() => null);
           state.pendingHumanAction = {
-            reason: 'Review filled application before submission',
+            reason: formResult.isFinalReviewReady
+              ? 'Review filled application before submission'
+              : `Review filled fields for step ${state.formState.currentStep} before continuing`,
             savedUrl: page.url(),
             savedStorageState: storageState,
           };
           await persistState(applicationId, state);
-
-          if (applicationId) {
-            await updateApplicationStatus(applicationId, APPLICATION_STATUS.WAITING_FOR_FINAL_REVIEW, {
-              logMessage: 'All application steps filled. Awaiting candidate final review before submission.',
-            });
-          }
 
           return {
             status: APPLICATION_STATUS.WAITING_FOR_FINAL_REVIEW,
@@ -614,7 +569,9 @@ export const executeAgentLoop = async ({
             answeredQuestions: state.formState.answeredQuestions,
             agentState: state,
             pageUrl: page.url(),
-            message: 'All application steps filled. Awaiting candidate review and confirmation before submission.',
+            message: formResult.isFinalReviewReady
+              ? 'All application steps filled. Awaiting candidate review and confirmation before submission.'
+              : `Step ${state.formState.currentStep} filled & verified via DOM check. Awaiting candidate verification/edit before continuing.`,
           };
         }
 
