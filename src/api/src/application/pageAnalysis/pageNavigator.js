@@ -63,78 +63,87 @@ export const navigatePortalWithAiDecision = async (page, analysis, context = nul
     // 1. Action: Click Opening Accordion / Role Card and then click its inner "Apply" / "Autofill"
     if (nextRecommendedAction === 'click_opening_apply' || pageType === 'job_listings_accordion' || (analysis?.openingsList && analysis.openingsList.length > 0)) {
       const roleTitle = effectiveRole.title || '';
-      let targetApplyBtn = null;
       let activePage = page;
-      let clicked = false;
 
-      await logJobEvent('pageNavigator', 'SEARCH_ROLE_CARD', `Searching for opening card matching: "${roleTitle}"`);
+      await logJobEvent('pageNavigator', 'SEARCH_ROLE_CARD', `Locating & clicking opening card for: "${roleTitle}"`);
 
-      // Strategy 1: Find container holding both the role title and an Apply button
-      if (roleTitle) {
-        const cardSelectors = [
-          `//*[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), "${roleTitle.toLowerCase().slice(0, 15)}")]/ancestor-or-self::*[.//button[contains(., "Apply") or contains(., "apply")] or .//a[contains(., "Apply") or contains(., "apply")]][1]`,
-          `div:has-text("${roleTitle}")`,
-          `section:has-text("${roleTitle}")`,
-          `article:has-text("${roleTitle}")`,
-          `.card:has-text("${roleTitle}")`,
-          `[class*="position" i]:has-text("${roleTitle}")`,
-          `[class*="opening" i]:has-text("${roleTitle}")`,
-          `[class*="job" i]:has-text("${roleTitle}")`,
-        ];
-
-        for (const sel of cardSelectors) {
-          try {
-            const loc = sel.startsWith('//') ? page.locator(`xpath=${sel}`).first() : page.locator(sel).first();
-            if (await loc.isVisible().catch(() => false)) {
-              // Click to expand if it's an accordion header
-              await loc.click().catch(() => {});
-              await page.waitForTimeout(600);
-
-              const innerBtn = loc.locator('button:has-text("Apply"), a:has-text("Apply"), [role="button"]:has-text("Apply"), button, a.btn').first();
-              if (await innerBtn.isVisible().catch(() => false)) {
-                targetApplyBtn = innerBtn;
-                await logJobEvent('pageNavigator', 'MATCHED_ROLE_CARD', `Located dedicated Apply button inside card for: "${roleTitle}"`);
-                break;
-              }
-            }
-          } catch {
-            // continue
-          }
-        }
+      let newPagePromise = null;
+      if (context) {
+        newPagePromise = context.waitForEvent('page', { timeout: 6000 }).catch(() => null);
       }
 
-      // Strategy 2: Fallback to role element or generic Apply button locators
-      if (!targetApplyBtn) {
-        const buttonText = customButtonText || 'Apply';
-        const fallbackLocators = [
-          page.locator(`[data-automation-id="apply-button"]`).first(),
-          page.locator(`button:has-text("${buttonText}")`).first(),
-          page.locator(`a:has-text("${buttonText}")`).first(),
-          page.locator(`button:has-text("Apply")`).first(),
-          page.locator(`a:has-text("Apply")`).first(),
-        ];
-
-        for (const loc of fallbackLocators) {
-          if (await loc.isVisible().catch(() => false)) {
-            targetApplyBtn = loc;
-            break;
-          }
-        }
-      }
-
-      if (targetApplyBtn) {
-        await logJobEvent('pageNavigator', 'CLICK_APPLY', `Clicking Apply button for ${roleTitle}`);
-
-        let newPagePromise = null;
-        if (context) {
-          newPagePromise = context.waitForEvent('page', { timeout: 6000 }).catch(() => null);
-        }
-
-        await targetApplyBtn.scrollIntoViewIfNeeded().catch(() => {});
-        await targetApplyBtn.click({ timeout: 5000 }).catch(async () => {
-          await targetApplyBtn.click({ force: true, timeout: 3000 });
+      // Execute instantaneous, deeply-scoped DOM traversal to locate the exact card container and click its Apply button
+      const domResult = await page.evaluate((targetTitle) => {
+        const normTarget = (targetTitle || '').toLowerCase().trim();
+        const allElements = Array.from(document.querySelectorAll('h1, h2, h3, h4, h5, h6, strong, b, span, p, div, a, button'));
+        
+        // Find elements containing the target role words
+        const matchingElements = allElements.filter((el) => {
+          const txt = (el.textContent || '').trim().toLowerCase();
+          return (
+            (txt.includes(normTarget) || (normTarget.length > 8 && txt.includes(normTarget.slice(0, 10)))) &&
+            txt.length < 150
+          );
         });
-        clicked = true;
+
+        // Sort by shortest text length to isolate the exact title header/element
+        matchingElements.sort((a, b) => (a.textContent || '').length - (b.textContent || '').length);
+
+        for (const matchEl of matchingElements) {
+          let container = matchEl;
+          for (let i = 0; i < 7 && container && container !== document.body; i++) {
+            const btn = Array.from(container.querySelectorAll('button, a, [role="button"], input[type="button"], input[type="submit"]')).find((b) => {
+              const text = (b.textContent || b.value || b.getAttribute('aria-label') || '').toLowerCase().trim();
+              const href = (b.getAttribute('href') || '').toLowerCase();
+              return text === 'apply' || text.includes('apply') || href.includes('mailto:') || href.includes('apply');
+            });
+
+            if (btn) {
+              const href = btn.getAttribute('href') || '';
+              const btnText = (btn.textContent || btn.value || '').trim();
+              btn.scrollIntoView({ behavior: 'instant', block: 'center' });
+              btn.click();
+              return {
+                clicked: true,
+                href,
+                btnText,
+                isMailto: href.toLowerCase().startsWith('mailto:'),
+                matchedTitle: (matchEl.textContent || '').trim(),
+              };
+            }
+            container = container.parentElement;
+          }
+        }
+
+        // Fallback: Click any visible button or link with text 'Apply'
+        const allApplyButtons = Array.from(document.querySelectorAll('button, a, [role="button"]')).filter((b) => {
+          const text = (b.textContent || b.value || '').toLowerCase().trim();
+          const href = (b.getAttribute('href') || '').toLowerCase();
+          return text === 'apply' || text.includes('apply now') || href.includes('mailto:');
+        });
+
+        if (allApplyButtons.length > 0) {
+          allApplyButtons[0].scrollIntoView({ behavior: 'instant', block: 'center' });
+          allApplyButtons[0].click();
+          const href = allApplyButtons[0].getAttribute('href') || '';
+          return {
+            clicked: true,
+            href,
+            btnText: allApplyButtons[0].textContent.trim(),
+            isMailto: href.toLowerCase().startsWith('mailto:'),
+            matchedTitle: 'Generic Apply Button',
+          };
+        }
+
+        return { clicked: false };
+      }, roleTitle);
+
+      if (domResult.clicked) {
+        await logJobEvent(
+          'pageNavigator',
+          'CLICK_APPLY_SUCCESS',
+          `Clicked Apply for "${roleTitle}" (Mailto: ${domResult.isMailto}, Href: ${domResult.href || 'none'})`
+        );
 
         if (newPagePromise) {
           const popupPage = await newPagePromise;
@@ -145,12 +154,14 @@ export const navigatePortalWithAiDecision = async (page, analysis, context = nul
           }
         }
 
-        await activePage.waitForTimeout(2500);
+        await activePage.waitForTimeout(2000);
 
         return {
           success: true,
           newPage: activePage,
           navigated: true,
+          isMailto: Boolean(domResult.isMailto),
+          mailtoUrl: domResult.isMailto ? domResult.href : null,
           message: `Successfully clicked Apply for ${roleTitle}`,
         };
       }

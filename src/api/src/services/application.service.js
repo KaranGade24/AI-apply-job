@@ -1786,7 +1786,99 @@ export const advanceEmployerPortalActionService = async (applicationId, userId, 
       }).catch(() => {});
     }
 
+    // Check if mailto application link was clicked
+    if (navResult.isMailto || navResult.mailtoUrl) {
+      let recipientEmail = "careers@innowise.us";
+      let subject = `Application for ${job.title || "Position"}`;
+      try {
+        const rawMailto = (navResult.mailtoUrl || "").replace(/^mailto:/i, "");
+        const [emailPart, queryPart] = rawMailto.split("?");
+        if (emailPart) recipientEmail = decodeURIComponent(emailPart);
+        if (queryPart) {
+          const params = new URLSearchParams(queryPart);
+          if (params.get("subject")) subject = params.get("subject");
+        }
+      } catch {
+        // fallback
+      }
+
+      await tailorRoleOutreachService(applicationId, userId, {
+        roleTitle: specificRoleOverride?.title || job.title || "Fullstack Developer - MERN",
+        recipientEmail,
+        referenceId: specificRoleOverride?.referenceId || currentAnalysis?.matchedRole?.referenceId || "",
+      });
+
+      await JobApplication.findByIdAndUpdate(applicationId, {
+        applicationMethod: "email",
+        status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
+      });
+
+      await updateApplicationStatus(applicationId, APPLICATION_STATUS.WAITING_FOR_REVIEW, {
+        logMessage: `Employer specifies email application for ${specificRoleOverride?.title || job.title} (${recipientEmail}). Tailored resume and outreach draft prepared.`,
+      });
+
+      return await findApplicationById(applicationId);
+    }
+
     // Re-inspect the new state after clicking the matched role's Apply button
+    const formInspection = await inspectForm(activePage);
+    if (formInspection.fields && formInspection.fields.length > 0) {
+      const userResumeDoc = await Resume.findOne({ userId }).sort({ createdAt: -1 }).catch(() => null);
+      const candidateResume = application.resume?.tailoredResumeData || userResumeDoc?.parsedData || {};
+      const userProfile = await UserProfile.findOne({ userId }).catch(() => null);
+
+      const { resolvedAnswers, missingQuestions } = await resolveAllFormAnswers(formInspection.fields, {
+        userAnswers: application.form?.answers || [],
+        userProfile: userProfile || {},
+        user: { username: userProfile?.fullName, email: userProfile?.email },
+        resumeData: candidateResume || {},
+        job,
+        applicationId,
+      });
+
+      await fillFormFields(activePage, formInspection.fields, resolvedAnswers, {
+        resumePdfPath: application.resume?.pdfPath,
+      });
+      await verifyFilledFields(activePage, resolvedAnswers);
+
+      const reviewFields = formInspection.fields.map((f) => {
+        const match = resolvedAnswers.find((a) => a.questionId === f.questionId || a.fieldId === f.fieldId);
+        return {
+          questionId: f.questionId,
+          fieldId: f.fieldId,
+          question: f.question,
+          type: f.type,
+          answer: match ? match.answer : '',
+          source: match ? match.source : 'profile',
+          options: f.options || [],
+          required: Boolean(f.required),
+          isTermsAgreement: Boolean(f.isTermsAgreement),
+        };
+      });
+
+      const currentStorageState = await BrowserManager.captureStorageState(context).catch(() => null);
+
+      await JobApplication.findByIdAndUpdate(applicationId, {
+        status: APPLICATION_STATUS.WAITING_FOR_FINAL_REVIEW,
+        'form.fields': formInspection.fields,
+        'form.answers': resolvedAnswers,
+        'form.reviewFields': reviewFields,
+        'form.missingQuestions': missingQuestions,
+        'form.isAccountCreation': Boolean(formInspection.isAccountCreation),
+        'workflow.agentState.pendingHumanAction': {
+          reason: 'Review filled form before final submission',
+          savedUrl: activePage.url(),
+          savedStorageState: currentStorageState,
+        },
+      });
+
+      await updateApplicationStatus(applicationId, APPLICATION_STATUS.WAITING_FOR_FINAL_REVIEW, {
+        logMessage: `Employer application form loaded with ${formInspection.fields.length} fields. Verified via DOM check. Ready for candidate review.`,
+      });
+
+      return await findApplicationById(applicationId);
+    }
+
     const postExtracted = await extractPageContent(activePage);
     const postAnalysis = await classifyPageWithLlm(postExtracted, job, userId);
 
