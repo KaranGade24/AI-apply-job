@@ -25,6 +25,8 @@ import {
   Save,
   Trash2,
   Edit2,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 import {
@@ -83,6 +85,7 @@ export const ApplicationReviewModal = ({
   const [retryingGoogleForm, setRetryingGoogleForm] = useState(false);
   const [formQuestionFilter, setFormQuestionFilter] = useState('all'); // 'all' | 'filled' | 'missing' | 'required'
   const [formSearchQuery, setFormSearchQuery] = useState('');
+  const [showPasswords, setShowPasswords] = useState({});
 
   // Multi-role & Direct Email Outreach state
   const [tailoringRoleId, setTailoringRoleId] = useState(null);
@@ -545,12 +548,12 @@ export const ApplicationReviewModal = ({
   // Submit / Confirm application action
   const handleConfirmApply = async () => {
     // If on Checkpoint 2 (waiting for final review)
-    if (application?.status === 'waiting_for_final_review' || (application?.form?.reviewFields?.length > 0 && isNaukri)) {
+    if (application?.status === 'waiting_for_final_review' || application?.form?.reviewFields?.length > 0) {
       return await handleConfirmFinal();
     }
 
-    // If on Checkpoint 1 (missing answers)
-    if (application?.form?.missingQuestions?.length > 0 && isNaukri) {
+    // If on Checkpoint 1 (missing answers / credentials required)
+    if (application?.status === 'waiting_for_user' || application?.form?.missingQuestions?.length > 0) {
       return await handleSubmitMissingAnswers();
     }
 
@@ -1291,6 +1294,68 @@ export const ApplicationReviewModal = ({
                                     placeholder={q.placeholder || 'Type your answer...'}
                                     className="w-full text-xs p-2.5 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:outline-hidden"
                                   />
+                                ) : q.type === 'checkbox' ? (
+                                  <label className="flex items-start gap-2.5 p-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      checked={Boolean(missingAnswers[q.questionId])}
+                                      onChange={(e) =>
+                                        setMissingAnswers((prev) => ({
+                                          ...prev,
+                                          [q.questionId]: e.target.checked,
+                                        }))
+                                      }
+                                      className="mt-0.5 text-blue-600 focus:ring-blue-500 rounded"
+                                    />
+                                    <span className="text-xs text-slate-700 font-medium">
+                                      {q.placeholder || q.question}
+                                    </span>
+                                  </label>
+                                ) : q.type === 'password' ? (
+                                  <div className="space-y-2">
+                                    <div className="relative">
+                                      <input
+                                        type={showPasswords[q.questionId] ? 'text' : 'password'}
+                                        value={missingAnswers[q.questionId] || ''}
+                                        onChange={(e) =>
+                                          setMissingAnswers((prev) => ({
+                                            ...prev,
+                                            [q.questionId]: e.target.value,
+                                          }))
+                                        }
+                                        placeholder={q.placeholder || 'Enter password...'}
+                                        className="w-full text-xs p-2.5 pr-9 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:outline-hidden font-mono"
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setShowPasswords((prev) => ({
+                                            ...prev,
+                                            [q.questionId]: !prev[q.questionId],
+                                          }))
+                                        }
+                                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                                      >
+                                        {showPasswords[q.questionId] ? (
+                                          <EyeOff className="w-4 h-4" />
+                                        ) : (
+                                          <Eye className="w-4 h-4" />
+                                        )}
+                                      </button>
+                                    </div>
+                                    {Array.isArray(q.requirements) && q.requirements.length > 0 && (
+                                      <div className="p-2.5 bg-amber-50/70 border border-amber-200 rounded-lg space-y-1 text-xs text-slate-700">
+                                        <span className="text-[11px] font-bold text-amber-900 block">
+                                          Password Requirements:
+                                        </span>
+                                        <ul className="text-[11px] text-slate-600 list-disc list-inside space-y-0.5">
+                                          {q.requirements.map((req, rIdx) => (
+                                            <li key={rIdx}>{req}</li>
+                                          ))}
+                                        </ul>
+                                      </div>
+                                    )}
+                                  </div>
                                 ) : (
                                   <input
                                     type={q.type === 'number' ? 'number' : 'text'}

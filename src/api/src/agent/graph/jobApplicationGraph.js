@@ -916,13 +916,21 @@ const unknownApplicationNode = async (state) => {
     );
 
     // Determine final status
-    let finalStatus = APPLICATION_STATUS.WAITING_FOR_REVIEW;
+    let finalStatus = unknownResult.status || APPLICATION_STATUS.WAITING_FOR_REVIEW;
     if (
       unknownResult.actionTaken === "email_sent" ||
       unknownResult.actionTaken === "google_form_submitted" ||
-      unknownResult.actionTaken === "custom_form_submitted"
+      unknownResult.actionTaken === "custom_form_submitted" ||
+      unknownResult.actionTaken === "success" ||
+      unknownResult.pageResult?.terminalState === "success"
     ) {
       finalStatus = APPLICATION_STATUS.APPLIED;
+    } else if (
+      unknownResult.status === APPLICATION_STATUS.WAITING_FOR_USER ||
+      unknownResult.status === APPLICATION_STATUS.WAITING_FOR_FINAL_REVIEW ||
+      unknownResult.status === APPLICATION_STATUS.HUMAN_REQUIRED
+    ) {
+      finalStatus = unknownResult.status;
     }
 
     // Persist unknown page analysis & execution to DB via repository
@@ -938,6 +946,8 @@ const unknownApplicationNode = async (state) => {
 
     return {
       unknownPageResult: unknownResult,
+      agentState: unknownResult.pageResult?.agentState || null,
+      pendingHumanAction: unknownResult.pageResult?.agentState?.pendingHumanAction || null,
       status: finalStatus,
     };
   } catch (error) {
@@ -1154,6 +1164,8 @@ const workflow = new StateGraph({
     phoneApplication: { value: (x, y) => y ?? x, default: () => null },
     googleFormResult: { value: (x, y) => y ?? x, default: () => null },
     unknownPageResult: { value: (x, y) => y ?? x, default: () => null },
+    agentState: { value: (x, y) => y ?? x, default: () => null },
+    pendingHumanAction: { value: (x, y) => y ?? x, default: () => null },
     status: {
       value: (x, y) => y ?? x,
       default: () => APPLICATION_STATUS.PENDING,

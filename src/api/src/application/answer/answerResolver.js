@@ -1,8 +1,9 @@
 import { resolveFromProfile } from './profileAnswerResolver.js';
 import { resolveFromResume } from './resumeAnswerResolver.js';
 import { resolveFromAi } from './aiAnswerResolver.js';
+import { resolveFromHuman, persistMissingQuestionsForUser } from './humanAnswerResolver.js';
 import { classifyQuestionCategory, normalizeQuestionText } from '../form/formNormalizer.js';
-import { QUESTION_CATEGORIES } from '../form/fieldTypes.js';
+import { FIELD_TYPES, QUESTION_CATEGORIES } from '../form/fieldTypes.js';
 
 /**
  * Resolves all fields on an application form using multi-level matching:
@@ -10,7 +11,8 @@ import { QUESTION_CATEGORIES } from '../form/fieldTypes.js';
  * Level 2: Verified Resume Facts
  * Level 3: User Settings & Past Answers
  * Level 4: AI Subjective Reasoning (Grounded)
- * Level 5: Unanswered -> Flagged as Missing Questions (Sent to Frontend)
+ * Level 5: Direct Candidate Human Input (if previously answered)
+ * Level 6: Ambiguous / Unanswered -> Flagged as Missing Questions (persisted for user review)
  *
  * @param {Array<object>} fields - Fields extracted by Form Inspector
  * @param {object} context
@@ -20,6 +22,8 @@ import { QUESTION_CATEGORIES } from '../form/fieldTypes.js';
  * @param {object} context.userSetting
  * @param {object} context.resumeData
  * @param {object} context.job
+ * @param {string} [context.applicationId] - Application ID to persist missing questions if needed
+ * @param {boolean} [context.autoPersistMissing=false] - Whether to automatically persist missing questions to DB
  * @returns {Promise<{ resolvedAnswers: Array<object>, missingQuestions: Array<object> }>}
  */
 export const resolveAllFormAnswers = async (fields = [], context = {}) => {
@@ -30,6 +34,8 @@ export const resolveAllFormAnswers = async (fields = [], context = {}) => {
     userSetting = {},
     resumeData = {},
     job = {},
+    applicationId = null,
+    autoPersistMissing = false,
   } = context;
 
   const resolvedAnswers = [];
@@ -58,6 +64,38 @@ export const resolveAllFormAnswers = async (fields = [], context = {}) => {
         source: 'user',
         confidence: 1,
         userConfirmed: true,
+        options: field.options || [],
+      });
+      continue;
+    }
+
+    // Direct check via human resolver
+    const humanRes = resolveFromHuman(field, userAnswers);
+    if (humanRes.resolved) {
+      resolvedAnswers.push({
+        questionId: qId,
+        fieldId: fId,
+        question: field.question,
+        type: field.type,
+        answer: humanRes.value,
+        source: humanRes.source,
+        confidence: humanRes.confidence,
+        userConfirmed: true,
+        options: field.options || [],
+      });
+      continue;
+    }
+
+    // Sensitive credentials / Password fields cannot be hallucinated by AI
+    if (field.type === FIELD_TYPES.PASSWORD || field.type === 'password') {
+      missingQuestions.push({
+        questionId: qId,
+        fieldId: fId,
+        question: field.question,
+        type: 'password',
+        required: true,
+        placeholder: field.placeholder || 'Enter your password...',
+        requirements: field.requirements || [],
         options: field.options || [],
       });
       continue;
@@ -140,7 +178,7 @@ export const resolveAllFormAnswers = async (fields = [], context = {}) => {
       }
     }
 
-    // Level 5: Ambiguous / Unknown question -> DO NOT GUESS! Flag as Missing Question (Checkpoint 1)
+    // Level 6: Ambiguous / Unknown question -> DO NOT GUESS! Flag as Missing Question (Checkpoint 1)
     missingQuestions.push({
       questionId: qId,
       fieldId: fId,
@@ -149,6 +187,14 @@ export const resolveAllFormAnswers = async (fields = [], context = {}) => {
       required: Boolean(field.required),
       options: field.options || [],
       placeholder: field.placeholder || '',
+    });
+  }
+
+  // Level 6: Persist missing questions if requested
+  if (autoPersistMissing && applicationId && missingQuestions.length > 0) {
+    await persistMissingQuestionsForUser({
+      applicationId,
+      missingQuestions,
     });
   }
 

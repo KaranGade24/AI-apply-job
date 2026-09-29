@@ -12,6 +12,7 @@ export const FIELD_TYPES = Object.freeze({
   DATE: 'date',
   EMAIL: 'email',
   PHONE: 'phone',
+  PASSWORD: 'password',
 });
 
 export const QUESTION_CATEGORIES = Object.freeze({
@@ -25,5 +26,6 @@ export const QUESTION_CATEGORIES = Object.freeze({
   YES_NO: 'yesNo',
   SUBJECTIVE: 'subjective',
   RESUME: 'resume',
+  CREDENTIALS: 'credentials',
   UNKNOWN: 'unknown',
 });

@@ -1,38 +1,28 @@
-import { logJobEvent, logError } from "../../utils/logger.js";
-import { executeAutonomousUnknownApplication } from "../unknown/unknownPageHandler.js";
-import { runGoogleFormApplication } from "./googleFormApplicationMethod.js";
-import { runPhoneApplication } from "./phoneApplicationMethod.js";
-import { sendApplicationEmail } from "../../integrations/email/emailService.js";
-import {
-  updateApplicationStatus,
-  updateApplicationEmail,
-} from "../../repositories/application.repository.js";
-import { APPLICATION_STATUS } from "../../constant/application.constant.js";
-import { formatAndCleanEmailBody } from "../../agent/prompt/applicationEmail.js";
-import { JobApplication } from "../../../src/model/JobApplication.js";
+import { logJobEvent, logError } from '../../utils/logger.js';
+import { executeAutonomousUnknownApplication } from '../unknown/unknownPageHandler.js';
+import { updateApplicationStatus } from '../../repositories/application.repository.js';
+import { APPLICATION_STATUS } from '../../constant/application.constant.js';
+import { JobApplication } from '../../model/JobApplication.js';
 
 /**
  * Runs the full Autonomous Unknown / Career Portal application method workflow.
  *
- * It:
- * 1. Opens the URL in a headless browser with user session state.
- * 2. Runs the autonomous multi-step loop:
- *    - Click initial Apply on job description/ATS.
- *    - Detect and click modal actions (e.g. "Start Your Application", "Autofill with Resume", "Apply Manually").
- *    - Attach candidate tailored resume PDF if file upload dropzones appear.
- *    - Extract and resolve questionnaire fields.
- *    - Record candidate auth gateway state if login/creation required (HTTP 200).
- * 3. Saves pageAnalysis and form fields on the JobApplication document.
+ * Uses the Observe → Analyze → Decide → Act → Verify browser-agent engine:
+ * 1. Restores user session / cookies if available
+ * 2. Runs the autonomous agent loop across pages, accordions, modals, and multi-step forms
+ * 3. Supports dynamic method handoff (Google Form, direct Email, Phone)
+ * 4. Supports Human-in-the-loop pause/resume (WAITING_FOR_USER / HUMAN_REQUIRED)
+ * 5. Supports WAITING_FOR_FINAL_REVIEW checkpoint before final form submission
  *
  * @param {object} params
  * @param {string} params.applicationId
- * @param {string} params.pageUrl - The unknown URL
- * @param {object} params.candidateInfo - Candidate resume data
+ * @param {string} params.pageUrl - Target job URL
+ * @param {object} params.candidateInfo - Candidate resume / profile data
  * @param {object} params.jobDetails - Job document
  * @param {string} params.userId
- * @param {string} [params.resumePdfPath] - Path to tailored resume PDF
+ * @param {string} [params.resumePdfPath] - Local tailored resume PDF path
  * @param {object} [params.sessionState] - Optional browser session state
- * @returns {Promise<object>} Result with detectedMethod, action taken, and status
+ * @returns {Promise<object>} Structured execution result
  */
 export const runUnknownApplicationMethod = async ({
   applicationId,
@@ -45,26 +35,22 @@ export const runUnknownApplicationMethod = async ({
 }) => {
   try {
     if (!pageUrl) {
-      throw new Error("No URL provided for unknown application method");
+      throw new Error('No URL provided for unknown application method');
     }
 
     await logJobEvent(
-      "unknownApplicationMethod",
-      "START",
-      `Analyzing unknown/portal application page: ${pageUrl}`,
+      'unknownApplicationMethod',
+      'START',
+      `Analyzing unknown/portal application page: ${pageUrl}`
     );
 
     if (applicationId) {
-      await updateApplicationStatus(
-        applicationId,
-        APPLICATION_STATUS.ANALYZING_PORTAL,
-        {
-          logMessage: `AI analyzing employer portal: ${pageUrl}`,
-        },
-      );
+      await updateApplicationStatus(applicationId, APPLICATION_STATUS.ANALYZING_PORTAL, {
+        logMessage: `AI browser agent analyzing portal: ${pageUrl}`,
+      });
     }
 
-    // Run the autonomous multi-step portal engine
+    // Run the autonomous browser agent
     const pageResult = await executeAutonomousUnknownApplication({
       url: pageUrl,
       job: jobDetails,
@@ -75,143 +61,57 @@ export const runUnknownApplicationMethod = async ({
       sessionState,
     });
 
-    const { detectedMethod } = pageResult;
+    const detectedMethod = pageResult.detectedMethod || pageResult.handoff?.method || 'unknown';
 
-    // Save pageAnalysis and inspected form fields on JobApplication
-    if (applicationId && pageResult.pageAnalysis) {
-      await JobApplication.findByIdAndUpdate(applicationId, {
-        pageAnalysis: {
-          ...pageResult.pageAnalysis,
-          currentUrl: pageResult.pageUrl || pageUrl,
-          analyzedAt: new Date(),
-        },
-        "form.fields": pageResult.formFields || [],
-        "form.requiresHuman": false,
-      });
-    }
-
-    // --- EMAIL ---
-    if (detectedMethod === "email") {
-      const recipientEmail =
-        pageResult.emailContact?.email ||
-        pageResult.emails?.[0] ||
-        jobDetails?.hrEmail ||
-        "";
-
-      if (recipientEmail) {
-        const candidateName =
-          candidateInfo?.personalInfo?.fullName ||
-          candidateInfo?.name ||
-          "Candidate";
-        const jobTitle = jobDetails?.title || "Software Developer";
-        const company = jobDetails?.company || "Company";
-        const refId =
-          pageResult.emailContact?.referenceId ||
-          pageResult.pageAnalysis?.matchedRole?.referenceId ||
-          "";
-
-        const subject = refId
-          ? `Application for ${jobTitle} - Ref ID: ${refId} - ${candidateName}`
-          : `Application for ${jobTitle} at ${company} - ${candidateName}`;
-
-        const rawBody = `Dear Hiring Team at ${company},
-
-I am writing to express my strong interest in the ${jobTitle} position${refId ? ` (Ref ID: ${refId})` : ""}. ${candidateInfo?.summary || `With expertise in ${(candidateInfo?.skills || []).slice(0, 4).join(", ")}, I am confident in delivering immediate value to your team.`}
-
-My tailored resume is attached for your review. I look forward to the opportunity to discuss my qualifications in an interview.
-
-Sincerely,
-
-${candidateName}`;
-
-        const body = formatAndCleanEmailBody(rawBody, candidateName);
-
-        if (applicationId) {
-          await updateApplicationEmail(applicationId, {
-            recipient: recipientEmail,
-            subject,
-            body,
-            approved: false,
-          });
-          await updateApplicationStatus(
-            applicationId,
-            APPLICATION_STATUS.WAITING_FOR_REVIEW,
-            {
-              logMessage: `Employer specifies email applications. Draft prepared for review with Ref ID: ${refId || "N/A"}.`,
-            },
-          );
-        }
-
-        return {
-          detectedMethod,
-          actionTaken: "email_prepared",
-          recipientEmail,
-          subject,
-          message: `Application email draft prepared for ${recipientEmail}`,
-          pageResult,
-        };
-      }
-    }
-
-    // --- GOOGLE FORM ---
-    if (detectedMethod === "google_form") {
-      const googleFormUrl = pageResult.googleFormUrl;
-      const formResult = await runGoogleFormApplication({
-        applicationId,
-        googleFormUrl,
-        candidateInfo,
-        jobDetails,
-        userId,
-        resumePdfPath,
-      });
+    // If dynamic handoff was executed (e.g. to Google Form, Phone, or Email)
+    if (pageResult.handoffExecuted) {
       return {
         detectedMethod,
-        actionTaken: formResult.submitted
-          ? "google_form_submitted"
-          : "google_form_filled",
-        googleFormUrl,
-        filledCount: formResult.filledCount,
-        submitted: formResult.submitted,
-        message: formResult.message,
+        actionTaken: 'handoff_executed',
+        handoffResult: pageResult.handoffResult,
+        status: pageResult.status,
+        message: pageResult.message || `Discovered ${detectedMethod} application method.`,
         pageResult,
       };
     }
 
-    // --- CUSTOM FORM / CAREER PORTAL ---
-    if (applicationId) {
-      await updateApplicationStatus(
-        applicationId,
-        APPLICATION_STATUS.WAITING_FOR_REVIEW,
-        {
-          logMessage: `Employer portal analyzed: ${pageResult.message}`,
-        },
-      );
+    // Persist any form fields or state to JobApplication
+    if (applicationId && (pageResult.formFields || pageResult.agentState)) {
+      const updateData = {};
+      if (pageResult.formFields) {
+        updateData['form.fields'] = pageResult.formFields;
+      }
+      if (pageResult.missingQuestions) {
+        updateData['form.missingQuestions'] = pageResult.missingQuestions;
+      }
+      if (pageResult.answeredQuestions) {
+        updateData['form.answers'] = pageResult.answeredQuestions;
+      }
+      if (Object.keys(updateData).length > 0) {
+        await JobApplication.findByIdAndUpdate(applicationId, updateData);
+      }
     }
 
     return {
-      detectedMethod: detectedMethod || "career_portal",
-      actionTaken: "waiting_for_review",
-      message:
-        pageResult.message || `Portal analyzed. Ready for candidate review.`,
+      detectedMethod,
+      actionTaken: pageResult.terminalState || 'in_progress',
+      status: pageResult.status || APPLICATION_STATUS.WAITING_FOR_REVIEW,
+      message: pageResult.message || 'Agent completed iteration.',
       pageResult,
     };
   } catch (error) {
-    await logError(
-      "unknownApplicationMethod.runUnknownApplicationMethod",
-      error.message,
-    );
+    await logError('unknownApplicationMethod.runUnknownApplicationMethod', error.message);
+
     if (applicationId) {
-      await updateApplicationStatus(
-        applicationId,
-        APPLICATION_STATUS.WAITING_FOR_REVIEW,
-        {
-          logMessage: `Portal navigation active. Manual review available.`,
-        },
-      );
+      await updateApplicationStatus(applicationId, APPLICATION_STATUS.WAITING_FOR_REVIEW, {
+        logMessage: `Portal navigation halted: ${error.message}. Manual review available.`,
+      });
     }
+
     return {
-      detectedMethod: "career_portal",
-      actionTaken: "waiting_for_review",
+      detectedMethod: 'unknown',
+      actionTaken: 'error_fallback',
+      status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
       message: error.message,
     };
   }

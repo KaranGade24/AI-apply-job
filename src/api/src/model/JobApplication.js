@@ -252,9 +252,52 @@ const jobApplicationSchema = new mongoose.Schema(
         type: String,
         default: "initialized",
       },
+      currentStage: {
+        type: String,
+        enum: ["initialized", "analyzing", "navigating", "formMode", "paused", "completed"],
+        default: "initialized",
+      },
       rejectionReason: {
         type: String,
         default: null,
+      },
+      agentState: {
+        visitedPages: [
+          {
+            url: { type: String },
+            title: { type: String, default: "" },
+            pageType: { type: String, default: "unknown" },
+            fingerprint: { type: String, default: "" },
+            visitedAt: { type: Date, default: Date.now },
+          },
+        ],
+        actions: [
+          {
+            type: { type: String },
+            target: { type: mongoose.Schema.Types.Mixed },
+            value: { type: String, default: null },
+            success: { type: Boolean, default: false },
+            pageChanged: { type: Boolean, default: false },
+            timestamp: { type: Date, default: Date.now },
+          },
+        ],
+        currentPage: {
+          url: { type: String, default: "" },
+          pageType: { type: String, default: "unknown" },
+          fingerprint: { type: String, default: "" },
+        },
+        discoveredMethod: { type: String, default: null },
+        counters: {
+          totalActions: { type: Number, default: 0 },
+          totalDecisions: { type: Number, default: 0 },
+          retriesForCurrentAction: { type: Number, default: 0 },
+          samePageVisits: { type: Number, default: 0 },
+        },
+        pendingHumanAction: {
+          reason: { type: String, default: null },
+          savedUrl: { type: String, default: null },
+          savedStorageState: { type: mongoose.Schema.Types.Mixed, default: null },
+        },
       },
       logs: [
         {

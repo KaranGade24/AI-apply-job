@@ -21,6 +21,8 @@ import { findUserProfileByUserId } from "../repositories/user.repository.js";
 import { getGeminiModel } from "../agent/config/modelConfig.js";
 import { runNaukriApplication } from "../integrations/applicationPlatforms/naukri/naukriApplication.js";
 import { runGoogleFormApplication } from "../application/methods/googleFormApplicationMethod.js";
+import { runUnknownApplicationMethod } from "../application/methods/unknownApplicationMethod.js";
+import { submitForm } from "../application/form/formSubmitter.js";
 import { extractPageContent } from "../application/pageAnalysis/pageContentExtractor.js";
 import { classifyPageWithLlm } from "../application/pageAnalysis/pageClassifierLlm.js";
 import { navigatePortalWithAiDecision } from "../application/pageAnalysis/pageNavigator.js";
@@ -320,6 +322,9 @@ export const approveAndSendApplication = async (applicationId, userId) => {
 
 /**
  * Checkpoint 1: Receives user answers for missing questionnaire questions and resumes application
+/**
+ * Checkpoint 1: Receives candidate answers for missing questionnaire questions and resumes application
+ * Supports both Naukri and generic UNKNOWN career portal applications.
  * @param {string} applicationId
  * @param {string} userId
  * @param {Array<object>} answers - Array of { questionId, answer }
@@ -342,14 +347,18 @@ export const submitMissingAnswersService = async (applicationId, userId, answers
       `Received ${answers.length} user answers for application ${applicationId}`
     );
 
-    // Run Naukri application with userAnswers
-    const res = await runNaukriApplication({
-      applicationId,
-      userId,
-      userAnswers: answers,
-    });
+    const isNaukri = Boolean(application.naukriDetails?.jobId || application.job?.source === 'naukri');
+    if (isNaukri) {
+      await runNaukriApplication({
+        applicationId,
+        userId,
+        userAnswers: answers,
+      });
+      return await findApplicationById(applicationId);
+    }
 
-    return await findApplicationById(applicationId);
+    // Generic UNKNOWN career portal application flow
+    return await resumeUnknownApplicationWithAnswersService(applicationId, userId, answers);
   } catch (error) {
     await logError('applicationService.submitMissingAnswersService', error.message);
     throw error;
@@ -357,7 +366,79 @@ export const submitMissingAnswersService = async (applicationId, userId, answers
 };
 
 /**
- * Checkpoint 2: Receives final user confirmation and triggers final submission on Naukri
+ * Resumes the generic UNKNOWN browser agent loop after candidate supplies missing answers
+ * (e.g. passwords, verification codes, additional questionnaire answers).
+ */
+export const resumeUnknownApplicationWithAnswersService = async (applicationId, userId, answers = []) => {
+  const application = await JobApplication.findById(applicationId).populate('jobId');
+  if (!application) {
+    throw new appError("Application not found", 404);
+  }
+
+  // 1. Merge submitted answers into form.answers
+  const currentAnswers = application.form?.answers || [];
+  const existingMap = new Map();
+  currentAnswers.forEach((a) => existingMap.set(a.questionId, a));
+
+  answers.forEach((ans) => {
+    existingMap.set(ans.questionId, {
+      questionId: ans.questionId,
+      answer: ans.answer,
+      source: 'user',
+      confidence: 1.0,
+      userConfirmed: true,
+    });
+  });
+
+  const mergedAnswers = Array.from(existingMap.values());
+
+  // 2. Filter out answered questions from missingQuestions
+  const answeredIds = new Set(answers.map((a) => a.questionId));
+  const remainingMissing = (application.form?.missingQuestions || []).filter(
+    (q) => !answeredIds.has(q.questionId)
+  );
+
+  await JobApplication.findByIdAndUpdate(applicationId, {
+    'form.answers': mergedAnswers,
+    'form.missingQuestions': remainingMissing,
+    status: APPLICATION_STATUS.AI_RUNNING,
+  });
+
+  const savedUrl =
+    application.workflow?.agentState?.pendingHumanAction?.savedUrl ||
+    application.jobId?.applicationUrl ||
+    application.jobId?.sourceUrl;
+
+  const savedStorageState =
+    application.workflow?.agentState?.pendingHumanAction?.savedStorageState || null;
+
+  const candidateResume =
+    application.resume?.tailoredResumeData ||
+    (await getActiveResumeByUserId(userId));
+
+  await logJobEvent(
+    'resumeUnknownApplicationWithAnswersService',
+    'RESUMING',
+    `Resuming generic agent for app ${applicationId} at ${savedUrl}`
+  );
+
+  // Resume the UNKNOWN browser agent loop
+  await runUnknownApplicationMethod({
+    applicationId,
+    pageUrl: savedUrl,
+    candidateInfo: candidateResume,
+    jobDetails: application.jobId,
+    userId,
+    resumePdfPath: application.resume?.pdfPath || null,
+    sessionState: savedStorageState,
+  });
+
+  return await findApplicationById(applicationId);
+};
+
+/**
+ * Checkpoint 2: Receives final user confirmation and triggers final submission
+ * Supports both Naukri and generic UNKNOWN career portal applications.
  * @param {string} applicationId
  * @param {string} userId
  * @param {object} payload
@@ -381,19 +462,113 @@ export const confirmFinalApplicationService = async (applicationId, userId, payl
       `User confirmed final application ${applicationId}. Submitting...`
     );
 
-    // Run Naukri application with confirmSubmission = true
-    const res = await runNaukriApplication({
-      applicationId,
-      userId,
-      confirmSubmission: true,
-      finalEditedAnswers: payload.confirmedAnswers || [],
-    });
+    const isNaukri = Boolean(application.naukriDetails?.jobId || application.job?.source === 'naukri');
+    if (isNaukri) {
+      await runNaukriApplication({
+        applicationId,
+        userId,
+        confirmSubmission: true,
+        finalEditedAnswers: payload.confirmedAnswers || [],
+      });
+      return await findApplicationById(applicationId);
+    }
 
-    return await findApplicationById(applicationId);
+    // Generic UNKNOWN career portal final submission flow
+    return await submitFinalUnknownApplicationService(applicationId, userId, payload);
   } catch (error) {
     await logError('applicationService.confirmFinalApplicationService', error.message);
     throw error;
   }
+};
+
+/**
+ * Checkpoint 2 for generic UNKNOWN applications:
+ * Clicks the final submit button on the review page, verifies submission, and marks APPLIED.
+ */
+export const submitFinalUnknownApplicationService = async (applicationId, userId, payload = {}) => {
+  const application = await JobApplication.findById(applicationId).populate('jobId');
+  if (!application) {
+    throw new appError("Application not found", 404);
+  }
+
+  // 1. Update review fields if candidate edited any answers
+  if (Array.isArray(payload.confirmedAnswers) && payload.confirmedAnswers.length > 0) {
+    const reviewFields = application.form?.reviewFields || [];
+    payload.confirmedAnswers.forEach((ans) => {
+      const match = reviewFields.find((f) => f.questionId === ans.questionId);
+      if (match) {
+        match.answer = ans.answer;
+        match.source = 'user';
+      }
+    });
+
+    await JobApplication.findByIdAndUpdate(applicationId, {
+      'form.reviewFields': reviewFields,
+    });
+  }
+
+  await updateApplicationStatus(applicationId, APPLICATION_STATUS.SUBMITTING, {
+    logMessage: "Submitting application on employer portal after candidate confirmation...",
+  });
+
+  const savedUrl =
+    application.workflow?.agentState?.pendingHumanAction?.savedUrl ||
+    application.jobId?.applicationUrl ||
+    application.jobId?.sourceUrl;
+
+  const savedStorageState =
+    application.workflow?.agentState?.pendingHumanAction?.savedStorageState || null;
+
+  let browser = null;
+  let context = null;
+  let page = null;
+
+  try {
+    const session = await BrowserManager.launchWithSession({
+      storageState: savedStorageState,
+      headless: true,
+    });
+    browser = session.browser;
+    context = session.context;
+    page = session.page;
+
+    await page.goto(savedUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await page.waitForTimeout(2000);
+
+    const submitResult = await submitForm(page);
+
+    if (submitResult.submitted && (submitResult.successDetected || !submitResult.errorMessage)) {
+      await updateApplicationStatus(applicationId, APPLICATION_STATUS.APPLIED, {
+        logMessage: "Application confirmed and successfully submitted to employer portal!",
+      });
+
+      await JobApplication.findByIdAndUpdate(applicationId, {
+        'form.submittedAt': new Date(),
+        status: APPLICATION_STATUS.APPLIED,
+      });
+
+      await logJobEvent(
+        'submitFinalUnknownApplicationService',
+        'APPLIED',
+        `Application ${applicationId} submitted successfully.`
+      );
+    } else {
+      const errorMsg = submitResult.errorMessage || "Submission button clicked but confirmation not detected.";
+      await updateApplicationStatus(applicationId, APPLICATION_STATUS.WAITING_FOR_FINAL_REVIEW, {
+        logMessage: `Submission issue: ${errorMsg}. Please review.`,
+      });
+      await logError('submitFinalUnknownApplicationService', errorMsg);
+    }
+  } catch (err) {
+    await logError('submitFinalUnknownApplicationService', err.message);
+    await updateApplicationStatus(applicationId, APPLICATION_STATUS.WAITING_FOR_FINAL_REVIEW, {
+      logMessage: `Error submitting application: ${err.message}`,
+    });
+  } finally {
+    await BrowserManager.closeSafely({ page, context, browser });
+  }
+
+  return await findApplicationById(applicationId);
 };
 
 /**

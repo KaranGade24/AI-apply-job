@@ -39,6 +39,12 @@ export const APPLICATION_STATUS = Object.freeze({
   WAITING_FOR_FINAL_REVIEW: "waiting_for_final_review",
   SUBMITTING: "submitting",
   SUBMITTED: "Applied",
+  // Generic browser agent statuses
+  AI_RUNNING: "ai_running",
+  WAITING_FOR_USER: "waiting_for_user",
+  PAUSED: "paused",
+  FORM_FILLED: "form_filled",
+  SUBMIT_ATTEMPTED: "submit_attempted",
 });
 
 export const PORTAL_PAGE_TYPES = Object.freeze({
@@ -76,6 +82,11 @@ export const HUMAN_REASONS = Object.freeze({
   TWO_FACTOR_AUTH: "2fa",
   SESSION_EXPIRED: "sessionExpired",
   VALIDATION_MISMATCH: "validationMismatch",
+  LOGIN_REQUIRED: "loginRequired",
+  UNKNOWN_QUESTION: "unknownQuestion",
+  AMBIGUOUS_ANSWER: "ambiguousAnswer",
+  PERMISSION_REQUIRED: "permissionRequired",
+  FINAL_SUBMISSION: "finalSubmission",
 });
 
 /**
@@ -93,6 +104,126 @@ export const APPLICATION_METHOD = Object.freeze({
   // Legacy alias kept for backward compatibility
   WEBSITE_FORM: "unknown",
 });
+
+/**
+ * Browser Actions — executed by Playwright via browserActionExecutor.
+ * These are the ONLY actions that touch the browser DOM.
+ */
+export const BROWSER_ACTIONS = Object.freeze({
+  NAVIGATE: "navigate",
+  CLICK: "click",
+  FILL: "fill",
+  TYPE: "type",
+  SELECT: "select",
+  CHECK: "check",
+  UNCHECK: "uncheck",
+  UPLOAD: "upload",
+  SCROLL: "scroll",
+  WAIT: "wait",
+  GO_BACK: "goBack",
+  CLOSE_MODAL: "closeModal",
+});
+
+/**
+ * System Actions — internal operations triggered by the agent loop,
+ * NOT directly by the LLM. The agent loop transitions to these
+ * based on page classification (e.g., pageType === APPLICATION_FORM → inspectForm).
+ */
+export const SYSTEM_ACTIONS = Object.freeze({
+  INSPECT_FORM: "inspectForm",
+  SUBMIT: "submit",
+});
+
+/**
+ * Control Decisions — workflow routing decisions from the LLM.
+ * These do NOT execute browser actions. They control agent flow.
+ */
+export const CONTROL_DECISIONS = Object.freeze({
+  HANDOFF: "handoff",
+  HUMAN_REQUIRED: "humanRequired",
+  FINISH: "finish",
+});
+
+/**
+ * Extended page types for the UNKNOWN browser agent.
+ * Used by the two-stage classification pipeline (Stage 1: classify, Stage 2: decide).
+ */
+export const PAGE_TYPES = Object.freeze({
+  JOB_LISTING: "job_listing",
+  JOB_DESCRIPTION: "job_description",
+  ROLE_SELECTION: "role_selection",
+  APPLICATION_FORM: "application_form",
+  MULTI_STEP_FORM: "multi_step_form",
+  MODAL_FORM: "modal_form",
+  ATS_GATEWAY: "ats_gateway",
+  LOGIN_PAGE: "login_page",
+  OTP_PAGE: "otp_page",
+  GOOGLE_FORM: "google_form",
+  EMAIL_INSTRUCTIONS: "email_instructions",
+  EXTERNAL_APPLICATION: "external_application",
+  FORM_CLOSED: "form_closed",
+  SUCCESS_PAGE: "success_page",
+  UNKNOWN: "unknown",
+});
+
+/**
+ * Agent terminal states — end conditions for the Observe→Decide→Act→Verify loop.
+ */
+export const AGENT_TERMINAL_STATES = Object.freeze({
+  SUCCESS: "success",
+  HUMAN_REQUIRED: "human_required",
+  FAILED: "failed",
+  BLOCKED: "blocked",
+  CLOSED: "closed",
+});
+
+/**
+ * Safety limits for the UNKNOWN agent loop.
+ * ACTIVE_RUN_TIMEOUT_MS only counts active browser execution time.
+ * Human wait time (login, OTP, question answers) does NOT count against this.
+ */
+export const AGENT_LOOP_LIMITS = Object.freeze({
+  MAX_ACTIONS: 50,
+  MAX_RETRIES_PER_ACTION: 3,
+  MAX_SAME_PAGE_VISITS: 3,
+  MAX_AI_DECISIONS: 50,
+  ACTIVE_RUN_TIMEOUT_MS: 300000, // 5 minutes of active browser time
+});
+
+/**
+ * Handoff methods for dynamic method discovery during the UNKNOWN agent loop.
+ * When the agent discovers the site is actually a known method, it hands off.
+ */
+export const HANDOFF_METHODS = Object.freeze({
+  EMAIL: "email",
+  PHONE: "phone",
+  GOOGLE_FORM: "googleForm",
+  GENERIC_FORM: "genericForm",
+});
+
+/**
+ * Known ATS domains that are safe for navigation without additional validation.
+ */
+export const KNOWN_ATS_DOMAINS = Object.freeze([
+  "greenhouse.io",
+  "lever.co",
+  "myworkdayjobs.com",
+  "smartrecruiters.com",
+  "taleo.net",
+  "icims.com",
+  "jobvite.com",
+  "bamboohr.com",
+  "ashbyhq.com",
+  "breezy.hr",
+  "recruitee.com",
+  "workable.com",
+  "jazz.co",
+  "applytojob.com",
+  "boards.greenhouse.io",
+  "jobs.lever.co",
+  "docs.google.com",
+  "forms.gle",
+]);
 
 export const RESUME_TEMPLATES = [
   {

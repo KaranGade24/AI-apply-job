@@ -3,14 +3,14 @@ import { generateQuestionId } from './formNormalizer.js';
 import { logJobEvent } from '../../utils/logger.js';
 
 /**
- * Inspects the current page DOM to extract questionnaire fields and modal state
+ * Inspects the current page DOM to extract questionnaire fields, steppers, password requirements, and modal state
  * @param {import('playwright').Page} page
  * @returns {Promise<object>}
  */
 export const inspectForm = async (page) => {
   try {
     if (!page || page.isClosed()) {
-      return { isQuestionnairePresent: false, fields: [], buttons: [] };
+      return { isQuestionnairePresent: false, fields: [], buttons: [], stepperState: { hasStepper: false } };
     }
 
     const formSnapshot = await page.evaluate((fieldTypes) => {
@@ -28,12 +28,83 @@ export const inspectForm = async (page) => {
         }
       }
 
-      // Check if page already shows "Applied" confirmation
+      // 2. Stepper / Multi-Stage Detection
+      let stepperState = { hasStepper: false, currentStep: 1, totalSteps: 1, steps: [], activeStepName: '' };
+      const stepperContainers = document.querySelectorAll(
+        '[role="tablist"], .stepper, .step-indicator, [class*="wizard" i], [class*="stepper" i], [class*="progressBar" i], [data-automation-id*="step" i], ol[class*="step" i], ul[class*="step" i]'
+      );
+
+      for (const sc of stepperContainers) {
+        const stepItems = sc.querySelectorAll('[role="tab"], li, [class*="step-item" i], [class*="stepItem" i], [class*="step" i]');
+        if (stepItems.length >= 2) {
+          const stepNames = [];
+          let activeIndex = 1;
+          stepItems.forEach((st, idx) => {
+            const stText = (st.textContent || '').trim().replace(/\s+/g, ' ');
+            const isActive =
+              st.getAttribute('aria-selected') === 'true' ||
+              st.getAttribute('aria-current') === 'step' ||
+              /active|current|selected/i.test(st.className || '');
+            if (stText && stText.length < 60) {
+              stepNames.push(stText);
+              if (isActive) activeIndex = idx + 1;
+            }
+          });
+
+          if (stepNames.length >= 2) {
+            stepperState = {
+              hasStepper: true,
+              currentStep: activeIndex,
+              totalSteps: stepNames.length,
+              steps: stepNames,
+              activeStepName: stepNames[activeIndex - 1] || '',
+            };
+            break;
+          }
+        }
+      }
+
       const pageText = document.body.innerText || '';
+
+      // Fallback text-based stepper detection (e.g. "Step 1 of 5")
+      if (!stepperState.hasStepper) {
+        const stepTextMatch = pageText.match(/step\s*([0-9]+)\s*(?:of|\/)\s*([0-9]+)(?:\s*[:#-]?\s*([A-Za-z0-9_ -]+))?/i);
+        if (stepTextMatch) {
+          stepperState = {
+            hasStepper: true,
+            currentStep: parseInt(stepTextMatch[1], 10) || 1,
+            totalSteps: parseInt(stepTextMatch[2], 10) || 1,
+            steps: [stepTextMatch[3] ? stepTextMatch[3].trim() : `Step ${stepTextMatch[1]}`],
+            activeStepName: stepTextMatch[3] ? stepTextMatch[3].trim() : `Step ${stepTextMatch[1]}`,
+          };
+        }
+      }
+
+      // 3. Extract Password Requirements if visible on page
+      const passwordReqList = [];
+      const reqHeaders = Array.from(document.querySelectorAll('h1, h2, h3, h4, h5, p, span, div, strong')).filter(
+        (el) => /password requirements/i.test(el.textContent || '')
+      );
+
+      if (reqHeaders.length > 0) {
+        const parentContainer = reqHeaders[0].closest('div, section, form') || reqHeaders[0].parentElement;
+        if (parentContainer) {
+          const listItems = parentContainer.querySelectorAll('li, p');
+          listItems.forEach((li) => {
+            const txt = (li.textContent || '').trim();
+            if (txt && !/password requirements/i.test(txt) && txt.length < 80) {
+              passwordReqList.push(txt);
+            }
+          });
+        }
+      }
+
+      // Check if page already shows "Applied" confirmation
       const isAlreadyApplied =
         pageText.includes('Applied successfully') ||
         pageText.includes('You have successfully applied') ||
         pageText.includes('Application submitted') ||
+        pageText.includes('Thank you for applying') ||
         Boolean(document.querySelector('.already-applied, [class*="applied-banner"]'));
 
       // Check for security prompts (CAPTCHA / OTP / 2FA)
@@ -56,7 +127,9 @@ export const inspectForm = async (page) => {
         'input:not([type="hidden"]):not([type="submit"]):not([type="button"]), textarea, select, [role="radiogroup"], [role="group"]'
       );
 
+      let hasPasswordField = false;
       let counter = 0;
+
       elements.forEach((el) => {
         // Skip invisible elements
         if (el.offsetParent === null && el.type !== 'file') return;
@@ -81,6 +154,9 @@ export const inspectForm = async (page) => {
           detectedType = fieldTypes.EMAIL;
         } else if (inputType === 'tel' || inputType === 'phone') {
           detectedType = fieldTypes.PHONE;
+        } else if (inputType === 'password') {
+          detectedType = fieldTypes.PASSWORD;
+          hasPasswordField = true;
         }
 
         // Find label or associated question text
@@ -117,6 +193,11 @@ export const inspectForm = async (page) => {
         // Clean question text (remove asterisk, duplicate spaces)
         questionText = questionText.replace(/\s+/g, ' ').replace(/^\*|\*$/g, '').trim();
 
+        // Detect terms of use agreement checkbox
+        const isTermsAgreement =
+          detectedType === fieldTypes.CHECKBOX &&
+          /terms|privacy|acknowledge|agree|conditions/i.test(questionText);
+
         // Extract options if select or radio group
         const options = [];
         if (detectedType === fieldTypes.SELECT) {
@@ -148,28 +229,43 @@ export const inspectForm = async (page) => {
             required: el.required || el.getAttribute('aria-required') === 'true' || questionText.includes('*'),
             options,
             currentValue: el.value || '',
+            requirements: detectedType === fieldTypes.PASSWORD ? passwordReqList : [],
+            isTermsAgreement,
           });
           counter++;
         }
       });
 
-      // Find actionable buttons (Next / Continue / Save & Apply / Submit)
+      // Find actionable buttons (Create Account / Next / Continue / Save & Apply / Submit)
       const buttons = [];
       const btnEls = root.querySelectorAll('button, input[type="submit"], a.btn, [role="button"]');
       btnEls.forEach((b) => {
         const txt = (b.textContent || b.value || '').trim().toLowerCase();
-        if (/submit|save & apply|apply now|confirm/i.test(txt)) {
+        if (/create account|sign up|register/i.test(txt)) {
+          buttons.push({ type: 'create_account', text: b.textContent.trim(), selector: b.id ? `#${b.id}` : `button:has-text("${b.textContent.trim()}")` });
+        } else if (/sign in|log in/i.test(txt)) {
+          buttons.push({ type: 'sign_in', text: b.textContent.trim(), selector: b.id ? `#${b.id}` : `button:has-text("${b.textContent.trim()}")` });
+        } else if (/submit|save & apply|apply now|confirm/i.test(txt)) {
           buttons.push({ type: 'submit', text: b.textContent.trim(), selector: b.id ? `#${b.id}` : `button:has-text("${b.textContent.trim()}")` });
-        } else if (/next|continue|proceed/i.test(txt)) {
+        } else if (/next|continue|proceed|save & continue|save and continue/i.test(txt)) {
           buttons.push({ type: 'next', text: b.textContent.trim(), selector: b.id ? `#${b.id}` : `button:has-text("${b.textContent.trim()}")` });
         }
       });
+
+      const isAccountCreation = hasPasswordField && (
+        /create account/i.test(pageText) ||
+        buttons.some((b) => b.type === 'create_account') ||
+        fields.some((f) => /verify|confirm/i.test(f.question))
+      );
 
       return {
         isAlreadyApplied,
         hasCaptcha,
         hasOtp,
         has2fa,
+        hasPasswordField,
+        isAccountCreation,
+        stepperState,
         fields,
         buttons,
         isQuestionnairePresent: fields.length > 0,
@@ -185,7 +281,7 @@ export const inspectForm = async (page) => {
     await logJobEvent(
       'inspectForm',
       'INSPECTED',
-      `Found ${normalizedFields.length} fields on current form. Already applied: ${formSnapshot.isAlreadyApplied}`
+      `Found ${normalizedFields.length} fields on current form. AccountCreation: ${formSnapshot.isAccountCreation}, Stepper: ${formSnapshot.stepperState?.hasStepper ? `Step ${formSnapshot.stepperState.currentStep}/${formSnapshot.stepperState.totalSteps}` : 'none'}`
     );
 
     return {
@@ -200,6 +296,9 @@ export const inspectForm = async (page) => {
       hasCaptcha: false,
       hasOtp: false,
       has2fa: false,
+      hasPasswordField: false,
+      isAccountCreation: false,
+      stepperState: { hasStepper: false, currentStep: 1, totalSteps: 1, steps: [] },
       fields: [],
       buttons: [],
     };
