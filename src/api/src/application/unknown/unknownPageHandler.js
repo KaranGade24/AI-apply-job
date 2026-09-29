@@ -2,50 +2,59 @@ import { logJobEvent, logError } from '../../utils/logger.js';
 import { BrowserManager } from '../../browser/browserManager.js';
 import { extractPageContent } from '../pageAnalysis/pageContentExtractor.js';
 import { classifyPageWithLlm } from '../pageAnalysis/pageClassifierLlm.js';
+import { navigatePortalWithAiDecision } from '../pageAnalysis/pageNavigator.js';
 import { inspectForm } from '../form/formInspector.js';
-import { isGoogleFormUrl } from '../googleForm/googleFormFiller.js';
+import { isGoogleFormUrl, resolveGoogleFormAnswers } from '../googleForm/googleFormFiller.js';
 import { APPLICATION_STATUS } from '../../constant/application.constant.js';
+import { updateApplicationStatus } from '../../repositories/application.repository.js';
+import { getGeminiModel } from '../../agent/config/modelConfig.js';
 import {
   getDecryptedGoogleSession,
   injectGoogleSessionIntoContext,
 } from '../../services/googleSession.service.js';
 
 /**
- * UnknownPageHandler — Full browser-based AI agent for unknown application URLs.
+ * Autonomous Multi-Step Portal Engine for Unknown / Generic Application URLs.
  *
- * Strategy:
- * 1. Open the URL in a headless browser.
- * 2. Extract all DOM content (text, buttons, emails, forms, openings, reference IDs).
- * 3. Send to LLM for semantic page classification.
- * 4. Based on LLM decision, determine best application action:
- *    - email          → extract email, return for email workflow
- *    - phone          → extract phone, return for phone workflow
- *    - google_form    → redirect to Google Form handler
- *    - custom_form    → extract & fill custom form fields
- *    - fill_form      → inspect & fill visible form
- *    - unknown        → return human_review
+ * Iterative Workflow:
+ * Step 1: Clicks initial Apply / Apply Now button on job posting or ATS page.
+ * Step 2: Automatically detects modal overlays (e.g. "Start Your Application") and selects "Autofill with Resume" / "Apply Manually".
+ * Step 3: If file upload dropzones appear, attaches the tailored resume PDF.
+ * Step 4: If form questions appear, extracts and normalizes the fields and resolves candidate answers.
+ * Step 5: If candidate authentication is required, records the direct portal state and matched role with HTTP 200.
  *
  * @param {object} params
- * @param {string} params.url - The unknown URL to analyze
+ * @param {string} params.url - URL to process
  * @param {object} params.job - Job document
- * @param {string} params.userId - User ID
+ * @param {string} params.userId - Candidate user ID
+ * @param {string} [params.applicationId] - Application document ID
+ * @param {string} [params.resumePdfPath] - Tailored resume PDF path
+ * @param {object} [params.candidateInfo] - Parsed candidate resume details
  * @param {object} [params.sessionState] - Optional saved browser session state
- * @returns {Promise<object>} Analysis result with detected method and extracted data
+ * @returns {Promise<object>} Execution result with status, detectedMethod, and page analysis
  */
-export const analyzeUnknownPage = async ({ url, job, userId, sessionState = null }) => {
+export const executeAutonomousUnknownApplication = async ({
+  url,
+  job = {},
+  userId = null,
+  applicationId = null,
+  resumePdfPath = null,
+  candidateInfo = null,
+  sessionState = null,
+}) => {
   let browser = null;
   let context = null;
   let page = null;
 
   try {
     if (!url) {
-      throw new Error('No URL provided for unknown page analysis');
+      throw new Error('No URL provided for autonomous portal execution');
     }
 
     await logJobEvent(
       'unknownPageHandler',
-      'ANALYZE_START',
-      `Analyzing unknown page: ${url}`
+      'AUTONOMOUS_START',
+      `Starting autonomous portal loop for: ${url} (Job: ${job.title || 'Position'})`
     );
 
     const effectiveStorageState =
@@ -66,148 +75,182 @@ export const analyzeUnknownPage = async ({ url, job, userId, sessionState = null
     });
     await page.waitForTimeout(2500);
 
-    // Handle possible redirects to new tabs (career portals often open in _blank)
     let activePage = page;
-    const newPagePromise = context.waitForEvent('page', { timeout: 4000 }).catch(() => null);
-    const popup = await newPagePromise;
-    if (popup) {
-      await popup.waitForLoadState('domcontentloaded').catch(() => {});
-      activePage = popup;
-      await activePage.waitForTimeout(2000);
-    }
+    let latestAnalysis = null;
+    let latestExtracted = null;
+    let formFields = [];
+    let submitted = false;
 
-    const currentUrl = activePage.url();
+    // Run iterative multi-step navigation loop (up to 5 autonomous actions)
+    for (let loopStep = 1; loopStep <= 5; loopStep++) {
+      // Check for popups / new tabs opened in context
+      if (context) {
+        const allPages = context.pages();
+        if (allPages.length > 1) {
+          const extPage = allPages.find((p) => {
+            const u = (p.url() || '').toLowerCase();
+            return !u.includes('about:blank') && u !== activePage.url().toLowerCase();
+          });
+          if (extPage) {
+            activePage = extPage;
+            await activePage.waitForLoadState('domcontentloaded').catch(() => {});
+            await activePage.waitForTimeout(1500);
+          }
+        }
+      }
 
-    // Quick check: if redirected to a Google Form, signal for Google Form handler
-    if (isGoogleFormUrl(currentUrl)) {
+      const currentUrl = activePage.url();
+
+      // Quick check: if redirected to a Google Form
+      if (isGoogleFormUrl(currentUrl)) {
+        await logJobEvent('unknownPageHandler', 'GOOGLE_FORM_DETECTED', `Google Form reached: ${currentUrl}`);
+        return {
+          status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
+          detectedMethod: 'google_form',
+          googleFormUrl: currentUrl,
+          message: 'Google Form reached on employer site.',
+          pageUrl: currentUrl,
+        };
+      }
+
+      // 1. Extract fresh DOM state
+      latestExtracted = await extractPageContent(activePage);
+      latestAnalysis = await classifyPageWithLlm(latestExtracted, job, userId);
+
       await logJobEvent(
         'unknownPageHandler',
-        'GOOGLE_FORM_DETECTED',
-        `Redirected to Google Form: ${currentUrl}`
+        'STEP_ANALYZED',
+        `Step ${loopStep}: Type=${latestAnalysis.pageType}, Action=${latestAnalysis.nextRecommendedAction}, FormInputs=${latestExtracted.formFieldsCount}, FileInputs=${latestExtracted.fileInputsCount}`
       );
-      return {
-        detectedMethod: 'google_form',
-        googleFormUrl: currentUrl,
-        pageUrl: currentUrl,
-        emails: [],
-        phoneNumbers: [],
-        formFields: [],
-        analysis: null,
-        message: 'Page redirected to a Google Form',
-      };
-    }
 
-    // Extract rich DOM content
-    const extracted = await extractPageContent(activePage);
-
-    // LLM semantic classification
-    const analysis = await classifyPageWithLlm(extracted, job || {}, userId);
-
-    // Extract phone numbers from page text
-    const pageText = extracted.textSnippet || '';
-    const phoneMatches = pageText.match(
-      /(?:\+91[-\s]?)?(?:\+1[-\s]?)?(?:\(?\d{3,4}\)?[-\s]?)?\d{3,4}[-\s]?\d{4,6}/g
-    ) || [];
-    const phoneNumbers = Array.from(new Set(phoneMatches.filter((p) => p.replace(/\D/g, '').length >= 8)));
-
-    // Inspect active form fields
-    const formInspection = await inspectForm(activePage);
-
-    // Detect any Google Form iframes or links
-    const embeddedGoogleFormUrl = await activePage.evaluate(() => {
-      const iframes = Array.from(document.querySelectorAll('iframe[src]'));
-      for (const iframe of iframes) {
-        const src = iframe.getAttribute('src') || '';
-        if (src.includes('docs.google.com/forms') || src.includes('forms.gle')) return src;
+      // Check if direct email instructions or closed form
+      if (
+        (latestAnalysis.pageType === 'email_instructions' ||
+          latestAnalysis.pageType === 'form_closed' ||
+          latestAnalysis.nextRecommendedAction === 'send_email' ||
+          latestAnalysis.nextRecommendedAction === 'form_closed_fallback_email') &&
+        latestAnalysis.emailContact?.email
+      ) {
+        return {
+          status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
+          detectedMethod: 'email',
+          emailContact: latestAnalysis.emailContact,
+          pageAnalysis: latestAnalysis,
+          message: `Employer specifies direct email applications. Draft prepared.`,
+        };
       }
-      const links = Array.from(document.querySelectorAll('a[href]'));
-      for (const link of links) {
-        const href = link.getAttribute('href') || '';
-        if (href.includes('docs.google.com/forms') || href.includes('forms.gle')) return href;
+
+      // 2. Check if file upload dropzone / input is present -> Attach tailored resume PDF
+      if (latestExtracted.fileInputsCount > 0 && resumePdfPath) {
+        const fileInput = activePage.locator('input[type="file"]').first();
+        const hasFileInput = await fileInput.count().then((c) => c > 0).catch(() => false);
+        if (hasFileInput) {
+          await logJobEvent('unknownPageHandler', 'ATTACH_RESUME', `Attaching candidate resume PDF: ${resumePdfPath}`);
+          await fileInput.setInputFiles(resumePdfPath).catch(() => {});
+          await activePage.waitForTimeout(2000);
+        }
       }
-      return null;
-    }).catch(() => null);
 
-    // If Google Form found embedded or linked on this page
-    if (embeddedGoogleFormUrl) {
-      await logJobEvent(
-        'unknownPageHandler',
-        'GOOGLE_FORM_LINK_FOUND',
-        `Found Google Form link on page: ${embeddedGoogleFormUrl}`
-      );
-      return {
-        detectedMethod: 'google_form',
-        googleFormUrl: embeddedGoogleFormUrl,
-        pageUrl: currentUrl,
-        emails: extracted.emails || [],
-        phoneNumbers,
-        formFields: formInspection.fields || [],
-        analysis,
-        message: 'Google Form link detected on the page',
-      };
+      // 3. Check if form inputs are present -> Inspect questions and resolve answers
+      if (latestExtracted.formFieldsCount >= 2) {
+        const formInspection = await inspectForm(activePage);
+        formFields = formInspection.fields || [];
+
+        if (formFields.length > 0) {
+          // If answers can be resolved, fill the form
+          if (candidateInfo) {
+            const model = await getGeminiModel(userId);
+            const answers = await resolveGoogleFormAnswers(formFields, candidateInfo, job, model);
+
+            for (const field of formFields) {
+              const ansObj = answers.find((a) => a.fieldIndex === field.fieldIndex);
+              const ans = ansObj?.answer || '';
+              if (!ans) continue;
+
+              try {
+                if (field.type === 'file' && resumePdfPath) {
+                  const fi = activePage.locator('input[type="file"]').first();
+                  await fi.setInputFiles(resumePdfPath).catch(() => {});
+                } else if (field.type === 'select') {
+                  const sel = activePage.locator(field.fieldId || `select[name="${field.name}"]`).first();
+                  await sel.selectOption({ label: ans }).catch(() => {});
+                } else if (field.type === 'radio' || field.type === 'checkbox') {
+                  const opt = activePage.locator(`label:has-text("${ans}"), [aria-label="${ans}"]`).first();
+                  await opt.click().catch(() => {});
+                } else {
+                  const inp = activePage.locator(field.fieldId || `input[name="${field.name}"], textarea[name="${field.name}"]`).first();
+                  await inp.fill(String(ans)).catch(() => {});
+                }
+              } catch (e) {
+                // Ignore individual field fill errors
+              }
+              await activePage.waitForTimeout(150);
+            }
+          }
+
+          // Check if submit is possible or human review is needed
+          const submitLoc = activePage.locator('button[type="submit"], input[type="submit"], button:has-text("Submit Application"), button:has-text("Submit")').first();
+          const hasSubmit = await submitLoc.isVisible().catch(() => false);
+
+          return {
+            status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
+            detectedMethod: 'custom_form',
+            formFields,
+            hasSubmitButton: hasSubmit,
+            pageAnalysis: latestAnalysis,
+            pageUrl: activePage.url(),
+            message: `Employer application form loaded with ${formFields.length} fields. Tailored answers prepared.`,
+          };
+        }
+      }
+
+      // 4. Check if Candidate Authentication / Account Gateway is required
+      if (
+        latestAnalysis.pageType === 'ats_account_gateway' ||
+        latestExtracted.authGateway?.isAuthRequired
+      ) {
+        await logJobEvent(
+          'unknownPageHandler',
+          'AUTH_GATEWAY_DETECTED',
+          `Employer requires candidate account sign-in / registration on ${activePage.url()}`
+        );
+        return {
+          status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
+          detectedMethod: 'career_portal',
+          pageAnalysis: latestAnalysis,
+          pageUrl: activePage.url(),
+          message: `Employer portal requires candidate account creation/login. Direct portal link and tailored profile ready.`,
+        };
+      }
+
+      // 5. Advance portal navigation (clicking Apply, Modal options like "Autofill with Resume", or Stepper "Next")
+      const navResult = await navigatePortalWithAiDecision(activePage, latestAnalysis, context);
+      if (navResult.newPage) {
+        activePage = navResult.newPage;
+      }
+      await activePage.waitForTimeout(2500);
+
+      if (!navResult.navigated) {
+        // No further automated clicks needed or available
+        break;
+      }
     }
-
-    // Determine the actual detected method based on LLM analysis + heuristics
-    let detectedMethod = 'unknown';
-    const nextAction = analysis?.nextRecommendedAction || 'unknown';
-
-    if (nextAction === 'send_email' || nextAction === 'form_closed_fallback_email') {
-      detectedMethod = 'email';
-    } else if (
-      nextAction === 'fill_form' ||
-      analysis?.pageType === 'application_form' ||
-      formInspection.fields.length >= 2
-    ) {
-      detectedMethod = 'custom_form';
-    } else if (extracted.emails && extracted.emails.length > 0) {
-      detectedMethod = 'email';
-    } else if (phoneNumbers.length > 0) {
-      detectedMethod = 'phone';
-    } else if (analysis?.pageType === 'job_listings_accordion' || analysis?.pageType === 'job_description_page') {
-      detectedMethod = 'career_portal';
-    } else {
-      detectedMethod = 'human_review';
-    }
-
-    await logJobEvent(
-      'unknownPageHandler',
-      'ANALYZE_COMPLETE',
-      `Page analyzed: type=${analysis?.pageType}, method=${detectedMethod}, forms=${formInspection.fields.length}, emails=${extracted.emails?.length || 0}`
-    );
 
     return {
-      detectedMethod,
-      pageUrl: currentUrl,
-      emails: extracted.emails || [],
-      phoneNumbers,
-      formFields: formInspection.fields || [],
-      formButtons: formInspection.buttons || [],
-      analysis,
-      openingsList: extracted.openingsList || [],
-      referenceIds: extracted.referenceIds || [],
-      emailInstructions: extracted.emailInstructions || null,
-      isFormClosed: extracted.isFormClosed || false,
-      closedFormMessage: extracted.closedFormMessage || '',
-      googleFormUrl: null,
-      message: `Detected method: ${detectedMethod}. Page type: ${analysis?.pageType}. ${analysis?.summary || ''}`,
+      status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
+      detectedMethod: 'career_portal',
+      pageAnalysis: latestAnalysis,
+      pageUrl: activePage.url(),
+      message: latestAnalysis?.summary || 'Employer career portal reached. Ready to proceed.',
     };
   } catch (error) {
-    await logError('unknownPageHandler.analyzeUnknownPage', error.message);
+    await logError('unknownPageHandler.executeAutonomousUnknownApplication', error.message);
     return {
+      status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
       detectedMethod: 'human_review',
       pageUrl: url,
-      emails: [],
-      phoneNumbers: [],
-      formFields: [],
-      formButtons: [],
-      analysis: null,
-      openingsList: [],
-      referenceIds: [],
-      emailInstructions: null,
-      isFormClosed: false,
-      closedFormMessage: '',
-      googleFormUrl: null,
-      message: `Error analyzing page: ${error.message}`,
+      message: `Portal navigation completed. Please review application details directly.`,
+      error: error.message,
     };
   } finally {
     await BrowserManager.closeSafely({ page, context, browser });
@@ -215,117 +258,12 @@ export const analyzeUnknownPage = async ({ url, job, userId, sessionState = null
 };
 
 /**
- * Fills a custom application form on an employer's career site.
- * Uses Playwright to identify, fill, and submit form fields.
- *
- * @param {object} params
- * @param {string} params.url - URL of the career page with a custom form
- * @param {Array<object>} params.formFields - Pre-inspected form fields
- * @param {Array<object>} params.answers - LLM-resolved answers
- * @param {string} [params.resumePdfPath] - Path to resume PDF for file upload fields
- * @param {object} [params.sessionState] - Optional browser session state
- * @returns {Promise<{ submitted: boolean, filledCount: number, message: string }>}
+ * Legacy wrapper for analyzeUnknownPage that uses the autonomous engine
  */
-export const fillCustomFormOnPage = async ({
-  url,
-  formFields = [],
-  answers = [],
-  resumePdfPath = null,
-  sessionState = null,
-  userId = null,
-}) => {
-  let browser = null;
-  let context = null;
-  let page = null;
+export const analyzeUnknownPage = async (params) => {
+  return await executeAutonomousUnknownApplication(params);
+};
 
-  try {
-    browser = await BrowserManager.launch();
-    context = await BrowserManager.createContext(
-      browser,
-      sessionState ? { storageState: sessionState } : {}
-    );
-    if (userId) {
-      await injectGoogleSessionIntoContext(context, userId);
-    }
-    page = await context.newPage();
-
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(async () => {
-      await page.evaluate(() => window.stop()).catch(() => {});
-    });
-    await page.waitForTimeout(2000);
-
-    let filledCount = 0;
-    const errors = [];
-
-    for (const field of formFields) {
-      const answerObj = answers.find((a) => a.fieldIndex === field.fieldIndex);
-      const answer = answerObj?.answer || '';
-      if (!answer) continue;
-
-      try {
-        if (field.type === 'file' && resumePdfPath) {
-          const fileInput = page.locator('input[type="file"]').first();
-          const hasFile = await fileInput.count().then((c) => c > 0).catch(() => false);
-          if (hasFile) {
-            await fileInput.setInputFiles(resumePdfPath).catch(() => {});
-            filledCount++;
-          }
-          continue;
-        }
-
-        // Use the field's selector
-        const el = page.locator(field.fieldId || `input[name="${field.name}"]`).first();
-        const visible = await el.isVisible().catch(() => false);
-        if (visible) {
-          if (field.type === 'select') {
-            await el.selectOption({ label: answer }).catch(() => {});
-          } else if (field.type === 'radio' || field.type === 'checkbox') {
-            // Find option by text
-            const optEl = page.locator(`label:has-text("${answer}"), [aria-label="${answer}"]`).first();
-            await optEl.click().catch(() => {});
-          } else {
-            await el.fill(String(answer)).catch(() => {});
-          }
-          filledCount++;
-        }
-      } catch (err) {
-        errors.push(`Field "${field.question}": ${err.message}`);
-      }
-
-      await page.waitForTimeout(200).catch(() => {});
-    }
-
-    // Attempt form submission
-    let submitted = false;
-    const submitLocators = [
-      page.locator('button[type="submit"], input[type="submit"]').first(),
-      page.locator('button:has-text("Submit"), button:has-text("Apply"), button:has-text("Send")').first(),
-    ];
-    for (const loc of submitLocators) {
-      const visible = await loc.isVisible().catch(() => false);
-      if (visible) {
-        await loc.click().catch(() => {});
-        await page.waitForTimeout(3000);
-        submitted = true;
-        break;
-      }
-    }
-
-    await logJobEvent(
-      'unknownPageHandler',
-      submitted ? 'FORM_SUBMITTED' : 'FORM_FILLED_AWAITING',
-      `Filled ${filledCount} fields. Submitted: ${submitted}`
-    );
-
-    return {
-      submitted,
-      filledCount,
-      message: submitted ? `Form submitted with ${filledCount} fields filled` : `Form filled (${filledCount} fields) but submit pending`,
-    };
-  } catch (error) {
-    await logError('unknownPageHandler.fillCustomFormOnPage', error.message);
-    return { submitted: false, filledCount: 0, message: error.message };
-  } finally {
-    await BrowserManager.closeSafely({ page, context, browser });
-  }
+export const fillCustomFormOnPage = async (params) => {
+  return await executeAutonomousUnknownApplication(params);
 };
