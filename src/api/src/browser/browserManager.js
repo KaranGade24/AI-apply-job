@@ -25,6 +25,25 @@ export class BrowserManager {
   }
 
   /**
+   * Convenience helper to launch browser, create context (with optional storageState), and create page
+   * @param {object} [options]
+   * @param {object} [options.storageState]
+   * @param {boolean} [options.headless]
+   * @returns {Promise<{browser: import('playwright').Browser, context: import('playwright').BrowserContext, page: import('playwright').Page}>}
+   */
+  static async launchWithSession(options = {}) {
+    try {
+      const browser = await this.launch(options);
+      const context = await this.createContext(browser, options);
+      const page = await context.newPage();
+      return { browser, context, page };
+    } catch (error) {
+      await logError('browserManager.launchWithSession', error.message);
+      throw error;
+    }
+  }
+
+  /**
    * Creates an isolated browser context, optionally restoring from authenticated storageState
    * @param {import('playwright').Browser} browser
    * @param {object} [options]
