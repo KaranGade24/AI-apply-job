@@ -547,12 +547,18 @@ export const submitFinalUnknownApplicationService = async (applicationId, userId
     page = session.page;
 
     await page.goto(savedUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await page.waitForTimeout(2000);
+    await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
+    await page.waitForSelector('input, textarea, select, button, [data-automation-id]', { timeout: 8000 }).catch(() => {});
+    await page.waitForTimeout(1500);
 
     // 1. If candidate confirmed/edited answers, ensure they are batch filled in DOM and verified
     if (Array.isArray(payload.confirmedAnswers) && payload.confirmedAnswers.length > 0) {
       const currentInspection = await inspectForm(page);
-      const currentFields = currentInspection.fields || [];
+      const currentFields =
+        currentInspection.fields && currentInspection.fields.length > 0
+          ? currentInspection.fields
+          : application.form?.fields || [];
+
       const formattedAnswers = payload.confirmedAnswers.map((a) => ({
         questionId: a.questionId,
         fieldId: a.fieldId || a.questionId,
@@ -569,8 +575,23 @@ export const submitFinalUnknownApplicationService = async (applicationId, userId
     // 2. inspectForm() ONCE to check current step buttons & state
     const formInspection = await inspectForm(page);
     const buttons = formInspection.buttons || [];
-    const nextBtn = buttons.find((b) => b.type === 'create_account' || b.type === 'next');
-    const submitBtn = buttons.find((b) => b.type === 'submit');
+    let nextBtn = buttons.find((b) => b.type === 'create_account' || b.type === 'next');
+    let submitBtn = buttons.find((b) => b.type === 'submit');
+
+    // Fallback locator search for Workday / ATS Create Account / Continue / Submit buttons if not found in snapshot
+    if (!nextBtn && !submitBtn) {
+      const createAccountLocator = page.locator('button:has-text("Create Account"), [data-automation-id="createAccountSubmitButton"], button:has-text("Sign In"), button:has-text("Next"), button:has-text("Continue"), [data-automation-id="bottom-navigation-next-button"]').first();
+      const hasCreateBtn = await createAccountLocator.isVisible({ timeout: 2500 }).catch(() => false);
+      if (hasCreateBtn) {
+        nextBtn = { type: 'create_account', text: 'Create Account', selector: 'button:has-text("Create Account"), [data-automation-id="createAccountSubmitButton"]' };
+      } else {
+        const submitLocator = page.locator('button:has-text("Submit"), [data-automation-id="bottom-navigation-submit-button"], button:has-text("Apply")').first();
+        const hasSubmit = await submitLocator.isVisible({ timeout: 2500 }).catch(() => false);
+        if (hasSubmit) {
+          submitBtn = { type: 'submit', text: 'Submit', selector: 'button:has-text("Submit"), [data-automation-id="bottom-navigation-submit-button"]' };
+        }
+      }
+    }
 
     const isFinalStep =
       (!nextBtn && Boolean(submitBtn)) ||

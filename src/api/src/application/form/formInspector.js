@@ -16,13 +16,13 @@ export const inspectForm = async (page) => {
     const formSnapshot = await page.evaluate((fieldTypes) => {
       // 1. Detect if any modal, drawer, or questionnaire container exists
       const modalContainers = document.querySelectorAll(
-        '.apply-modal, .chatbot_drawer, .drawer, [class*="apply-container"], [class*="applyModal"], [class*="application-form"], [class*="apply_form"], form, [role="dialog"]'
+        '.apply-modal, .chatbot_drawer, .drawer, [class*="apply-container"], [class*="applyModal"], [class*="application-form"], [class*="apply_form"], form, [role="dialog"], [data-automation-id*="page" i], [data-automation-id*="form" i]'
       );
 
-      // Prefer modal container if present, else fallback to main document body
+      // Prefer modal container if present and containing inputs, else fallback to document.body
       let root = document.body;
       for (const m of modalContainers) {
-        if (m.offsetParent !== null || m.offsetHeight > 100) {
+        if ((m.offsetParent !== null || m.offsetHeight > 100) && m.querySelector('input, textarea, select, [role="checkbox"], [role="radiogroup"]')) {
           root = m;
           break;
         }
@@ -118,21 +118,36 @@ export const inspectForm = async (page) => {
         pageText.includes('Two-Factor Authentication') || pageText.includes('verification code')
       );
 
-      // Extract all form input fields within root
+      // Extract all form input fields within root or fallback to document.body
       const fields = [];
       const seenNames = new Set();
 
-      // Find all questions / inputs
-      const elements = root.querySelectorAll(
+      // Find all questions / inputs with document.body fallback
+      let elements = Array.from(root.querySelectorAll(
         'input:not([type="hidden"]):not([type="submit"]):not([type="button"]), textarea, select, [role="radiogroup"], [role="group"], [role="checkbox"]'
-      );
+      ));
+
+      if (elements.length === 0 && root !== document.body) {
+        elements = Array.from(document.body.querySelectorAll(
+          'input:not([type="hidden"]):not([type="submit"]):not([type="button"]), textarea, select, [role="radiogroup"], [role="group"], [role="checkbox"]'
+        ));
+      }
 
       let hasPasswordField = false;
       let counter = 0;
 
+      const isElementVisible = (el) => {
+        if (el.type === 'file' || el.type === 'checkbox' || el.type === 'radio' || el.getAttribute('role') === 'checkbox') return true;
+        if (el.offsetParent !== null) return true;
+        const rect = el.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) return true;
+        const style = window.getComputedStyle(el);
+        return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+      };
+
       elements.forEach((el) => {
-        // Skip invisible elements
-        if (el.offsetParent === null && el.type !== 'file') return;
+        // Skip truly hidden/invisible elements
+        if (!isElementVisible(el)) return;
 
         const tagName = el.tagName.toLowerCase();
         const inputType = (el.getAttribute('type') || '').toLowerCase();
@@ -268,17 +283,29 @@ export const inspectForm = async (page) => {
 
       // Find actionable buttons (Create Account / Next / Continue / Save & Apply / Submit)
       const buttons = [];
-      const btnEls = root.querySelectorAll('button, input[type="submit"], a.btn, [role="button"]');
+      let btnEls = Array.from(root.querySelectorAll('button, input[type="submit"], a.btn, [role="button"], [data-automation-id*="button" i], [data-automation-id*="submit" i], [data-automation-id*="next" i], [data-automation-id*="create" i]'));
+      if (btnEls.length === 0 && root !== document.body) {
+        btnEls = Array.from(document.body.querySelectorAll('button, input[type="submit"], a.btn, [role="button"], [data-automation-id*="button" i], [data-automation-id*="submit" i], [data-automation-id*="next" i], [data-automation-id*="create" i]'));
+      }
       btnEls.forEach((b) => {
-        const txt = (b.textContent || b.value || '').trim().toLowerCase();
-        if (/create account|sign up|register/i.test(txt)) {
-          buttons.push({ type: 'create_account', text: b.textContent.trim(), selector: b.id ? `#${b.id}` : `button:has-text("${b.textContent.trim()}")` });
-        } else if (/sign in|log in/i.test(txt)) {
-          buttons.push({ type: 'sign_in', text: b.textContent.trim(), selector: b.id ? `#${b.id}` : `button:has-text("${b.textContent.trim()}")` });
-        } else if (/submit|save & apply|apply now|confirm/i.test(txt)) {
-          buttons.push({ type: 'submit', text: b.textContent.trim(), selector: b.id ? `#${b.id}` : `button:has-text("${b.textContent.trim()}")` });
-        } else if (/next|continue|proceed|save & continue|save and continue/i.test(txt)) {
-          buttons.push({ type: 'next', text: b.textContent.trim(), selector: b.id ? `#${b.id}` : `button:has-text("${b.textContent.trim()}")` });
+        const txt = (b.textContent || b.value || b.getAttribute('aria-label') || b.getAttribute('data-automation-id') || '').trim().toLowerCase();
+        const autoId = b.getAttribute('data-automation-id') || '';
+        const selector = b.id
+          ? `#${b.id}`
+          : autoId
+          ? `[data-automation-id="${autoId}"]`
+          : b.textContent?.trim()
+          ? `button:has-text("${b.textContent.trim()}")`
+          : `[role="button"]`;
+
+        if (/create account|sign up|register/i.test(txt) || /createAccount/i.test(autoId)) {
+          buttons.push({ type: 'create_account', text: b.textContent.trim() || 'Create Account', selector });
+        } else if (/sign in|log in/i.test(txt) || /signIn/i.test(autoId)) {
+          buttons.push({ type: 'sign_in', text: b.textContent.trim() || 'Sign In', selector });
+        } else if (/submit|save & apply|apply now|confirm/i.test(txt) || /submit/i.test(autoId)) {
+          buttons.push({ type: 'submit', text: b.textContent.trim() || 'Submit', selector });
+        } else if (/next|continue|proceed|save & continue|save and continue/i.test(txt) || /next/i.test(autoId) || /continue/i.test(autoId)) {
+          buttons.push({ type: 'next', text: b.textContent.trim() || 'Next', selector });
         }
       });
 
