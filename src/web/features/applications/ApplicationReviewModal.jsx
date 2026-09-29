@@ -1548,13 +1548,29 @@ export const ApplicationReviewModal = ({
                                 <span className="text-xs font-bold text-slate-900">
                                   AI Page & Portal Intelligence
                                 </span>
-                                {application?.pageAnalysis?.pageType && (
+                                {application?.pageAnalysis && (
                                   <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider ${
                                     application.pageAnalysis.isFormClosed || application.pageAnalysis.pageType === 'form_closed'
                                       ? 'bg-rose-100 text-rose-800'
                                       : 'bg-indigo-100 text-indigo-800'
                                   }`}>
-                                    {application.pageAnalysis.isFormClosed ? 'FORM CLOSED / EXPIRED' : application.pageAnalysis.pageType.replace(/_/g, ' ')}
+                                    {application.pageAnalysis.isFormClosed
+                                      ? 'FORM CLOSED / EXPIRED'
+                                      : application.pageAnalysis.pageType === 'multi_step_wizard'
+                                      ? `MULTI-STEP (${application.pageAnalysis.workflow?.currentStepName || `STEP ${application.pageAnalysis.workflow?.currentStep || 1}`})`
+                                      : application.pageAnalysis.pageType === 'modal_application_form'
+                                      ? 'APPLICATION MODAL'
+                                      : application.pageAnalysis.pageType === 'ats_account_gateway'
+                                      ? 'CANDIDATE SIGN-IN GATEWAY'
+                                      : application.pageAnalysis.pageType === 'external_ats' || (application.pageAnalysis.currentUrl && application.pageAnalysis.currentUrl.includes('myworkdayjobs'))
+                                      ? 'WORKDAY / ATS PORTAL'
+                                      : application.pageAnalysis.pageType === 'job_description_page'
+                                      ? 'JOB POSTING'
+                                      : application.pageAnalysis.pageType === 'job_listings_accordion'
+                                      ? 'MULTI-ROLE DIRECTORY'
+                                      : application.pageAnalysis.pageType === 'application_form'
+                                      ? 'APPLICATION FORM'
+                                      : (application.pageAnalysis.pageType || 'PORTAL').replace(/_/g, ' ')}
                                   </span>
                                 )}
                               </div>

@@ -820,8 +820,10 @@ export const runNaukriApplication = async ({
         await activePage.waitForTimeout(3000);
       }
 
-      // Check if clicking submit opened an external company site or popup
+      // Check if clicking submit opened an external company site, forwarder, or popup
       if (context) {
+        // Give popup/redirect up to 5 seconds to initiate
+        await activePage.waitForTimeout(2000);
         const allPages = context.pages();
         if (allPages.length > 1) {
           const externalOrGooglePage = allPages.find((p) => {
@@ -840,8 +842,45 @@ export const runNaukriApplication = async ({
         }
       }
 
+      // Handle intermediate forwarders (e.g. naukri.com/myapply/showAcp)
+      let currentUrlAfterSubmit = (activePage.url() || '').toLowerCase();
+      if (currentUrlAfterSubmit.includes('showacp') || currentUrlAfterSubmit.includes('myapply')) {
+        await logJobEvent('naukriApplication', 'FORWARDER_DETECTED', `Intermediate forwarder URL: ${activePage.url()}`);
+        await activePage.waitForTimeout(3000);
+
+        // Check if a new tab was created during forwarder wait
+        if (context) {
+          const pagesNow = context.pages();
+          const extPage = pagesNow.find((p) => {
+            const u = (p.url() || '').toLowerCase();
+            return !u.includes('naukri.com') && !u.includes('about:blank');
+          });
+          if (extPage) {
+            activePage = extPage;
+            await activePage.waitForLoadState('domcontentloaded').catch(() => {});
+          }
+        }
+
+        currentUrlAfterSubmit = (activePage.url() || '').toLowerCase();
+        // If still on showAcp, check for any redirect links inside the page
+        if (currentUrlAfterSubmit.includes('showacp')) {
+          const destUrl = await activePage.evaluate(() => {
+            const link = document.querySelector('a[href*="http"]:not([href*="naukri.com"])');
+            if (link) return link.href;
+            const iframe = document.querySelector('iframe[src*="http"]:not([src*="naukri.com"])');
+            if (iframe) return iframe.src;
+            return null;
+          }).catch(() => null);
+
+          if (destUrl) {
+            await activePage.goto(destUrl, { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
+            await activePage.waitForTimeout(3000);
+            currentUrlAfterSubmit = (activePage.url() || '').toLowerCase();
+          }
+        }
+      }
+
       // If activePage has navigated to an external company site or Google Form
-      const currentUrlAfterSubmit = (activePage.url() || '').toLowerCase();
       const isExternalAfterSubmit =
         currentUrlAfterSubmit.includes('docs.google.com/forms') ||
         currentUrlAfterSubmit.includes('forms.gle') ||
@@ -884,7 +923,7 @@ export const runNaukriApplication = async ({
           };
         }
 
-        // Run LLM page classifier on the external company site
+        // Run LLM page classifier on the external company site / Workday
         const extractedExt = await extractPageContent(activePage);
         const analysisExt = await classifyPageWithLlm(extractedExt, job, userId);
 
@@ -898,16 +937,50 @@ export const runNaukriApplication = async ({
           },
         });
 
-        if (analysisExt.pageType === 'job_listings_accordion' || analysisExt.nextRecommendedAction === 'click_opening_apply') {
-          await navigatePortalWithAiDecision(activePage, analysisExt, context);
-          await activePage.waitForTimeout(2000);
+        // If it's an ATS (e.g. Workday), single job description, or listings accordion, navigate and click Apply
+        if (
+          analysisExt.pageType === 'external_ats' ||
+          analysisExt.pageType === 'job_description_page' ||
+          analysisExt.pageType === 'job_listings_accordion' ||
+          analysisExt.nextRecommendedAction === 'click_opening_apply' ||
+          analysisExt.nextRecommendedAction === 'fill_form'
+        ) {
+          await updateApplicationStatus(applicationId, APPLICATION_STATUS.APPLYING, {
+            logMessage: `Clicking Apply on employer portal (${analysisExt.matchedRole?.title || job.title})...`,
+          });
+
+          const navResult = await navigatePortalWithAiDecision(activePage, analysisExt, context);
+          if (navResult.newPage) {
+            activePage = navResult.newPage;
+          }
+          await activePage.waitForTimeout(3000);
+
+          // Check if post-apply page is an application form or confirmed submission
+          const postExtNavExtracted = await extractPageContent(activePage);
+          if (postExtNavExtracted.formFieldsCount > 0) {
+            const formInspection = await inspectForm(activePage);
+            await JobApplication.findByIdAndUpdate(applicationId, {
+              status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
+              'form.requiresHuman': false,
+              'form.fields': formInspection.fields || [],
+            });
+
+            await updateApplicationStatus(applicationId, APPLICATION_STATUS.WAITING_FOR_REVIEW, {
+              logMessage: `Employer application form loaded with ${formInspection.fields?.length || postExtNavExtracted.formFieldsCount} fields. Ready for candidate review.`,
+            });
+            return {
+              status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
+              message: `Employer application form opened on ${activePage.url()}. Form fields inspected.`,
+              pageAnalysis: analysisExt,
+            };
+          }
         } else if (analysisExt.emailContact?.email) {
-          const refId = analysisExt.emailContact.referenceId;
+          const refId = analysisExt.emailContact.referenceId || analysisExt.matchedRole?.referenceId;
           await JobApplication.findByIdAndUpdate(applicationId, {
             applicationMethod: 'email',
             'email.recipient': analysisExt.emailContact.email,
             'email.subject': `Application: ${job.title}${refId ? ` (Ref: ${refId})` : ''}`,
-            'email.body': `Dear Hiring Team,\n\nI am applying for the ${job.title} position at ${job.company}.\n\nBest regards,\n${userDoc?.fullName || 'Applicant'}`,
+            'email.body': `Dear Hiring Team,\n\nI am applying for the ${job.title} position at ${job.company}.${refId ? ` (Reference ID: ${refId})` : ''}\n\nBest regards,\n${userDoc?.fullName || 'Applicant'}`,
             status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
           });
           return {
@@ -915,6 +988,16 @@ export const runNaukriApplication = async ({
             message: `Employer specifies direct email application. Draft ready for review.`,
           };
         }
+
+        // Return gracefully with the analyzed company portal state
+        await updateApplicationStatus(applicationId, APPLICATION_STATUS.WAITING_FOR_REVIEW, {
+          logMessage: `Employer portal active: ${analysisExt.summary || activePage.url()}`,
+        });
+        return {
+          status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
+          message: analysisExt.summary || 'Employer career portal reached. Ready to proceed.',
+          pageAnalysis: analysisExt,
+        };
       }
 
       // Verify submission

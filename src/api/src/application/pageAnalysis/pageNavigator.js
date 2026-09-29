@@ -27,7 +27,40 @@ export const navigatePortalWithAiDecision = async (page, analysis, context = nul
       `Executing action: "${nextRecommendedAction}" for role: "${effectiveRole.title || 'Unknown'}" (Ref ID: ${effectiveRole.referenceId || 'N/A'})`
     );
 
-    // 1. Action: Click Opening Accordion / Role Card and then click its inner "Apply Now"
+    // 0. High-Priority: Target Selector or Target Button provided directly by AI
+    const customSelector = analysis?.targetSelector || effectiveRole.targetSelector;
+    const customButtonText = effectiveRole.targetButtonText || analysis?.matchedRole?.targetButtonText;
+
+    if (customSelector) {
+      const customLoc = page.locator(customSelector).first();
+      const isVisible = await customLoc.isVisible().catch(() => false);
+      if (isVisible) {
+        await logJobEvent('pageNavigator', 'CLICK_AI_TARGET', `Clicking AI identified target: ${customSelector}`);
+        let newPagePromise = null;
+        if (context) {
+          newPagePromise = context.waitForEvent('page', { timeout: 6000 }).catch(() => null);
+        }
+
+        await customLoc.click().catch(() => {});
+        let activePage = page;
+        if (newPagePromise) {
+          const popupPage = await newPagePromise;
+          if (popupPage) {
+            await popupPage.waitForLoadState('domcontentloaded').catch(() => {});
+            activePage = popupPage;
+          }
+        }
+        await activePage.waitForTimeout(2500);
+        return {
+          success: true,
+          newPage: activePage,
+          navigated: true,
+          message: `Clicked AI target element: ${customSelector}`,
+        };
+      }
+    }
+
+    // 1. Action: Click Opening Accordion / Role Card and then click its inner "Apply" / "Autofill"
     if (nextRecommendedAction === 'click_opening_apply' || pageType === 'job_listings_accordion') {
       const roleTitle = effectiveRole.title || '';
       let targetElement = null;
@@ -56,10 +89,9 @@ export const navigatePortalWithAiDecision = async (page, analysis, context = nul
         await page.waitForTimeout(1200);
       }
 
-      // Step B: Locate the inner "Apply Now" or "Apply" button
-      const buttonText = effectiveRole.targetButtonText || 'Apply Now';
+      // Step B: Locate the inner "Apply Now", "Apply", or AI target button
+      const buttonText = customButtonText || 'Apply';
       const applyBtnLocators = [
-        // Inside parent container of matched role
         targetElement
           ? targetElement
               .locator('..')
@@ -73,10 +105,10 @@ export const navigatePortalWithAiDecision = async (page, analysis, context = nul
               .locator(`button:has-text("${buttonText}"), a:has-text("${buttonText}"), [role="button"]:has-text("${buttonText}")`)
               .first()
           : null,
+        page.locator(`[data-automation-id="apply-button"]`).first(),
         page.locator(`button:has-text("${buttonText}")`).first(),
         page.locator(`a:has-text("${buttonText}")`).first(),
         page.locator(`[role="button"]:has-text("${buttonText}")`).first(),
-        page.locator(`text="${buttonText}"`).first(),
         page.locator(`button:has-text("Apply")`).first(),
         page.locator(`a:has-text("Apply")`).first(),
       ].filter(Boolean);
@@ -87,9 +119,8 @@ export const navigatePortalWithAiDecision = async (page, analysis, context = nul
       for (const btnLoc of applyBtnLocators) {
         const visible = await btnLoc.isVisible().catch(() => false);
         if (visible) {
-          await logJobEvent('pageNavigator', 'CLICK_APPLY', `Clicking inner button: "${buttonText}" for ${roleTitle}`);
+          await logJobEvent('pageNavigator', 'CLICK_APPLY', `Clicking button: "${buttonText}" for ${roleTitle}`);
 
-          // Prepare to capture any new page / popup if company site uses target="_blank"
           let newPagePromise = null;
           if (context) {
             newPagePromise = context.waitForEvent('page', { timeout: 6000 }).catch(() => null);
@@ -120,18 +151,12 @@ export const navigatePortalWithAiDecision = async (page, analysis, context = nul
           message: `Successfully clicked "${buttonText}" for ${roleTitle}`,
         };
       }
-
-      return {
-        success: false,
-        navigated: false,
-        message: `Expanded "${roleTitle}", but could not locate inner "${buttonText}" button.`,
-      };
     }
 
     // 2. Action: Click single Job Description Apply button
     if (nextRecommendedAction === 'click_description_apply' || pageType === 'job_description_page') {
       const applyBtn = page
-        .locator('button:has-text("Apply"), a:has-text("Apply"), [role="button"]:has-text("Apply")')
+        .locator('button:has-text("Apply"), a:has-text("Apply"), [role="button"]:has-text("Apply"), [data-automation-id="apply-button"]')
         .first();
 
       const visible = await applyBtn.isVisible().catch(() => false);
@@ -143,9 +168,10 @@ export const navigatePortalWithAiDecision = async (page, analysis, context = nul
       }
     }
 
-    // 3. Action: External ATS (Workday, Greenhouse, Lever, SmartRecruiters, etc.)
+    // 3. Action: External ATS (Workday, Greenhouse, Lever, SmartRecruiters, Taleo, etc.)
     if (
       nextRecommendedAction === 'fill_form' ||
+      nextRecommendedAction === 'click_button' ||
       pageType === 'external_ats'
     ) {
       const atsApplyLocators = [
