@@ -216,6 +216,23 @@ export const resolveAllFormAnswers = async (fields = [], context = {}) => {
       continue;
     }
 
+    // Level 3.5: Sensitive / Legal Guard (Never invent sponsorship, citizenship, demographic, or criminal answers)
+    const { guardSensitiveQuestion } = await import('../../browser/safety/sensitiveQuestionGuard.js');
+    const sensitiveCheck = guardSensitiveQuestion(field, { ...userProfile, preferences: userSetting });
+    if (sensitiveCheck.isSensitive && !sensitiveCheck.canAutoResolve) {
+      missingQuestions.push({
+        questionId: qId,
+        fieldId: fId,
+        question: field.question,
+        type: field.type,
+        required: Boolean(field.required),
+        options: field.options || [],
+        placeholder: field.placeholder || '',
+        reason: sensitiveCheck.reason,
+      });
+      continue;
+    }
+
     // Level 4: Subjective AI questions (e.g. "Why are you interested in this position?")
     // Collect for ONE single batch LLM call across all subjective questions on this page
     if (category === QUESTION_CATEGORIES.SUBJECTIVE) {

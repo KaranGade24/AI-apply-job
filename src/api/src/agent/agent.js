@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import resumeGraph from './graph/resumeGraph.js';
 import { jobDiscoveryGraph } from './graph/jobDiscoveryGraph.js';
 import { jobApplicationGraph } from './graph/jobApplicationGraph.js';
+import { applicationGraph } from './graph/applicationGraph.js';
 import { logError, logResumeEvent } from '../utils/logger.js';
 import { appError } from '../utils/errors.js';
 
@@ -11,7 +12,8 @@ import { appError } from '../utils/errors.js';
 export const agents = Object.freeze({
   resume: resumeGraph,
   jobDiscovery: jobDiscoveryGraph,
-  jobApplication: jobApplicationGraph
+  jobApplication: jobApplicationGraph,
+  browserApplication: applicationGraph,
 });
 
 /**

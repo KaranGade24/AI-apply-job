@@ -250,6 +250,30 @@ const jobApplicationSchema = new mongoose.Schema(
       message: { type: String, default: "" },
       analyzedAt: { type: Date, default: null },
     },
+    currentState: {
+      type: String,
+      default: "INIT",
+      index: true,
+    },
+    browserSessionId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "BrowserSession",
+      default: null,
+    },
+    submissionVerification: {
+      verified: { type: Boolean, default: false },
+      verificationLevel: { type: String, default: null },
+      confirmationId: { type: String, default: null },
+      submittedAt: { type: Date, default: null },
+      evidence: [{ type: String }],
+      screenshotUrl: { type: String, default: null },
+    },
+    preSubmissionReview: {
+      readyForReview: { type: Boolean, default: false },
+      userConfirmed: { type: Boolean, default: false },
+      confirmedAt: { type: Date, default: null },
+      summary: { type: mongoose.Schema.Types.Mixed, default: null },
+    },
     workflow: {
       threadId: {
         type: String,

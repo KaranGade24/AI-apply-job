@@ -5,9 +5,20 @@ import {
   HANDOFF_METHODS,
   PAGE_TYPES,
   APPLICATION_STATUS,
+  APPLICATION_STATES,
+  VERIFICATION_LEVELS,
   AGENT_LOOP_LIMITS,
 } from '../../constant/application.constant.js';
 import { BrowserManager } from '../../browser/browserManager.js';
+import { observeBrowser } from '../../browser/observer/browserObserver.js';
+import { validateProposedAction } from '../../browser/executor/actionValidator.js';
+import { executeBrowserAction } from '../../browser/executor/browserExecutor.js';
+import { verifyStateTransition } from '../../browser/verifier/stateVerifier.js';
+import { classifyFailure } from '../../browser/recovery/failureClassifier.js';
+import { executeRecoveryStrategy } from '../../browser/recovery/recoveryManager.js';
+import { evaluateSubmissionSafety } from '../../browser/safety/submissionGuard.js';
+import { recordApplicationEvent } from '../../repositories/applicationEvent.repository.js';
+import { upsertBrowserSession, updateSessionCheckpoint } from '../../repositories/browserSession.repository.js';
 import { extractPageContent } from '../pageAnalysis/pageContentExtractor.js';
 import { normalizePage } from '../pageAnalysis/pageNormalizer.js';
 import { classifyPageWithLlm } from '../pageAnalysis/pageClassifierLlm.js';
@@ -658,56 +669,117 @@ export const executeAgentLoop = async ({
         }
       }
 
-      // === EXECUTE BROWSER ACTION ===
-      previousNormalized = normalizedState;
+      // === VALIDATE PROPOSED ACTION ===
+      const preObservation = await observeBrowser(page);
+      const actionValidation = validateProposedAction(decision.decision, {
+        observation: preObservation,
+        currentState: state.currentState || APPLICATION_STATES.FORM_FILLING,
+        recentActions: state.actions || [],
+      });
 
-      const actionResult = await executeSingleBrowserAction(page, decision.decision, {
+      if (!actionValidation.valid) {
+        await logJobEvent(
+          'agentLoop',
+          'ACTION_VALIDATION_FAILED',
+          `Proposed action rejected: ${actionValidation.reasons.join('; ')}`
+        );
+        continue;
+      }
+
+      // === EXECUTE BROWSER ACTION (DETERMINISTIC) ===
+      previousNormalized = normalizedState;
+      const actionResult = await executeBrowserAction(page, decision.decision, {
         resumePdfPath,
         context,
       });
 
-      // === VERIFY ACTION (automatic — not AI-requested) ===
-      await page.waitForTimeout(2000);
+      // === OBSERVE RESULT & VERIFY STATE TRANSITION ===
+      await page.waitForTimeout(1000);
+      const postObservation = await observeBrowser(page);
       const postRaw = await extractPageContent(page);
       const postNormalized = normalizePage(postRaw);
-      const verification = verifyActionResult(previousNormalized, postNormalized);
 
-      // === RECORD ===
+      const verification = await verifyStateTransition(
+        page,
+        decision.decision,
+        preObservation,
+        postObservation
+      );
+
+      // === RECORD PERSISTENT AUDIT EVENT & AGENT STATE ===
       recordAction(state, decision.decision, actionResult, verification);
       await persistState(applicationId, state);
+
+      if (applicationId) {
+        await recordApplicationEvent({
+          applicationId,
+          type: verification.verified ? 'ACTION_VERIFIED' : 'ACTION_UNVERIFIED',
+          state: state.currentState || APPLICATION_STATES.FORM_FILLING,
+          url: page.url(),
+          actionId: actionResult.actionId,
+          payload: decision.decision,
+          evidence: verification.evidence,
+          verificationLevel: verification.verificationLevel,
+          error: actionResult.error || (!verification.verified ? verification.reason : null),
+        }).catch(() => {});
+      }
 
       await logJobEvent(
         'agentLoop',
         'ACTION_COMPLETE',
-        `${decision.decision.type} → success=${actionResult.success} | pageChanged=${verification.pageChanged} | url=${page.url()}`,
+        `${decision.decision.type} → ok=${actionResult.ok} | verified=${verification.verified} (Level: ${verification.verificationLevel}) | url=${page.url()}`
       );
 
-      // === RECOVERY on failure ===
-      if (!actionResult.success) {
-        const recovery = await attemptRecovery(page, state, decision.decision, postNormalized, job, userId);
-        if (!recovery.recovered) {
+      // === RECOVERY ON FAILURE OR UNVERIFIED RESULT ===
+      if (!actionResult.ok || !verification.verified) {
+        const failure = classifyFailure(actionResult, verification, postObservation);
+        const recovery = await executeRecoveryStrategy(
+          page,
+          failure,
+          decision.decision,
+          state.counters.retriesForCurrentAction || 1
+        );
+
+        if (!recovery.retry) {
           state.pendingHumanAction = {
-            reason: `Action "${decision.decision.type}" failed after ${AGENT_LOOP_LIMITS.MAX_RETRIES_PER_ACTION} retries`,
+            reason: recovery.reason || 'Action failed and recovery exhausted',
             savedUrl: page.url(),
           };
           await persistState(applicationId, state);
           break;
         }
-        // Recovery produced a new decision — it will be handled in the next loop iteration
       }
 
-      // === SUCCESS CHECK ===
-      if (verification.successDetected) {
-        await logJobEvent('agentLoop', 'SUCCESS_DETECTED', 'Submission success detected on page');
-        await addWorkflowLog(applicationId, 'SUCCESS_DETECTED', 'Application submission confirmed');
+      // === SUBMISSION VERIFICATION CHECK ===
+      if (
+        (decision.decision.intent === 'submit_application' || verification.confirmationId) &&
+        verification.verified &&
+        (verification.verificationLevel === VERIFICATION_LEVELS.LEVEL_3 ||
+          verification.verificationLevel === VERIFICATION_LEVELS.LEVEL_4)
+      ) {
+        await logJobEvent('agentLoop', 'SUBMISSION_VERIFIED', `Level: ${verification.verificationLevel} | ID: ${verification.confirmationId || 'N/A'}`);
+        await addWorkflowLog(applicationId, 'SUBMISSION_VERIFIED', `Submission verified with level: ${verification.verificationLevel}`);
+        
+        if (applicationId) {
+          await JobApplication.findByIdAndUpdate(applicationId, {
+            status: APPLICATION_STATUS.APPLICATION_COMPLETED,
+            currentState: APPLICATION_STATES.APPLICATION_COMPLETED,
+            'submissionVerification.verified': true,
+            'submissionVerification.verificationLevel': verification.verificationLevel,
+            'submissionVerification.confirmationId': verification.confirmationId,
+            'submissionVerification.submittedAt': new Date(),
+          });
+        }
+
         await persistState(applicationId, state);
 
         return {
-          status: APPLICATION_STATUS.APPLIED,
+          status: APPLICATION_STATUS.APPLICATION_COMPLETED,
           terminalState: 'success',
           agentState: state,
           pageUrl: page.url(),
-          message: 'Application submitted successfully.',
+          confirmationId: verification.confirmationId,
+          message: 'Application verified and submitted successfully.',
         };
       }
     }
