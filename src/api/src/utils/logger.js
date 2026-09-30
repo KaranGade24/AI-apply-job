@@ -18,25 +18,45 @@ try {
   console.error('Failed to create logs directory:', dirError.message);
 }
 
+/**
+ * Sanitizes and redacts sensitive data (cookies, passwords, tokens, storageState) from logs.
+ *
+ * @param {string|object} input
+ * @returns {string} Sanitized string
+ */
+export const sanitizeSecrets = (input) => {
+  if (!input) return '';
+  const text = typeof input === 'object' ? JSON.stringify(input) : String(input);
+
+  return text
+    // Redact passwords
+    .replace(/(['"]?password['"]?\s*[:=]\s*['"])([^'"]+)(['"])/gi, '$1[REDACTED_PASSWORD]$3')
+    // Redact authorization tokens & JWTs
+    .replace(/(['"]?authorization['"]?\s*[:=]\s*['"])([^'"]+)(['"])/gi, '$1[REDACTED_TOKEN]$3')
+    .replace(/bearer\s+[a-zA-Z0-9_\-\.]+/gi, 'Bearer [REDACTED_TOKEN]')
+    // Redact cookies & storageState
+    .replace(/(['"]?cookie['"]?\s*[:=]\s*['"])([^'"]+)(['"])/gi, '$1[REDACTED_COOKIE]$3')
+    .replace(/["']?storageState["']?\s*[:=]\s*(\{[^}]+\}|"[^"]+"|\'[^\']+\})/gi, 'storageState="[REDACTED_STORAGE_STATE]"')
+    // Redact API keys
+    .replace(/AIzaSy[a-zA-Z0-9_\-_]{33}/g, '[REDACTED_API_KEY]');
+};
+
 export const logAuthEvent = async (eventType, userIdentifier, status, additionalInfo = '', mode = 'mix') => {
   try {
     const timestamp = new Date().toISOString();
+    const sanitizedInfo = sanitizeSecrets(additionalInfo);
     
-    // Construct the text format log entry
-    const formattedLog = `[${timestamp}] EVENT: ${eventType.toUpperCase()} | STATUS: ${status.toUpperCase()} | USER: ${userIdentifier} | INFO: ${additionalInfo}\n`;
+    const formattedLog = `[${timestamp}] EVENT: ${eventType.toUpperCase()} | STATUS: ${status.toUpperCase()} | USER: ${userIdentifier} | INFO: ${sanitizedInfo}\n`;
     
-    // Output to console if mode is console or mix
     if (mode === 'console' || mode === 'mix') {
       console.log(formattedLog.trim());
     }
 
-    // Append to the text file if mode is file or mix
     if (mode === 'file' || mode === 'mix') {
       const logFilePath = path.join(logDirectory, 'authEvents.log');
       await fs.appendFile(logFilePath, formattedLog, 'utf8');
     }
   } catch (error) {
-    // Graceful fallback if the file system fails, preventing the app from crashing
     console.error('Failed to write to auth log file:', error.message);
   }
 };
@@ -44,7 +64,10 @@ export const logAuthEvent = async (eventType, userIdentifier, status, additional
 export const logError = async (context, errorMessage, stack = '', mode = 'mix') => {
   try {
     const timestamp = new Date().toISOString();
-    const formattedLog = `[${timestamp}] ERROR | CONTEXT: ${context} | MESSAGE: ${errorMessage} | STACK: ${stack}\n`;
+    const sanitizedMsg = sanitizeSecrets(errorMessage);
+    const sanitizedStack = sanitizeSecrets(stack);
+
+    const formattedLog = `[${timestamp}] ERROR | CONTEXT: ${context} | MESSAGE: ${sanitizedMsg} | STACK: ${sanitizedStack}\n`;
     
     if (mode === 'console' || mode === 'mix') {
       console.error(formattedLog.trim());
@@ -62,7 +85,9 @@ export const logError = async (context, errorMessage, stack = '', mode = 'mix') 
 export const logResumeEvent = async (resumeIdOrFile, status, additionalInfo = '', mode = 'mix') => {
   try {
     const timestamp = new Date().toISOString();
-    const formattedLog = `[${timestamp}] RESUME_EVENT | FILE/ID: ${resumeIdOrFile} | STATUS: ${status.toUpperCase()} | INFO: ${additionalInfo}\n`;
+    const sanitizedInfo = sanitizeSecrets(additionalInfo);
+
+    const formattedLog = `[${timestamp}] RESUME_EVENT | FILE/ID: ${resumeIdOrFile} | STATUS: ${status.toUpperCase()} | INFO: ${sanitizedInfo}\n`;
 
     if (mode === 'console' || mode === 'mix') {
       console.log(formattedLog.trim());
@@ -80,7 +105,9 @@ export const logResumeEvent = async (resumeIdOrFile, status, additionalInfo = ''
 export const logJobEvent = async (stepOrSource, status, additionalInfo = '', mode = 'mix') => {
   try {
     const timestamp = new Date().toISOString();
-    const formattedLog = `[${timestamp}] JOB_EVENT | STEP/SOURCE: ${stepOrSource} | STATUS: ${status.toUpperCase()} | INFO: ${additionalInfo}\n`;
+    const sanitizedInfo = sanitizeSecrets(additionalInfo);
+
+    const formattedLog = `[${timestamp}] JOB_EVENT | STEP/SOURCE: ${stepOrSource} | STATUS: ${status.toUpperCase()} | INFO: ${sanitizedInfo}\n`;
 
     if (mode === 'console' || mode === 'mix') {
       console.log(formattedLog.trim());

@@ -5,100 +5,149 @@ import { FIELD_TYPES } from './fieldTypes.js';
  * Verifies that all resolved answers were actually filled into the DOM.
  * Uses direct DOM inspection — NO LLM calls.
  *
+ * For every field, maintains:
+ * - intended answer
+ * - source
+ * - expected value
+ * - actual value
+ * - verification status
+ * - verification evidence
+ *
  * @param {import('playwright').Page} page
  * @param {Array<object>} resolvedAnswers - Answers that were filled by formFiller
- * @returns {Promise<{ allFilled: boolean, filledCount: number, emptyFields: Array<object> }>}
+ * @param {Array<object>} formFields - Original form fields extracted from the page
+ * @returns {Promise<{ allFilled: boolean, filledCount: number, fields: Array<object>, emptyFields: Array<object> }>}
  */
-export const verifyFilledFields = async (page, resolvedAnswers = []) => {
+export const verifyFilledFields = async (page, resolvedAnswers = [], formFields = []) => {
   if (!page || page.isClosed() || resolvedAnswers.length === 0) {
-    return { allFilled: true, filledCount: 0, emptyFields: [] };
+    return { allFilled: true, filledCount: 0, fields: [], emptyFields: [] };
   }
 
-  const fieldSelectors = resolvedAnswers.map((a) => ({
-    fieldId: a.fieldId,
-    questionId: a.questionId,
-    question: a.question,
-    expectedValue: a.answer,
-    type: a.type,
-  }));
+  // Create a combined model of expected selectors and questions
+  const fieldPayloads = resolvedAnswers.map((ans) => {
+    // Find matching form field metadata for required state
+    const matchedField = formFields.find(f => 
+      (f.fieldId && f.fieldId === ans.fieldId) || 
+      (f.selector && f.selector === ans.fieldId) ||
+      (f.questionId && f.questionId === ans.questionId)
+    );
 
-  const verificationResult = await page.evaluate((fields) => {
-    const results = [];
+    return {
+      fieldId: ans.fieldId,
+      questionId: ans.questionId,
+      question: ans.question || matchedField?.label || '',
+      expectedValue: String(ans.answer ?? ''),
+      intendedAnswer: String(ans.answer ?? ''),
+      source: ans.source || 'resolved_answer',
+      type: ans.type || matchedField?.type || 'text',
+      required: matchedField?.required === true
+    };
+  });
 
-    for (const field of fields) {
+  const evaluationResult = await page.evaluate((payloads) => {
+    return payloads.map((field) => {
       const selector = field.fieldId;
       if (!selector) {
-        results.push({ ...field, currentValue: '', isFilled: false, reason: 'no_selector' });
-        continue;
+        return {
+          ...field,
+          actualValue: '',
+          verified: false,
+          evidence: 'No selector available for this field'
+        };
       }
 
       let el = null;
       try {
         el = document.querySelector(selector);
       } catch (e) {
-        // Invalid selector syntax fallback
+        // Ignored
       }
 
       if (!el && selector) {
         el = document.getElementById(selector) ||
           document.querySelector(`[name="${selector}"]`) ||
-          document.querySelector(`[data-automation-id="${selector}"]`) ||
-          document.querySelector(`[aria-label*="${field.question?.slice(0, 30) || ''}"]`);
+          document.querySelector(`[data-automation-id="${selector}"]`);
       }
 
       if (!el) {
-        results.push({ ...field, currentValue: '', isFilled: false, reason: 'not_found' });
-        continue;
+        return {
+          ...field,
+          actualValue: '',
+          verified: false,
+          evidence: 'Element could not be found in active DOM'
+        };
       }
 
       const tagName = el.tagName.toLowerCase();
       const inputType = (el.getAttribute('type') || '').toLowerCase();
-      let currentValue = '';
-      let isFilled = false;
+      let actualValue = '';
+      let verified = false;
 
       if (inputType === 'checkbox' || inputType === 'radio' || el.getAttribute('role') === 'checkbox') {
-        isFilled = el.checked || el.getAttribute('aria-checked') === 'true' || el.getAttribute('data-checked') === 'true';
-        currentValue = isFilled ? 'checked' : '';
+        const isChecked = el.checked || el.getAttribute('aria-checked') === 'true' || el.getAttribute('data-checked') === 'true';
+        actualValue = isChecked ? 'checked' : 'unchecked';
+        
+        const expectedBool = field.expectedValue === 'true' || field.expectedValue === 'checked' || field.expectedValue === 'yes';
+        verified = isChecked === expectedBool;
       } else if (tagName === 'select') {
-        currentValue = el.value || '';
-        isFilled = currentValue !== '' && !currentValue.toLowerCase().includes('select');
+        actualValue = el.value || '';
+        const selectedText = el.options?.[el.selectedIndex]?.text || '';
+        
+        verified = actualValue.trim().toLowerCase() === field.expectedValue.trim().toLowerCase() ||
+                   selectedText.trim().toLowerCase() === field.expectedValue.trim().toLowerCase();
       } else if (inputType === 'file') {
-        // File inputs can't be read for value, assume filled if formFiller reported success
-        isFilled = true;
-        currentValue = '[file]';
+        // File input: we can't read files for value directly, assume verified if elements exist
+        verified = true;
+        actualValue = '[file_attached]';
       } else {
-        currentValue = el.value || '';
-        isFilled = currentValue.trim().length > 0;
+        actualValue = el.value || '';
+        verified = actualValue.trim().toLowerCase() === field.expectedValue.trim().toLowerCase();
+        
+        // Soft fallback for partial matches on dynamic elements (e.g. autocompletes)
+        if (!verified && actualValue.trim().length > 0) {
+          verified = actualValue.toLowerCase().includes(field.expectedValue.toLowerCase()) || 
+                     field.expectedValue.toLowerCase().includes(actualValue.toLowerCase());
+        }
       }
 
-      results.push({
+      return {
         ...field,
-        currentValue,
-        isFilled,
-        reason: isFilled ? 'ok' : 'empty',
-      });
-    }
+        actualValue,
+        verified,
+        evidence: verified 
+          ? `Value matches expected: "${field.expectedValue}"` 
+          : `Mismatch. Expected: "${field.expectedValue}", Actual: "${actualValue}"`
+      };
+    });
+  }, fieldPayloads);
 
-    return results;
-  }, fieldSelectors);
+  const fields = evaluationResult.map(r => ({
+    fieldId: r.fieldId,
+    questionId: r.questionId,
+    question: r.question,
+    type: r.type,
+    intendedAnswer: r.intendedAnswer,
+    source: r.source,
+    expectedValue: r.expectedValue,
+    actualValue: r.actualValue,
+    verificationStatus: r.verified,
+    verificationEvidence: r.evidence,
+    required: r.required
+  }));
 
-  const emptyFields = verificationResult.filter((r) => !r.isFilled);
-  const filledCount = verificationResult.filter((r) => r.isFilled).length;
+  const emptyFields = fields.filter(f => !f.verificationStatus);
+  const filledCount = fields.filter(f => f.verificationStatus).length;
 
   await logJobEvent(
     'formVerifier',
     'VERIFIED',
-    `Verification: ${filledCount}/${verificationResult.length} fields filled. Empty: ${emptyFields.length}`,
+    `Verification: ${filledCount}/${fields.length} fields successfully verified.`
   );
 
   return {
     allFilled: emptyFields.length === 0,
     filledCount,
-    emptyFields: emptyFields.map((e) => ({
-      fieldId: e.fieldId,
-      questionId: e.questionId,
-      question: e.question,
-      reason: e.reason,
-    })),
+    fields,
+    emptyFields
   };
 };

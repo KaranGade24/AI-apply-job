@@ -1,157 +1,88 @@
-import { extractDomSnapshot } from "./domObserver.js";
-import { extractAccessibilitySnapshot } from "./accessibilityObserver.js";
-import { logError } from "../../utils/logger.js";
+import { observeDOM } from './domObserver.js';
+import { observeAccessibility } from './accessibilityObserver.js';
+import { logJobEvent, logError } from '../../utils/logger.js';
+import crypto from 'crypto';
 
 /**
- * Captures comprehensive normalized page observation combining DOM, Accessibility, and viewport signals
- *
- * @param {import('playwright').Page} page - Active Playwright page
- * @param {object} [options]
- * @returns {Promise<object>} Normalized PageObservation
+ * Creates a unique page snapshot signature based on the visible elements.
  */
-export const observeBrowser = async (page, options = {}) => {
+function computePageRevision(elements, url) {
+  const payload = elements
+    .filter(el => el.visible)
+    .map(el => `${el.elementFingerprint}:${el.boundingBox.x},${el.boundingBox.y}`)
+    .sort()
+    .join('|');
+
+  return crypto.createHash('sha256').update(url + '|' + payload).digest('hex');
+}
+
+/**
+ * Coordinates observation components to generate a complete PageObservation.
+ * @param {import('playwright').Page} page
+ * @returns {Promise<object>} PageObservation object
+ */
+export async function observeBrowser(page) {
   try {
     const url = page.url();
-    const title = await page.title().catch(() => "");
+    const title = await page.title().catch(() => '');
 
-    // 1. Extract interactive DOM snapshot
-    const dom = await extractDomSnapshot(page);
+    // 1. Gather all raw DOM elements
+    const rawElements = await observeDOM(page);
 
-    // 2. Extract Accessibility tree snapshot
-    const axNodes = await extractAccessibilitySnapshot(page);
+    // 2. Enrich with accessibility data
+    const enrichedElements = await observeAccessibility(page, rawElements);
 
-    // 3. Detect iframes
-    const frames = page.frames().map((f, idx) => ({
-      frameId: `frame_${idx}`,
-      url: f.url(),
-      isMainFrame: f === page.mainFrame(),
-    }));
+    // 3. Build snapshot properties
+    const pageObservationId = `obs_${crypto.randomUUID().substring(0, 8)}`;
+    const pageRevision = computePageRevision(enrichedElements, url);
 
-    // 4. Categorize interactive elements for quick lookup
-    const buttons = [];
-    const links = [];
-    const inputs = [];
-    const selects = [];
-    const checkboxes = [];
-    const radioButtons = [];
-    const textareas = [];
-    const fileInputs = [];
+    // 4. Categorize interactive elements for easy consumption
+    const forms = enrichedElements.filter(el => el.tagName === 'form');
+    const buttons = enrichedElements.filter(el => el.tagName === 'button' || el.role === 'button' || el.type === 'button' || el.type === 'submit');
+    const inputs = enrichedElements.filter(el => el.tagName === 'input' && !['checkbox', 'radio', 'file', 'button', 'submit'].includes(el.type));
+    const selects = enrichedElements.filter(el => el.tagName === 'select');
+    const checkboxes = enrichedElements.filter(el => el.tagName === 'input' && el.type === 'checkbox');
+    const radios = enrichedElements.filter(el => el.tagName === 'input' && el.type === 'radio');
+    const fileInputs = enrichedElements.filter(el => el.tagName === 'input' && el.type === 'file');
 
-    for (const el of dom.interactiveElements) {
-      if (el.tagName === "button" || el.role === "button") {
-        buttons.push(el);
-      } else if (el.tagName === "a" || el.role === "link") {
-        links.push(el);
-      } else if (el.tagName === "textarea") {
-        textareas.push(el);
-      } else if (el.tagName === "select" || el.role === "combobox" || el.role === "listbox") {
-        selects.push(el);
-      } else if (el.type === "checkbox" || el.role === "checkbox") {
-        checkboxes.push(el);
-      } else if (el.type === "radio" || el.role === "radio") {
-        radioButtons.push(el);
-      } else if (el.type === "file") {
-        fileInputs.push(el);
-      } else {
-        inputs.push(el);
-      }
-    }
+    // 5. Detect modal / dialog elements on page
+    const modalOpen = await page.evaluate(() => {
+      const modals = Array.from(document.querySelectorAll('.modal, .dialog, [role="dialog"], [aria-modal="true"]'));
+      return modals.some(m => {
+        const rect = m.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0 && window.getComputedStyle(m).display !== 'none';
+      });
+    });
 
-    // 5. Detect Blockers / Interrupters
-    const visibleTextLower = (dom.visibleText || "").toLowerCase();
-    const captchaDetected =
-      visibleTextLower.includes("recaptcha") ||
-      visibleTextLower.includes("hcaptcha") ||
-      visibleTextLower.includes("cf-turnstile") ||
-      visibleTextLower.includes("verify you are human") ||
-      visibleTextLower.includes("security check") ||
-      dom.interactiveElements.some((e) => (e.selectorCandidates || []).some((s) => s.includes("captcha")));
-
-    const loginDetected =
-      (visibleTextLower.includes("sign in") ||
-        visibleTextLower.includes("log in") ||
-        visibleTextLower.includes("enter your password")) &&
-      inputs.some((i) => i.type === "password");
-
-    const otpDetected =
-      visibleTextLower.includes("one-time password") ||
-      visibleTextLower.includes("verification code") ||
-      visibleTextLower.includes("enter otp") ||
-      visibleTextLower.includes("sent a code to");
-
-    // 6. Detect Success Indicators
-    const successIndicators = [];
-    const successTerms = [
-      "application submitted",
-      "thank you for applying",
-      "application received",
-      "your application has been submitted",
-      "successfully applied",
-      "we have received your application",
-    ];
-    for (const term of successTerms) {
-      if (visibleTextLower.includes(term)) {
-        successIndicators.push(term);
-      }
-    }
-
-    const observation = {
+    const pageObservation = {
+      pageObservationId,
+      pageRevision,
       url,
       title,
-      timestamp: new Date(),
-      headings: dom.headings,
+      interactiveElements: enrichedElements,
+      forms,
       buttons,
-      links,
       inputs,
       selects,
       checkboxes,
-      radioButtons,
-      textareas,
+      radios,
       fileInputs,
-      interactiveElements: dom.interactiveElements,
-      accessibilityNodes: axNodes.slice(0, 50),
-      validationMessages: dom.validationMessages,
-      dialogs: dom.dialogs,
-      frames,
-      hasLoadingIndicator: dom.hasLoadingIndicator,
-      visibleSnippet: (dom.visibleText || "").slice(0, 1000),
-      blockers: {
-        captcha: captchaDetected,
-        login: loginDetected,
-        otp: otpDetected,
-      },
-      successIndicators,
-      hasForm: inputs.length + selects.length + textareas.length > 0 || fileInputs.length > 0,
-      totalInteractiveCount: dom.interactiveElements.length,
+      modalOpen,
+      iframeCount: page.frames().length - 1, // Exclude main frame
+      timestamp: new Date()
     };
 
-    return observation;
+    await logJobEvent(
+      'browserObserver',
+      'OBSERVE_PAGE',
+      `URL: ${url} | Title: "${title}" | Elements: ${enrichedElements.length} | Revision: ${pageRevision.substring(0, 10)}`
+    );
+
+    return pageObservation;
   } catch (error) {
-    await logError("browserObserver.observeBrowser", error.message);
-    return {
-      url: page.url?.() || "",
-      title: "",
-      timestamp: new Date(),
-      headings: [],
-      buttons: [],
-      links: [],
-      inputs: [],
-      selects: [],
-      checkboxes: [],
-      radioButtons: [],
-      textareas: [],
-      fileInputs: [],
-      interactiveElements: [],
-      accessibilityNodes: [],
-      validationMessages: [],
-      dialogs: [],
-      frames: [],
-      hasLoadingIndicator: false,
-      visibleSnippet: "",
-      blockers: { captcha: false, login: false, otp: false },
-      successIndicators: [],
-      hasForm: false,
-      totalInteractiveCount: 0,
-    };
+    await logError('browserObserver.observeBrowser', error.message);
+    throw error;
   }
-};
+}
+
+export default observeBrowser;

@@ -1,60 +1,42 @@
-import mongoose from "mongoose";
-import { FAILURE_TYPES } from "../constant/application.constant.js";
+import mongoose from 'mongoose';
 
 const applicationAttemptSchema = new mongoose.Schema(
   {
     applicationId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "JobApplication",
+      ref: 'JobApplication',
       required: true,
       index: true,
     },
     attemptNumber: {
       type: Number,
-      required: true,
       default: 1,
     },
-    strategy: {
+    actionId: {
       type: String,
-      default: "generic",
     },
-    actionsExecuted: {
-      type: Number,
-      default: 0,
-    },
-    recoveryAttempts: {
-      type: Number,
-      default: 0,
-    },
-    outcome: {
+    actionType: {
       type: String,
-      enum: ["in_progress", "completed", "requires_human", "failed", "loop_detected"],
-      default: "in_progress",
     },
-    errorClassification: {
+    target: {
+      type: mongoose.Schema.Types.Mixed,
+    },
+    executionResult: {
+      type: mongoose.Schema.Types.Mixed,
+    },
+    verificationResult: {
+      type: mongoose.Schema.Types.Mixed,
+    },
+    recoveryUsed: {
       type: String,
-      enum: [...Object.values(FAILURE_TYPES), null],
-      default: null,
     },
-    errorMessage: {
-      type: String,
-      default: null,
+    success: {
+      type: Boolean,
+      default: false,
     },
-    fingerprintHistory: [
-      {
-        fingerprint: String,
-        timestamp: { type: Date, default: Date.now },
-      },
-    ],
   },
-  {
-    timestamps: true,
-  }
+  { timestamps: true }
 );
 
-applicationAttemptSchema.index({ applicationId: 1, attemptNumber: 1 });
-
-export const ApplicationAttempt =
-  mongoose.models.ApplicationAttempt ||
-  mongoose.model("ApplicationAttempt", applicationAttemptSchema);
+export const ApplicationAttempt = mongoose.model('ApplicationAttempt', applicationAttemptSchema);
 export default ApplicationAttempt;

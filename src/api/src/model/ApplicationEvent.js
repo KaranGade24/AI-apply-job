@@ -1,11 +1,10 @@
-import mongoose from "mongoose";
-import { VERIFICATION_LEVELS } from "../constant/application.constant.js";
+import mongoose from 'mongoose';
 
 const applicationEventSchema = new mongoose.Schema(
   {
     applicationId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "JobApplication",
+      ref: 'JobApplication',
       required: true,
       index: true,
     },
@@ -17,50 +16,32 @@ const applicationEventSchema = new mongoose.Schema(
     timestamp: {
       type: Date,
       default: Date.now,
-      index: true,
     },
     state: {
       type: String,
-      default: "INIT",
+      required: true,
     },
     url: {
       type: String,
-      default: "",
     },
     actionId: {
       type: String,
-      default: null,
     },
     payload: {
       type: mongoose.Schema.Types.Mixed,
-      default: null,
     },
     evidence: {
       type: mongoose.Schema.Types.Mixed,
-      default: null,
-    },
-    verificationLevel: {
-      type: String,
-      enum: [...Object.values(VERIFICATION_LEVELS), null],
-      default: null,
     },
     screenshotReference: {
       type: String,
-      default: null,
     },
     error: {
-      type: mongoose.Schema.Types.Mixed,
-      default: null,
+      type: String,
     },
   },
-  {
-    timestamps: true,
-  }
+  { timestamps: true }
 );
 
-applicationEventSchema.index({ applicationId: 1, timestamp: -1 });
-
-export const ApplicationEvent =
-  mongoose.models.ApplicationEvent ||
-  mongoose.model("ApplicationEvent", applicationEventSchema);
+export const ApplicationEvent = mongoose.model('ApplicationEvent', applicationEventSchema);
 export default ApplicationEvent;

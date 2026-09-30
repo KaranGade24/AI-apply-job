@@ -1,123 +1,205 @@
-import { logError, logJobEvent } from "../../utils/logger.js";
+import { logError } from '../../utils/logger.js';
+import { computeElementFingerprint } from './domObserver.js';
 
 /**
- * Resolves a Playwright Locator using multi-tier fallback strategy.
- * Never relies on brittle generated CSS selectors alone.
+ * Resolves a live Playwright Locator for a target element descriptor from a prior page observation.
+ * Uses a multi-tiered ambiguity-safe matching cascade with detailed score comparison.
  *
- * Preferred targeting order:
- * 1. Unique element ID (#id)
- * 2. Accessible role + accessible name (page.getByRole)
- * 3. Associated label (page.getByLabel)
- * 4. Placeholder / Test ID
- * 5. Text content + tag context
- * 6. CSS selector candidates
- * 7. XPath fallback
- *
- * @param {import('playwright').Page | import('playwright').Frame} pageOrFrame
- * @param {object} target - Target element specification
- * @param {object} [options] - Options (e.g. timeout)
- * @returns {Promise<{ locator: import('playwright').Locator, resolvedVia: string }>}
+ * @param {import('playwright').Page} page
+ * @param {object} elementDescriptor - Observed element descriptor with elementFingerprint, id, tag, etc.
+ * @returns {Promise<object|null>} Resolves to a Playwright Locator with attached metadata, or an ambiguity/error object
  */
-export const resolveElementLocator = async (pageOrFrame, target, options = {}) => {
-  const timeout = options.timeout || 4000;
-
-  if (!target || typeof target !== "object") {
-    throw new Error("Invalid target specification: target must be an object");
-  }
-
-  // 1. Stable unique attribute (#id)
-  if (target.id && !/^\d/.test(target.id)) {
-    try {
-      const loc = pageOrFrame.locator(`#${CSS.escape(target.id)}`).first();
-      await loc.waitFor({ state: "attached", timeout: 1500 });
-      return { locator: loc, resolvedVia: "id_attribute" };
-    } catch {
-      // Continue to next tier
+export async function resolveElement(page, elementDescriptor) {
+  try {
+    if (!elementDescriptor) {
+      return {
+        resolved: false,
+        reason: 'TARGET_NOT_FOUND',
+        candidates: []
+      };
     }
-  }
 
-  // 2. Accessible role + accessible name
-  if (target.role && (target.ariaLabel || target.text || target.name)) {
-    const accessibleName = target.ariaLabel || target.text || target.name;
-    try {
-      const loc = pageOrFrame.getByRole(target.role, { name: accessibleName, exact: false }).first();
-      await loc.waitFor({ state: "attached", timeout: 1500 });
-      return { locator: loc, resolvedVia: "accessible_role_and_name" };
-    } catch {
-      // Continue to next tier
-    }
-  }
+    const {
+      id,
+      name,
+      type,
+      tagName,
+      accessibleRole,
+      accessibleName,
+      labelText,
+      placeholder,
+      ancestryPath,
+      elementFingerprint
+    } = elementDescriptor;
 
-  // 3. Associated Label (for inputs/textareas/selects)
-  if (target.label) {
-    try {
-      const loc = pageOrFrame.getByLabel(target.label, { exact: false }).first();
-      await loc.waitFor({ state: "attached", timeout: 1500 });
-      return { locator: loc, resolvedVia: "associated_label" };
-    } catch {
-      // Continue
-    }
-  }
+    // Resolve within the correct frame
+    const frameContext = elementDescriptor.frameId 
+      ? page.frames().find(f => f.name() === elementDescriptor.frameId || f.url() === elementDescriptor.frameUrl) || page
+      : page;
 
-  // 4. Placeholder
-  if (target.placeholder) {
-    try {
-      const loc = pageOrFrame.getByPlaceholder(target.placeholder, { exact: false }).first();
-      await loc.waitFor({ state: "attached", timeout: 1500 });
-      return { locator: loc, resolvedVia: "placeholder" };
-    } catch {
-      // Continue
-    }
-  }
+    // Query all possible candidate elements of matching or interactive tag types
+    const queryTags = tagName || 'input, button, select, textarea, a, [role="button"], [role="checkbox"], [role="radio"]';
+    const candidatesCount = await frameContext.locator(queryTags).count().catch(() => 0);
+    const scoredCandidates = [];
 
-  // 5. Text content + structural tag context
-  if (target.text && target.text.length > 1) {
-    try {
-      const textToMatch = target.text.slice(0, 80);
-      const loc = pageOrFrame.getByText(textToMatch, { exact: false }).first();
-      await loc.waitFor({ state: "attached", timeout: 1500 });
-      return { locator: loc, resolvedVia: "text_content" };
-    } catch {
-      // Continue
-    }
-  }
+    for (let i = 0; i < candidatesCount; i++) {
+      const loc = frameContext.locator(queryTags).nth(i);
+      const isVisible = await loc.isVisible().catch(() => false);
+      const isEnabled = await loc.isEnabled().catch(() => false);
 
-  // 6. Selector Candidates from snapshot
-  if (Array.isArray(target.selectorCandidates) && target.selectorCandidates.length > 0) {
-    for (const sel of target.selectorCandidates) {
-      try {
-        const loc = pageOrFrame.locator(sel).first();
-        await loc.waitFor({ state: "attached", timeout: 1000 });
-        return { locator: loc, resolvedVia: `selector_candidate:${sel}` };
-      } catch {
-        // Try next candidate
+      const traits = await loc.evaluate((el) => {
+        const getLabelText = (node) => {
+          if (node.id) {
+            const label = document.querySelector(`label[for="${node.id}"]`);
+            if (label && label.innerText) return label.innerText.trim();
+          }
+          let parent = node.parentElement;
+          while (parent) {
+            if (parent.tagName === 'LABEL') return parent.innerText.trim();
+            parent = parent.parentElement;
+          }
+          return '';
+        };
+
+        return {
+          tagName: el.tagName.toLowerCase(),
+          id: el.id || '',
+          name: el.getAttribute('name') || '',
+          type: el.getAttribute('type') || '',
+          role: el.getAttribute('role') || '',
+          placeholder: el.getAttribute('placeholder') || '',
+          ariaLabel: el.getAttribute('aria-label') || el.getAttribute('aria-labelledby') || '',
+          labelText: getLabelText(el),
+          normalizedText: (el.innerText || el.textContent || '').trim().substring(0, 150),
+          href: el.getAttribute('href') || '',
+          dataTestId: el.getAttribute('data-testid') || el.getAttribute('data-test') || el.getAttribute('data-qa') || '',
+          className: el.className || ''
+        };
+      }).catch(() => null);
+
+      if (!traits) continue;
+
+      // Compute matching score
+      let score = 0;
+      const evidence = [];
+
+      const currentFingerprint = computeElementFingerprint(traits);
+      if (currentFingerprint === elementFingerprint) {
+        score += 50;
+        evidence.push('fingerprint_match');
       }
-    }
-  }
 
-  // 7. Direct selector fallback
-  if (target.selector) {
-    try {
-      const loc = pageOrFrame.locator(target.selector).first();
-      await loc.waitFor({ state: "attached", timeout });
-      return { locator: loc, resolvedVia: "direct_selector" };
-    } catch {
-      // Fallback failed
-    }
-  }
+      if (id && traits.id === id) {
+        score += 30;
+        evidence.push('id_match');
+      }
 
-  // 8. XPath fallback
-  if (target.xpath) {
-    try {
-      const loc = pageOrFrame.locator(`xpath=${target.xpath}`).first();
-      await loc.waitFor({ state: "attached", timeout });
-      return { locator: loc, resolvedVia: "xpath" };
-    } catch {
-      // Fallback failed
-    }
-  }
+      if (accessibleRole && traits.role === accessibleRole) {
+        score += 10;
+        evidence.push('role_match');
+      }
 
-  throw new Error(
-    `Unable to resolve locator for element (${target.elementId || target.role || target.text || "unknown"}). Target not found or stale.`
-  );
-};
+      if (accessibleName && traits.ariaLabel === accessibleName) {
+        score += 15;
+        evidence.push('aria_label_match');
+      }
+
+      if (labelText && traits.labelText === labelText) {
+        score += 20;
+        evidence.push('label_text_match');
+      }
+
+      if (name && traits.name === name) {
+        score += 15;
+        evidence.push('name_match');
+      }
+
+      if (placeholder && traits.placeholder === placeholder) {
+        score += 15;
+        evidence.push('placeholder_match');
+      }
+
+      if (traits.dataTestId && traits.dataTestId === elementDescriptor.dataTestId) {
+        score += 25;
+        evidence.push('data_test_id_match');
+      }
+
+      if (isVisible) {
+        score += 10;
+        evidence.push('visible');
+      }
+
+      // Record candidate
+      scoredCandidates.push({
+        index: i,
+        locator: loc,
+        traits,
+        score,
+        evidence,
+        visible: isVisible,
+        enabled: isEnabled
+      });
+    }
+
+    // Filter out low-matching candidates
+    const viableCandidates = scoredCandidates
+      .filter(c => c.score >= 10)
+      .sort((a, b) => b.score - a.score);
+
+    if (viableCandidates.length === 0) {
+      return {
+        resolved: false,
+        reason: 'TARGET_NOT_FOUND',
+        candidates: []
+      };
+    }
+
+    const topCandidate = viableCandidates[0];
+
+    if (viableCandidates.length === 1) {
+      const finalLoc = topCandidate.locator;
+      finalLoc.resolved = true;
+      finalLoc.reason = 'SUCCESS';
+      finalLoc.score = topCandidate.score;
+      finalLoc.evidence = topCandidate.evidence;
+      finalLoc.candidates = viableCandidates;
+      return finalLoc;
+    }
+
+    // Multiple candidates exist: compare top score with second best
+    const secondCandidate = viableCandidates[1];
+    const scoreDiff = topCandidate.score - secondCandidate.score;
+
+    // Safety margin of 15 points to resolve ambiguity
+    if (scoreDiff >= 15) {
+      const finalLoc = topCandidate.locator;
+      finalLoc.resolved = true;
+      finalLoc.reason = 'SUCCESS';
+      finalLoc.score = topCandidate.score;
+      finalLoc.evidence = topCandidate.evidence;
+      finalLoc.candidates = viableCandidates;
+      return finalLoc;
+    }
+
+    // Ambiguous elements found
+    return {
+      resolved: false,
+      reason: 'TARGET_AMBIGUOUS',
+      candidates: viableCandidates.map(c => ({
+        score: c.score,
+        evidence: c.evidence,
+        visible: c.visible,
+        enabled: c.enabled,
+        traits: c.traits
+      }))
+    };
+  } catch (error) {
+    await logError('elementResolver.resolveElement', error.message);
+    return {
+      resolved: false,
+      reason: 'ERROR',
+      message: error.message,
+      candidates: []
+    };
+  }
+}

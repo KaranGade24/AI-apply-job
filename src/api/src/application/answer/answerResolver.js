@@ -5,6 +5,17 @@ import { resolveFromHuman, persistMissingQuestionsForUser } from './humanAnswerR
 import { classifyQuestionCategory, normalizeQuestionText } from '../form/formNormalizer.js';
 import { FIELD_TYPES, QUESTION_CATEGORIES } from '../form/fieldTypes.js';
 
+// Sensitive/legal questions that must never be guessed or automated with generic defaults
+const SENSITIVE_PATTERNS = [
+  /gender|sex/i,
+  /race|ethnicity|demographic/i,
+  /disability|handicap/i,
+  /veteran|military/i,
+  /citizenship|visa|sponsorship|work\s+authorization|authorized\s+to\s+work/i,
+  /background\s+check|drug\s+screen|convict/i,
+  /social\s+security|national\s+id|ssn/i
+];
+
 /**
  * Resolves all fields on an application form using multi-level matching:
  * Level 1: Deterministic User Profile
@@ -73,8 +84,12 @@ export const resolveAllFormAnswers = async (fields = [], context = {}) => {
   for (const field of fields) {
     const qId = field.questionId;
     const fId = field.fieldId;
+    const qText = field.question || '';
 
-    // Check if user already provided/confirmed this answer (e.g. from Checkpoint 1 or review edits)
+    // Guardrail: Sensitive/legal questions must NEVER be guessed or automated
+    const isSensitive = SENSITIVE_PATTERNS.some(pattern => pattern.test(qText));
+
+    // Check if user already provided/confirmed this answer
     if (priorAnswerMap.has(qId) || priorAnswerMap.has(fId)) {
       const prior = priorAnswerMap.get(qId) || priorAnswerMap.get(fId);
       resolvedAnswers.push({
@@ -84,7 +99,8 @@ export const resolveAllFormAnswers = async (fields = [], context = {}) => {
         type: field.type,
         answer: prior.answer ?? prior.value,
         source: 'user',
-        confidence: 1,
+        sourcePath: 'userAnswers',
+        confidence: 1.0,
         userConfirmed: true,
         options: field.options || [],
       });
@@ -101,9 +117,25 @@ export const resolveAllFormAnswers = async (fields = [], context = {}) => {
         type: field.type,
         answer: humanRes.value,
         source: humanRes.source,
+        sourcePath: 'userAnswers',
         confidence: humanRes.confidence,
         userConfirmed: true,
         options: field.options || [],
+      });
+      continue;
+    }
+
+    // If sensitive and not explicitly answered by human, treat as missing and skip automated levels
+    if (isSensitive) {
+      missingQuestions.push({
+        questionId: qId,
+        fieldId: fId,
+        question: field.question,
+        type: field.type,
+        required: Boolean(field.required),
+        options: field.options || [],
+        placeholder: field.placeholder || '',
+        isSensitive: true
       });
       continue;
     }
@@ -128,6 +160,7 @@ export const resolveAllFormAnswers = async (fields = [], context = {}) => {
         type: FIELD_TYPES.CHECKBOX,
         answer: 'true',
         source: 'setting',
+        sourcePath: 'agreement_autofill',
         confidence: 1.0,
         userConfirmed: false,
         options: field.options || [],
@@ -151,6 +184,7 @@ export const resolveAllFormAnswers = async (fields = [], context = {}) => {
         type: 'password',
         answer: candidatePortalPassword,
         source: userSetting?.portalPassword ? 'setting' : 'profile',
+        sourcePath: userSetting?.portalPassword ? 'userSetting.portalPassword' : 'userProfile.portalPassword',
         confidence: 1.0,
         userConfirmed: false,
         options: [],
@@ -168,6 +202,7 @@ export const resolveAllFormAnswers = async (fields = [], context = {}) => {
         type: field.type,
         answer: profileRes.value,
         source: profileRes.source,
+        sourcePath: profileRes.sourcePath,
         confidence: profileRes.confidence,
         userConfirmed: false,
         options: field.options || [],
@@ -185,6 +220,7 @@ export const resolveAllFormAnswers = async (fields = [], context = {}) => {
         type: field.type,
         answer: resumeRes.value,
         source: resumeRes.source,
+        sourcePath: resumeRes.sourcePath,
         confidence: resumeRes.confidence,
         userConfirmed: false,
         options: field.options || [],
@@ -192,28 +228,35 @@ export const resolveAllFormAnswers = async (fields = [], context = {}) => {
       continue;
     }
 
-    // Level 3: User Settings (Notice period, Relocation preferences - NO LLM)
+    // Level 3: User Settings (Notice period - NO LLM, NO option[0] fallbacks)
     const category = classifyQuestionCategory(field.question);
     if (category === QUESTION_CATEGORIES.NOTICE_PERIOD) {
-      const notice = userSetting?.noticePeriod || 'Immediate';
-      let selectedOption = notice;
-      if (Array.isArray(field.options) && field.options.length > 0) {
-        selectedOption =
-          field.options.find((opt) => normalizeQuestionText(opt).includes('immediate') || opt.includes('15') || opt.includes('30')) ||
-          field.options[0];
+      const notice = userSetting?.noticePeriod;
+      if (notice) {
+        let selectedOption = notice;
+        if (Array.isArray(field.options) && field.options.length > 0) {
+          selectedOption = field.options.find((opt) => 
+            normalizeQuestionText(opt).includes(normalizeQuestionText(notice))
+          );
+        }
+
+        if (selectedOption) {
+          resolvedAnswers.push({
+            questionId: qId,
+            fieldId: fId,
+            question: field.question,
+            type: field.type,
+            answer: selectedOption,
+            source: 'setting',
+            sourcePath: 'userSetting.noticePeriod',
+            confidence: 0.95,
+            userConfirmed: false,
+            options: field.options || [],
+          });
+          continue;
+        }
       }
-      resolvedAnswers.push({
-        questionId: qId,
-        fieldId: fId,
-        question: field.question,
-        type: field.type,
-        answer: selectedOption,
-        source: 'setting',
-        confidence: 0.95,
-        userConfirmed: false,
-        options: field.options || [],
-      });
-      continue;
+      // If no matching notice period option matches, fallback to missing question (ASK_HUMAN)
     }
 
     // Level 3.5: Sensitive / Legal Guard (Never invent sponsorship, citizenship, demographic, or criminal answers)
@@ -234,7 +277,6 @@ export const resolveAllFormAnswers = async (fields = [], context = {}) => {
     }
 
     // Level 4: Subjective AI questions (e.g. "Why are you interested in this position?")
-    // Collect for ONE single batch LLM call across all subjective questions on this page
     if (category === QUESTION_CATEGORIES.SUBJECTIVE) {
       subjectiveFieldsToBatch.push(field);
       continue;
@@ -273,6 +315,7 @@ export const resolveAllFormAnswers = async (fields = [], context = {}) => {
           type: field.type,
           answer: String(answer).trim(),
           source: 'ai',
+          sourcePath: 'gemini.llm.model',
           confidence: 0.92,
           userConfirmed: false,
           options: field.options || [],

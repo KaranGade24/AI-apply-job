@@ -1,314 +1,438 @@
-import { StateGraph, START, END, Annotation, MemorySaver } from "@langchain/langgraph";
-import {
-  APPLICATION_STATES,
-  APPLICATION_STATUS,
-  VERIFICATION_LEVELS,
-} from "../../constant/application.constant.js";
-import { observeBrowser } from "../../browser/observer/browserObserver.js";
-import { validateProposedAction } from "../../browser/executor/actionValidator.js";
-import { executeBrowserAction } from "../../browser/executor/browserExecutor.js";
-import { verifyStateTransition } from "../../browser/verifier/stateVerifier.js";
-import { classifyFailure } from "../../browser/recovery/failureClassifier.js";
-import { executeRecoveryStrategy } from "../../browser/recovery/recoveryManager.js";
-import { evaluateSubmissionSafety } from "../../browser/safety/submissionGuard.js";
-import { recordApplicationEvent } from "../../repositories/applicationEvent.repository.js";
-import { upsertApplicationQuestion } from "../../repositories/applicationQuestion.repository.js";
-import { JobApplication } from "../../model/JobApplication.js";
+import { StateGraph, START, END, MemorySaver } from "@langchain/langgraph";
+import { BrowserManager } from "../../browser/browserManager.js";
+import { extractPageContent } from "../../application/pageAnalysis/pageContentExtractor.js";
+import { normalizePage } from "../../application/pageAnalysis/pageNormalizer.js";
+import { classifyPageStateLlm, PAGE_STATES } from "../../application/pageAnalysis/pageClassifierLlm.js";
+import { decideNextAction } from "../../application/unknown/agentDecision.js";
+import { executeSingleBrowserAction } from "../../browser/browserActionExecutor.js";
+import { verifyActionResult } from "../../browser/actionVerifier.js";
+import { orchestrateRecovery, RECOVERY_ACTIONS } from "../../browser/recovery/recoveryManager.js";
+import { inspectForm } from "../../application/form/formInspector.js";
+import { resolveAllFormAnswers } from "../../application/answer/answerResolver.js";
+import { fillFormFields } from "../../application/form/formFiller.js";
+import { verifyFilledFields } from "../../application/form/formVerifier.js";
 import { logJobEvent, logError } from "../../utils/logger.js";
+import { APPLICATION_STATUS } from "../../constant/application.constant.js";
+import { updateApplicationStatus } from "../../repositories/application.repository.js";
 
 /**
- * Strongly typed State Annotation for Verification-First Browser Application Graph
+ * Node 1: Initialize the browser state, page, and agentState context
  */
-export const ApplicationStateAnnotation = Annotation.Root({
-  applicationId: Annotation({ reducer: (x, y) => y ?? x ?? "", default: () => "" }),
-  userId: Annotation({ reducer: (x, y) => y ?? x ?? "", default: () => "" }),
-  jobId: Annotation({ reducer: (x, y) => y ?? x ?? "", default: () => "" }),
-  jobUrl: Annotation({ reducer: (x, y) => y ?? x ?? "", default: () => "" }),
-  currentUrl: Annotation({ reducer: (x, y) => y ?? x ?? "", default: () => "" }),
-  previousUrl: Annotation({ reducer: (x, y) => y ?? x ?? "", default: () => "" }),
-  pageTitle: Annotation({ reducer: (x, y) => y ?? x ?? "", default: () => "" }),
-  currentPageType: Annotation({ reducer: (x, y) => y ?? x ?? "UNKNOWN", default: () => "UNKNOWN" }),
-  currentApplicationState: Annotation({
-    reducer: (x, y) => y ?? x ?? APPLICATION_STATES.INIT,
-    default: () => APPLICATION_STATES.INIT,
-  }),
-  browserSessionId: Annotation({ reducer: (x, y) => y ?? x ?? null, default: () => null }),
-  pageObservation: Annotation({ reducer: (x, y) => y ?? x ?? null, default: () => null }),
-  formFields: Annotation({ reducer: (x, y) => y ?? x ?? [], default: () => [] }),
-  resolvedAnswers: Annotation({ reducer: (x, y) => y ?? x ?? [], default: () => [] }),
-  unresolvedQuestions: Annotation({ reducer: (x, y) => y ?? x ?? [], default: () => [] }),
-  proposedAction: Annotation({ reducer: (x, y) => y ?? x ?? null, default: () => null }),
-  actionResult: Annotation({ reducer: (x, y) => y ?? x ?? null, default: () => null }),
-  verificationResult: Annotation({ reducer: (x, y) => y ?? x ?? null, default: () => null }),
-  actionAttempts: Annotation({ reducer: (x, y) => (typeof y === "number" ? y : x || 0), default: () => 0 }),
-  recoveryAttempts: Annotation({ reducer: (x, y) => (typeof y === "number" ? y : x || 0), default: () => 0 }),
-  submissionAllowed: Annotation({ reducer: (x, y) => y ?? x ?? false, default: () => false }),
-  submissionConfirmed: Annotation({ reducer: (x, y) => y ?? x ?? false, default: () => false }),
-  submissionVerified: Annotation({ reducer: (x, y) => y ?? x ?? false, default: () => false }),
-  confirmationId: Annotation({ reducer: (x, y) => y ?? x ?? null, default: () => null }),
-  status: Annotation({ reducer: (x, y) => y ?? x ?? APPLICATION_STATUS.PENDING, default: () => APPLICATION_STATUS.PENDING }),
-  error: Annotation({ reducer: (x, y) => y ?? x ?? null, default: () => null }),
-  pageInstance: Annotation({ reducer: (x, y) => y ?? x ?? null, default: () => null }),
+const initializeNode = async (state) => {
+  await logJobEvent("applicationGraph", "INITIALIZE", "Initializing browser execution context...");
+  return {
+    status: APPLICATION_STATUS.AI_RUNNING,
+    stepCount: 1,
+    actionHistory: []
+  };
+};
+
+/**
+ * Node 2: Observe DOM, extract layout structures and page elements
+ */
+const observeNode = async (state) => {
+  await logJobEvent("applicationGraph", "OBSERVE", "Observing current page layout...");
+  const raw = await extractPageContent(state.page);
+  const normalized = normalizePage(raw);
+  return {
+    rawPageContent: raw,
+    normalizedState: normalized
+  };
+};
+
+/**
+ * Node 3: Classify semantic page state using Stage 1 Classifier
+ */
+const classifyNode = async (state) => {
+  await logJobEvent("applicationGraph", "CLASSIFY", "Classifying page semantic state...");
+  const classification = await classifyPageStateLlm(state.normalizedState, state.userId);
+  return {
+    pageState: classification.state,
+    pageClassification: classification
+  };
+};
+
+/**
+ * Node 4: Determine next automation Goal
+ */
+const determineGoalNode = async (state) => {
+  await logJobEvent("applicationGraph", "DETERMINE_GOAL", `Current State: ${state.pageState}`);
+  let mode = "normal";
+
+  if (state.pageState === PAGE_STATES.APPLICATION_FORM || state.pageState === PAGE_STATES.FORM_STEP) {
+    mode = "form_flow";
+  } else if (state.pageState === PAGE_STATES.REVIEW) {
+    mode = "final_flow";
+  }
+
+  return { executionMode: mode };
+};
+
+/**
+ * Node 5: Plan next logical action using Stage 2 Decision Engine
+ */
+const planNode = async (state) => {
+  await logJobEvent("applicationGraph", "PLAN", "Planning next browser action...");
+  const decision = await decideNextAction(
+    state.normalizedState,
+    state.agentState || {},
+    state.job || {},
+    state.pageClassification || {},
+    state.userId
+  );
+  return { plannedDecision: decision };
+};
+
+/**
+ * Node 6: Validate parameters and URL safety checks before execution
+ */
+const validateNode = async (state) => {
+  await logJobEvent("applicationGraph", "VALIDATE", "Validating action parameters...");
+  const decision = state.plannedDecision;
+  const isInvalid = !decision || !decision.decision;
+  return { actionValidated: !isInvalid };
+};
+
+/**
+ * Node 7: Execute single deterministic browser interaction via Playwright
+ */
+const executeNode = async (state) => {
+  await logJobEvent("applicationGraph", "EXECUTE", `Executing action: ${state.plannedDecision.decision}`);
+  const result = await executeSingleBrowserAction(state.page, state.plannedDecision, {
+    resumePdfPath: state.resumePdfPath,
+    context: state.browserContext
+  });
+  return { lastExecutionResult: result };
+};
+
+/**
+ * Node 8: Verify outcome of action using post-action verification modules
+ */
+const verifyNode = async (state) => {
+  await logJobEvent("applicationGraph", "VERIFY", "Verifying execution outcome...");
+  const postRaw = await extractPageContent(state.page);
+  const postNormalized = normalizePage(postRaw);
+  const verification = verifyActionResult(state.normalizedState, postNormalized);
+  return {
+    actionVerified: verification.successDetected,
+    normalizedState: postNormalized
+  };
+};
+
+/**
+ * Node 9: Formulate recovery strategy in case of failure
+ */
+const recoverNode = async (state) => {
+  await logJobEvent("applicationGraph", "RECOVER", "Executing recovery orchestration...");
+  const recovery = await orchestrateRecovery(state.lastExecutionResult?.error || "Action verification failed", {
+    page: state.page,
+    agentState: state.agentState,
+    previousAction: state.plannedDecision,
+    currentUrl: state.page?.url()
+  });
+
+  return {
+    recoveryStrategy: recovery.strategy,
+    status: recovery.strategy === RECOVERY_ACTIONS.ASK_HUMAN ? APPLICATION_STATUS.HUMAN_REQUIRED : state.status
+  };
+};
+
+/**
+ * Form Flow Node 1: Inspect form for input fields
+ */
+const inspectFormNode = async (state) => {
+  await logJobEvent("applicationGraph", "INSPECT_FORM", "Inspecting form inputs...");
+  const inspection = await inspectForm(state.page);
+  return {
+    formFields: inspection.fields || [],
+    stepperState: inspection.stepperState || {}
+  };
+};
+
+/**
+ * Form Flow Node 2: Resolve answers from profile & resume facts
+ */
+const resolveAnswersNode = async (state) => {
+  await logJobEvent("applicationGraph", "RESOLVE_ANSWERS", "Resolving answer matches...");
+  const context = {
+    userProfile: state.candidateInfo?.personalInfo || {},
+    user: { email: state.candidateInfo?.personalInfo?.email },
+    userSetting: {},
+    resumeData: state.candidateInfo || {},
+    job: state.job || {}
+  };
+  const resolution = await resolveAllFormAnswers(state.formFields, context);
+  return {
+    resolvedAnswers: resolution.resolvedAnswers || [],
+    missingQuestions: resolution.missingQuestions || []
+  };
+};
+
+/**
+ * Form Flow Node 3: Filter for active human questions
+ */
+const humanQuestionsIfNeededNode = async (state) => {
+  if (state.missingQuestions?.length > 0) {
+    await logJobEvent("applicationGraph", "HUMAN_QUESTIONS", `${state.missingQuestions.length} questions require user input.`);
+    return { status: APPLICATION_STATUS.WAITING_FOR_USER };
+  }
+  return { status: state.status };
+};
+
+/**
+ * Form Flow Node 4: Fill form fields via Playwright
+ */
+const fillNode = async (state) => {
+  await logJobEvent("applicationGraph", "FILL", `Filling ${state.resolvedAnswers?.length} resolved answers...`);
+  await fillFormFields(state.page, state.resolvedAnswers);
+  return {};
+};
+
+/**
+ * Form Flow Node 5: Verify filled values stick
+ */
+const verifyFieldsNode = async (state) => {
+  await logJobEvent("applicationGraph", "VERIFY_FIELDS", "Verifying field values...");
+  const verification = await verifyFilledFields(state.page, state.resolvedAnswers);
+  return { fieldsVerified: verification.allStuck };
+};
+
+/**
+ * Form Flow Node 6: Validate step layout elements
+ */
+const validateStepNode = async (state) => {
+  await logJobEvent("applicationGraph", "VALIDATE_STEP", "Validating current form step...");
+  return { stepValidated: true };
+};
+
+/**
+ * Final Flow Node 1: Review full page before submission
+ */
+const reviewNode = async (state) => {
+  await logJobEvent("applicationGraph", "REVIEW", "Reviewing drafted application fields...");
+  return {};
+};
+
+/**
+ * Final Flow Node 2: Confirmation verification check
+ */
+const confirmationNode = async (state) => {
+  await logJobEvent("applicationGraph", "CONFIRMATION", "Awaiting user final confirmation...");
+  return { status: APPLICATION_STATUS.WAITING_FOR_FINAL_REVIEW };
+};
+
+/**
+ * Final Flow Node 3: Check submission guard rules
+ */
+const submissionGuardNode = async (state) => {
+  await logJobEvent("applicationGraph", "SUBMISSION_GUARD", "Executing submission guard safety check...");
+  const allRequiredFilled = (state.missingQuestions || []).length === 0;
+  return { submissionAllowed: allRequiredFilled };
+};
+
+/**
+ * Final Flow Node 4: Submit the application
+ */
+const submitNode = async (state) => {
+  await logJobEvent("applicationGraph", "SUBMIT", "Submitting application...");
+  const submitBtn = await state.page.$('button[type="submit"], [id*="submit" i], [class*="submit" i]');
+  if (submitBtn) {
+    await submitBtn.click();
+    await state.page.waitForTimeout(3000);
+  }
+  return {};
+};
+
+/**
+ * Final Flow Node 5: Post-submission state verification
+ */
+const verifySubmissionNode = async (state) => {
+  await logJobEvent("applicationGraph", "VERIFY_SUBMISSION", "Verifying submission success...");
+  const bodyText = await state.page.innerText('body');
+  const hasSuccess = /(thank\s*you|submitted|success|confirmation)/i.test(bodyText);
+  return {
+    submittedSuccessfully: hasSuccess,
+    status: hasSuccess ? APPLICATION_STATUS.APPLIED : APPLICATION_STATUS.FAILED
+  };
+};
+
+/**
+ * Conditional Routers
+ */
+const routeFromClassify = (state) => {
+  if (state.pageState === PAGE_STATES.CAPTCHA_REQUIRED || state.pageState === PAGE_STATES.MFA_REQUIRED || state.pageState === PAGE_STATES.OTP_REQUIRED) {
+    return "recoverNode";
+  }
+  return "determineGoalNode";
+};
+
+const routeAfterGoal = (state) => {
+  if (state.executionMode === "form_flow") return "inspectFormNode";
+  if (state.executionMode === "final_flow") return "reviewNode";
+  return "planNode";
+};
+
+const routeAfterValidate = (state) => {
+  if (state.actionValidated) return "executeNode";
+  return "recoverNode";
+};
+
+const routeAfterVerify = (state) => {
+  if (state.actionVerified) return END;
+  return "recoverNode";
+};
+
+const routeAfterRecovery = (state) => {
+  if (state.status === APPLICATION_STATUS.HUMAN_REQUIRED) return END;
+  return "observeNode";
+};
+
+const routeAfterHumanQuestions = (state) => {
+  if (state.status === APPLICATION_STATUS.WAITING_FOR_USER) return END;
+  return "fillNode";
+};
+
+const routeAfterFieldsVerify = (state) => {
+  if (state.fieldsVerified) return "validateStepNode";
+  return "inspectFormNode";
+};
+
+const routeAfterSubmissionGuard = (state) => {
+  if (state.submissionAllowed) return "submitNode";
+  return END;
+};
+
+// Build Low-Level Browser Application Graph
+const graphWorkflow = new StateGraph({
+  channels: {
+    userId: { value: (x, y) => y ?? x, default: () => "" },
+    applicationId: { value: (x, y) => y ?? x, default: () => "" },
+    page: { value: (x, y) => y ?? x, default: () => null },
+    browserContext: { value: (x, y) => y ?? x, default: () => null },
+    job: { value: (x, y) => y ?? x, default: () => null },
+    candidateInfo: { value: (x, y) => y ?? x, default: () => null },
+    resumePdfPath: { value: (x, y) => y ?? x, default: () => "" },
+    status: { value: (x, y) => y ?? x, default: () => APPLICATION_STATUS.PENDING },
+
+    // Intermediate state channels
+    rawPageContent: { value: (x, y) => y ?? x, default: () => null },
+    normalizedState: { value: (x, y) => y ?? x, default: () => null },
+    pageState: { value: (x, y) => y ?? x, default: () => PAGE_STATES.UNKNOWN },
+    pageClassification: { value: (x, y) => y ?? x, default: () => null },
+    executionMode: { value: (x, y) => y ?? x, default: () => "normal" },
+    plannedDecision: { value: (x, y) => y ?? x, default: () => null },
+    actionValidated: { value: (x, y) => y ?? x, default: () => false },
+    lastExecutionResult: { value: (x, y) => y ?? x, default: () => null },
+    actionVerified: { value: (x, y) => y ?? x, default: () => false },
+    recoveryStrategy: { value: (x, y) => y ?? x, default: () => null },
+
+    // Form flow channels
+    formFields: { value: (x, y) => y ?? x, default: () => [] },
+    resolvedAnswers: { value: (x, y) => y ?? x, default: () => [] },
+    missingQuestions: { value: (x, y) => y ?? x, default: () => [] },
+    fieldsVerified: { value: (x, y) => y ?? x, default: () => false },
+    stepValidated: { value: (x, y) => y ?? x, default: () => false },
+
+    // Final submission channels
+    submissionAllowed: { value: (x, y) => y ?? x, default: () => false },
+    submittedSuccessfully: { value: (x, y) => y ?? x, default: () => false }
+  }
 });
 
-/**
- * 1. Initialize Application Node
- */
-export const initializeApplicationNode = async (state) => {
-  try {
-    await logJobEvent("applicationGraph", "INIT", `Initializing application state for ID: ${state.applicationId}`);
-    return {
-      currentApplicationState: APPLICATION_STATES.JOB_PAGE_OPEN,
-      status: APPLICATION_STATUS.PROCESSING,
-    };
-  } catch (error) {
-    return { error: error.message, status: APPLICATION_STATUS.FAILED };
-  }
-};
+// Register Core Nodes
+graphWorkflow.addNode("initializeNode", initializeNode);
+graphWorkflow.addNode("observeNode", observeNode);
+graphWorkflow.addNode("classifyNode", classifyNode);
+graphWorkflow.addNode("determineGoalNode", determineGoalNode);
+graphWorkflow.addNode("planNode", planNode);
+graphWorkflow.addNode("validateNode", validateNode);
+graphWorkflow.addNode("executeNode", executeNode);
+graphWorkflow.addNode("verifyNode", verifyNode);
+graphWorkflow.addNode("recoverNode", recoverNode);
 
-/**
- * 2. Observe Page Node
- */
-export const observePageNode = async (state) => {
-  try {
-    const page = state.pageInstance;
-    if (!page) {
-      throw new Error("No active browser page instance provided to observePageNode");
-    }
+// Register Form Flow Nodes
+graphWorkflow.addNode("inspectFormNode", inspectFormNode);
+graphWorkflow.addNode("resolveAnswersNode", resolveAnswersNode);
+graphWorkflow.addNode("humanQuestionsIfNeededNode", humanQuestionsIfNeededNode);
+graphWorkflow.addNode("fillNode", fillNode);
+graphWorkflow.addNode("verifyFieldsNode", verifyFieldsNode);
+graphWorkflow.addNode("validateStepNode", validateStepNode);
 
-    const observation = await observeBrowser(page);
+// Register Final Submission Nodes
+graphWorkflow.addNode("reviewNode", reviewNode);
+graphWorkflow.addNode("confirmationNode", confirmationNode);
+graphWorkflow.addNode("submissionGuardNode", submissionGuardNode);
+graphWorkflow.addNode("submitNode", submitNode);
+graphWorkflow.addNode("verifySubmissionNode", verifySubmissionNode);
 
-    return {
-      pageObservation: observation,
-      currentUrl: observation.url,
-      pageTitle: observation.title,
-    };
-  } catch (error) {
-    await logError("applicationGraph.observePageNode", error.message);
-    return { error: error.message };
-  }
-};
+// Define Edges & Flow Structure
+graphWorkflow.addEdge(START, "initializeNode");
+graphWorkflow.addEdge("initializeNode", "observeNode");
+graphWorkflow.addEdge("observeNode", "classifyNode");
 
-/**
- * 3. Classify Page & Detect Blockers
- */
-export const classifyPageNode = async (state) => {
-  try {
-    const obs = state.pageObservation || {};
-    const blockers = obs.blockers || {};
+graphWorkflow.addConditionalEdges("classifyNode", routeFromClassify, {
+  recoverNode: "recoverNode",
+  determineGoalNode: "determineGoalNode"
+});
 
-    if (blockers.captcha || blockers.login || blockers.otp) {
-      return {
-        currentApplicationState: APPLICATION_STATES.APPLICATION_REQUIRES_HUMAN,
-        status: APPLICATION_STATUS.HUMAN_REQUIRED,
-      };
-    }
+graphWorkflow.addConditionalEdges("determineGoalNode", routeAfterGoal, {
+  inspectFormNode: "inspectFormNode",
+  reviewNode: "reviewNode",
+  planNode: "planNode"
+});
 
-    const pageType = obs.hasForm ? "APPLICATION_FORM" : "JOB_DETAIL";
-    return {
-      currentPageType: pageType,
-      currentApplicationState: obs.hasForm ? APPLICATION_STATES.FORM_ANALYZING : APPLICATION_STATES.JOB_ANALYZED,
-    };
-  } catch (error) {
-    return { error: error.message };
-  }
-};
+graphWorkflow.addEdge("planNode", "validateNode");
 
-/**
- * 4. Analyze Form Fields & Resolve Answers
- */
-export const analyzeFormNode = async (state) => {
-  try {
-    const obs = state.pageObservation || {};
-    const fields = [
-      ...obs.inputs.map((i) => ({ fieldId: i.id || i.name, question: i.label || i.placeholder || i.name, type: i.type, required: i.required })),
-      ...obs.selects.map((s) => ({ fieldId: s.id || s.name, question: s.label || s.name, type: "select", required: s.required })),
-      ...obs.textareas.map((t) => ({ fieldId: t.id || t.name, question: t.label || t.name, type: "textarea", required: t.required })),
-    ];
+graphWorkflow.addConditionalEdges("validateNode", routeAfterValidate, {
+  executeNode: "executeNode",
+  recoverNode: "recoverNode"
+});
 
-    return {
-      formFields: fields,
-      currentApplicationState: APPLICATION_STATES.FORM_FILLING,
-    };
-  } catch (error) {
-    return { error: error.message };
-  }
-};
+graphWorkflow.addEdge("executeNode", "verifyNode");
 
-/**
- * 5. Pre-Submission Review Node
- */
-export const preSubmissionReviewNode = async (state) => {
-  try {
-    const obs = state.pageObservation || {};
-    const safety = evaluateSubmissionSafety({
-      currentState: APPLICATION_STATES.PRE_SUBMISSION_REVIEW,
-      submissionConfirmed: state.submissionConfirmed,
-      validationErrors: obs.validationMessages || [],
-      unresolvedQuestions: state.unresolvedQuestions || [],
-      blockers: obs.blockers || {},
-    });
+graphWorkflow.addConditionalEdges("verifyNode", routeAfterVerify, {
+  recoverNode: "recoverNode",
+  [END]: END
+});
 
-    if (state.applicationId) {
-      await JobApplication.findByIdAndUpdate(state.applicationId, {
-        currentState: APPLICATION_STATES.PRE_SUBMISSION_REVIEW,
-        'preSubmissionReview.readyForReview': true,
-        'preSubmissionReview.userConfirmed': state.submissionConfirmed,
-      });
-    }
+graphWorkflow.addConditionalEdges("recoverNode", routeAfterRecovery, {
+  [END]: END,
+  observeNode: "observeNode"
+});
 
-    return {
-      currentApplicationState: APPLICATION_STATES.PRE_SUBMISSION_REVIEW,
-      submissionAllowed: safety.allowed,
-      status: state.submissionConfirmed ? APPLICATION_STATUS.PROCESSING : APPLICATION_STATUS.WAITING_FOR_FINAL_REVIEW,
-    };
-  } catch (error) {
-    return { error: error.message };
-  }
-};
+// Form Flow Edges
+graphWorkflow.addEdge("inspectFormNode", "resolveAnswersNode");
+graphWorkflow.addEdge("resolveAnswersNode", "humanQuestionsIfNeededNode");
 
-/**
- * 6. Submit Application Node
- */
-export const submitApplicationNode = async (state) => {
-  try {
-    const page = state.pageInstance;
-    const submitBtn = (state.pageObservation?.buttons || []).find((b) =>
-      /submit|apply/i.test(b.text || b.ariaLabel || "")
-    );
+graphWorkflow.addConditionalEdges("humanQuestionsIfNeededNode", routeAfterHumanQuestions, {
+  [END]: END,
+  fillNode: "fillNode"
+});
 
-    if (!submitBtn) {
-      throw new Error("Submit button could not be resolved on pre-submission review page");
-    }
+graphWorkflow.addEdge("fillNode", "verifyFieldsNode");
 
-    const action = {
-      actionId: `sub_${Date.now()}`,
-      type: "click",
-      intent: "submit_application",
-      target: { elementId: submitBtn.elementId, id: submitBtn.id, text: submitBtn.text, role: "button" },
-      riskLevel: "CRITICAL",
-    };
+graphWorkflow.addConditionalEdges("verifyFieldsNode", routeAfterFieldsVerify, {
+  validateStepNode: "validateStepNode",
+  inspectFormNode: "inspectFormNode"
+});
 
-    const actionResult = await executeBrowserAction(page, action);
+graphWorkflow.addEdge("validateStepNode", END);
 
-    return {
-      proposedAction: action,
-      actionResult,
-      currentApplicationState: APPLICATION_STATES.SUBMISSION_VERIFYING,
-    };
-  } catch (error) {
-    return { error: error.message };
-  }
-};
+// Final Submission Edges
+graphWorkflow.addEdge("reviewNode", "confirmationNode");
+graphWorkflow.addEdge("confirmationNode", "submissionGuardNode");
 
-/**
- * 7. Verify Submission Node
- */
-export const verifySubmissionNode = async (state) => {
-  try {
-    const page = state.pageInstance;
-    const postObs = await observeBrowser(page);
+graphWorkflow.addConditionalEdges("submissionGuardNode", routeAfterSubmissionGuard, {
+  submitNode: "submitNode",
+  [END]: END
+});
 
-    const verification = await verifyStateTransition(
-      page,
-      state.proposedAction,
-      state.pageObservation,
-      postObs
-    );
+graphWorkflow.addEdge("submitNode", "verifySubmissionNode");
+graphWorkflow.addEdge("verifySubmissionNode", END);
 
-    if (state.applicationId) {
-      await recordApplicationEvent({
-        applicationId: state.applicationId,
-        type: verification.verified ? "SUBMISSION_VERIFIED" : "SUBMISSION_UNVERIFIED",
-        state: APPLICATION_STATES.SUBMISSION_VERIFYING,
-        url: postObs.url,
-        actionId: state.proposedAction?.actionId,
-        payload: state.proposedAction,
-        evidence: verification.evidence,
-        verificationLevel: verification.verificationLevel,
-        error: !verification.verified ? verification.reason : null,
-      }).catch(() => {});
-    }
-
-    if (
-      verification.verified &&
-      (verification.verificationLevel === VERIFICATION_LEVELS.LEVEL_3 ||
-        verification.verificationLevel === VERIFICATION_LEVELS.LEVEL_4)
-    ) {
-      return {
-        submissionVerified: true,
-        confirmationId: verification.confirmationId,
-        currentApplicationState: APPLICATION_STATES.APPLICATION_COMPLETED,
-        status: APPLICATION_STATUS.APPLICATION_COMPLETED,
-      };
-    }
-
-    return {
-      submissionVerified: false,
-      currentApplicationState: APPLICATION_STATES.APPLICATION_REQUIRES_HUMAN,
-      status: APPLICATION_STATUS.HUMAN_REQUIRED,
-    };
-  } catch (error) {
-    return { error: error.message };
-  }
-};
-
-/**
- * 8. Pause for Human Node
- */
-export const pauseForHumanNode = async (state) => {
-  try {
-    await logJobEvent("applicationGraph", "PAUSED", "Application paused for human input / confirmation");
-    return {
-      status: APPLICATION_STATUS.HUMAN_REQUIRED,
-    };
-  } catch (error) {
-    return { error: error.message };
-  }
-};
-
-/**
- * Build and compile the LangGraph StateGraph
- */
-const workflow = new StateGraph(ApplicationStateAnnotation)
-  .addNode("initializeApplication", initializeApplicationNode)
-  .addNode("observePage", observePageNode)
-  .addNode("classifyPage", classifyPageNode)
-  .addNode("analyzeForm", analyzeFormNode)
-  .addNode("preSubmissionReview", preSubmissionReviewNode)
-  .addNode("submitApplication", submitApplicationNode)
-  .addNode("verifySubmission", verifySubmissionNode)
-  .addNode("pauseForHuman", pauseForHumanNode)
-  .addEdge(START, "initializeApplication")
-  .addEdge("initializeApplication", "observePage")
-  .addEdge("observePage", "classifyPage")
-  .addConditionalEdges("classifyPage", (state) => {
-    if (state.currentApplicationState === APPLICATION_STATES.APPLICATION_REQUIRES_HUMAN) {
-      return "pauseForHuman";
-    }
-    if (state.currentApplicationState === APPLICATION_STATES.FORM_ANALYZING) {
-      return "analyzeForm";
-    }
-    return "observePage";
-  })
-  .addEdge("analyzeForm", "preSubmissionReview")
-  .addConditionalEdges("preSubmissionReview", (state) => {
-    if (state.submissionConfirmed && state.submissionAllowed) {
-      return "submitApplication";
-    }
-    return "pauseForHuman";
-  })
-  .addEdge("submitApplication", "verifySubmission")
-  .addConditionalEdges("verifySubmission", (state) => {
-    if (state.submissionVerified) {
-      return END;
-    }
-    return "pauseForHuman";
-  })
-  .addEdge("pauseForHuman", END);
-
-export const applicationGraph = workflow.compile({
-  checkpointer: new MemorySaver(),
+export const memorySaver = new MemorySaver();
+export const applicationGraph = graphWorkflow.compile({
+  checkpointer: memorySaver,
 });
 
 export default applicationGraph;

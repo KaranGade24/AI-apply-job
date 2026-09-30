@@ -1,11 +1,10 @@
-import mongoose from "mongoose";
-import { QUESTION_CLASSIFICATIONS } from "../constant/application.constant.js";
+import mongoose from 'mongoose';
 
 const applicationQuestionSchema = new mongoose.Schema(
   {
     applicationId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "JobApplication",
+      ref: 'JobApplication',
       required: true,
       index: true,
     },
@@ -13,82 +12,43 @@ const applicationQuestionSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
-    fieldId: {
-      type: String,
-      default: "",
-    },
     questionText: {
       type: String,
       required: true,
     },
     fieldType: {
       type: String,
-      default: "text",
+      default: 'text',
     },
-    options: [
-      {
-        type: String,
-      },
-    ],
-    required: {
-      type: Boolean,
-      default: false,
-    },
-    classification: {
-      type: String,
-      enum: [...Object.values(QUESTION_CLASSIFICATIONS), "UNKNOWN"],
-      default: QUESTION_CLASSIFICATIONS.MISSING_INFORMATION,
+    options: [String],
+    currentValue: {
+      type: mongoose.Schema.Types.Mixed,
     },
     source: {
-      type: {
-        type: String,
-        default: "userProfile",
-      },
-      path: {
-        type: String,
-        default: "",
-      },
-    },
-    confidence: {
-      type: Number,
-      default: 0,
-      min: 0,
-      max: 1,
-    },
-    currentAnswer: {
-      type: mongoose.Schema.Types.Mixed,
-      default: null,
-    },
-    resolvedAnswer: {
-      type: mongoose.Schema.Types.Mixed,
-      default: null,
+      type: String,
+      default: 'website',
     },
     reason: {
       type: String,
-      default: null,
     },
-    status: {
-      type: String,
-      enum: ["unresolved", "human_pending", "resolved", "skipped"],
-      default: "unresolved",
+    required: {
+      type: Boolean,
+      default: true,
     },
-    userConfirmed: {
+    resolved: {
       type: Boolean,
       default: false,
     },
-    screenshot: {
-      type: String,
-      default: null,
+    answer: {
+      type: mongoose.Schema.Types.Mixed,
+    },
+    confidence: {
+      type: Number,
+      default: 1.0,
     },
   },
-  {
-    timestamps: true,
-  }
+  { timestamps: true }
 );
 
-applicationQuestionSchema.index({ applicationId: 1, questionId: 1 }, { unique: true });
-
-export const ApplicationQuestion =
-  mongoose.models.ApplicationQuestion ||
-  mongoose.model("ApplicationQuestion", applicationQuestionSchema);
+export const ApplicationQuestion = mongoose.model('ApplicationQuestion', applicationQuestionSchema);
 export default ApplicationQuestion;

@@ -1,113 +1,62 @@
-import { FAILURE_TYPES } from "../../constant/application.constant.js";
+import { logJobEvent } from '../../utils/logger.js';
+
+export const FAILURE_TYPES = {
+  TARGET_NOT_FOUND: 'TARGET_NOT_FOUND',
+  TARGET_AMBIGUOUS: 'TARGET_AMBIGUOUS',
+  STALE_ELEMENT: 'STALE_ELEMENT',
+  VALIDATION_ERROR: 'VALIDATION_ERROR',
+  PAGE_NOT_READY: 'PAGE_NOT_READY',
+  NAVIGATION_ERROR: 'NAVIGATION_ERROR',
+  UPLOAD_FAILED: 'UPLOAD_FAILED',
+  WRONG_PAGE: 'WRONG_PAGE',
+  LOOP_DETECTED: 'LOOP_DETECTED',
+  HUMAN_REQUIRED: 'HUMAN_REQUIRED',
+  UNKNOWN_ERROR: 'UNKNOWN_ERROR'
+};
 
 /**
- * Classifies an action failure or verification failure into a structured failure category.
+ * Classifies a browser execution failure or page state mismatch.
  *
- * @param {object} actionResult - Result from browser executor
- * @param {object} verificationResult - Result from state verifier
- * @param {object} observation - Current PageObservation
- * @returns {object} Structured failure classification
+ * @param {Error|string} error - Triggering error or mismatch reason
+ * @param {object} context - Execution context details
+ * @returns {string} Canonical failure type from FAILURE_TYPES
  */
-export const classifyFailure = (actionResult, verificationResult, observation = {}) => {
-  const errMsg = (actionResult?.error || verificationResult?.reason || "").toLowerCase();
-  const blockers = observation.blockers || {};
+export const classifyFailure = (error, context = {}) => {
+  const errMsg = String(error?.message || error || '').toLowerCase();
 
-  // 1. Human challenges take highest priority
-  if (blockers.captcha || errMsg.includes("captcha") || errMsg.includes("turnstile")) {
-    return {
-      type: FAILURE_TYPES.CAPTCHA_REQUIRED,
-      message: "CAPTCHA challenge detected on website",
-      retryable: false,
-      requiresHuman: true,
-      strategy: "pause_for_human",
-    };
+  if (errMsg.includes('navigation') || errMsg.includes('net::err') || errMsg.includes('loadState') || errMsg.includes('did not navigate')) {
+    return FAILURE_TYPES.NAVIGATION_ERROR;
+  }
+  if (errMsg.includes('captcha') || errMsg.includes('mfa') || errMsg.includes('otp') || errMsg.includes('recaptcha') || errMsg.includes('human verification')) {
+    return FAILURE_TYPES.HUMAN_REQUIRED;
+  }
+  if (errMsg.includes('timeout') || errMsg.includes('waiting for selector') || errMsg.includes('not found') || errMsg.includes('unable to find') || errMsg.includes('cannot find') || errMsg.includes('frame')) {
+    return FAILURE_TYPES.TARGET_NOT_FOUND;
+  }
+  if (errMsg.includes('ambiguous') || errMsg.includes('strict mode violation') || errMsg.includes('matches multiple elements')) {
+    return FAILURE_TYPES.TARGET_AMBIGUOUS;
+  }
+  if (errMsg.includes('stale element') || errMsg.includes('detached from document') || errMsg.includes('context was destroyed')) {
+    return FAILURE_TYPES.STALE_ELEMENT;
+  }
+  if (errMsg.includes('validation') || errMsg.includes('required field') || errMsg.includes('invalid pattern') || errMsg.includes('please fill')) {
+    return FAILURE_TYPES.VALIDATION_ERROR;
+  }
+  if (errMsg.includes('navigation') || errMsg.includes('net::err') || errMsg.includes('loadState') || errMsg.includes('did not navigate')) {
+    return FAILURE_TYPES.NAVIGATION_ERROR;
+  }
+  if (errMsg.includes('upload') || errMsg.includes('file path') || errMsg.includes('mime type')) {
+    return FAILURE_TYPES.UPLOAD_FAILED;
+  }
+  if (errMsg.includes('captcha') || errMsg.includes('mfa') || errMsg.includes('otp') || errMsg.includes('recaptcha') || errMsg.includes('human verification')) {
+    return FAILURE_TYPES.HUMAN_REQUIRED;
+  }
+  if (errMsg.includes('loop') || errMsg.includes('oscillation') || errMsg.includes('stuck')) {
+    return FAILURE_TYPES.LOOP_DETECTED;
+  }
+  if (context.expectedPage && context.currentPage && context.expectedPage !== context.currentPage) {
+    return FAILURE_TYPES.WRONG_PAGE;
   }
 
-  if (blockers.otp || errMsg.includes("otp") || errMsg.includes("one-time password")) {
-    return {
-      type: FAILURE_TYPES.OTP_REQUIRED,
-      message: "One-Time Password / SMS verification detected",
-      retryable: false,
-      requiresHuman: true,
-      strategy: "pause_for_human",
-    };
-  }
-
-  if (blockers.login || errMsg.includes("login") || errMsg.includes("sign in")) {
-    return {
-      type: FAILURE_TYPES.LOGIN_REQUIRED,
-      message: "Authentication / Login gateway encountered",
-      retryable: false,
-      requiresHuman: true,
-      strategy: "pause_for_human",
-    };
-  }
-
-  // 2. Field validation errors
-  if (
-    observation.validationMessages?.length > 0 ||
-    errMsg.includes("validation error") ||
-    errMsg.includes("invalid") ||
-    errMsg.includes("required")
-  ) {
-    return {
-      type: FAILURE_TYPES.VALIDATION_ERROR,
-      message: observation.validationMessages?.[0] || "Form field validation error detected",
-      retryable: true,
-      requiresHuman: false,
-      strategy: "correct_field_value",
-    };
-  }
-
-  // 3. Stale DOM / Detached element
-  if (errMsg.includes("stale") || errMsg.includes("detached") || errMsg.includes("not attached")) {
-    return {
-      type: FAILURE_TYPES.STALE_ELEMENT,
-      message: "Target element became stale after dynamic DOM update",
-      retryable: true,
-      requiresHuman: false,
-      strategy: "re_observe_and_re_resolve",
-    };
-  }
-
-  // 4. Target element visibility / presence
-  if (errMsg.includes("not visible") || errMsg.includes("hidden")) {
-    return {
-      type: FAILURE_TYPES.TARGET_NOT_VISIBLE,
-      message: "Target element is hidden or outside viewport",
-      retryable: true,
-      requiresHuman: false,
-      strategy: "scroll_and_retry",
-    };
-  }
-
-  if (errMsg.includes("not found") || errMsg.includes("unable to resolve")) {
-    return {
-      type: FAILURE_TYPES.TARGET_NOT_FOUND,
-      message: "Target element could not be located in active DOM",
-      retryable: true,
-      requiresHuman: false,
-      strategy: "search_semantic_alternatives",
-    };
-  }
-
-  // 5. Network or navigation timeouts
-  if (errMsg.includes("timeout") || errMsg.includes("timed out")) {
-    return {
-      type: FAILURE_TYPES.NETWORK_TIMEOUT,
-      message: "Operation timed out waiting for DOM or network response",
-      retryable: true,
-      requiresHuman: false,
-      strategy: "wait_for_readiness",
-    };
-  }
-
-  // 6. Generic unverified transition
-  return {
-    type: FAILURE_TYPES.UNKNOWN_STATE,
-    message: verificationResult?.reason || "State transition could not be verified",
-    retryable: true,
-    requiresHuman: false,
-    strategy: "re_observe_and_replan",
-  };
+  return FAILURE_TYPES.UNKNOWN_ERROR;
 };

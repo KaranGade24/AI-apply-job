@@ -1,35 +1,40 @@
-import { ApplicationEvent } from "../model/ApplicationEvent.js";
-import { logError } from "../utils/logger.js";
+import { JobApplication } from '../model/JobApplication.js';
+import { logError } from '../utils/logger.js';
 
 /**
- * Creates and persists an audit event for an application action or state transition
- * @param {object} eventData
- * @returns {Promise<object>}
+ * Repository for persisting application workflow events and audit logs.
  */
-export const recordApplicationEvent = async (eventData) => {
-  try {
-    const event = new ApplicationEvent(eventData);
-    return await event.save();
-  } catch (error) {
-    await logError("applicationEvent.repository.recordApplicationEvent", error.message);
-    throw error;
-  }
-};
+export class ApplicationEventRepository {
+  /**
+   * Appends an event/log entry to the application's audit event trail.
+   *
+   * @param {string} applicationId
+   * @param {string} eventType
+   * @param {string} message
+   * @returns {Promise<object|null>}
+   */
+  static async logApplicationEvent(applicationId, eventType, message) {
+    if (!applicationId) return null;
+    try {
+      const eventRecord = {
+        eventType,
+        message,
+        timestamp: new Date()
+      };
 
-/**
- * Retrieves audit events for a given application, sorted chronologically
- * @param {string} applicationId
- * @param {number} [limit=100]
- * @returns {Promise<Array>}
- */
-export const getEventsByApplicationId = async (applicationId, limit = 100) => {
-  try {
-    return await ApplicationEvent.find({ applicationId })
-      .sort({ timestamp: 1 })
-      .limit(limit)
-      .lean();
-  } catch (error) {
-    await logError("applicationEvent.repository.getEventsByApplicationId", error.message);
-    throw error;
+      return await JobApplication.findByIdAndUpdate(
+        applicationId,
+        {
+          $push: { 'workflow.events': eventRecord },
+          $set: { updatedAt: new Date() }
+        },
+        { new: true }
+      );
+    } catch (error) {
+      await logError('ApplicationEventRepository.logApplicationEvent', error.message);
+      return null;
+    }
   }
-};
+}
+
+export default ApplicationEventRepository;

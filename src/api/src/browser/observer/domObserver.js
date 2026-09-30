@@ -1,220 +1,156 @@
-import { logError } from "../../utils/logger.js";
+import { logError } from '../../utils/logger.js';
+import crypto from 'crypto';
 
 /**
- * Extracts raw interactive DOM elements and page structure directly from Playwright Page or Frame.
- * Runs in-browser via evaluate to produce normalized element metadata with bounding boxes and selector candidates.
- *
- * @param {import('playwright').Page | import('playwright').Frame} frameOrPage
- * @returns {Promise<object>} Raw DOM extraction result
+ * Computes a stable fingerprint hash for an element based on its stable semantic traits.
  */
-export const extractDomSnapshot = async (frameOrPage) => {
-  try {
-    const snapshot = await frameOrPage.evaluate(() => {
-      const isVisible = (el) => {
-        if (!el) return false;
-        const style = window.getComputedStyle(el);
-        if (
-          style.display === "none" ||
-          style.visibility === "hidden" ||
-          style.opacity === "0"
-        ) {
-          return false;
-        }
-        const rect = el.getBoundingClientRect();
-        return rect.width > 0 && rect.height > 0;
-      };
+export function computeElementFingerprint(traits) {
+  const payload = [
+    traits.tagName || '',
+    traits.id || '',
+    traits.name || '',
+    traits.type || '',
+    traits.role || '',
+    traits.placeholder || '',
+    traits.ariaLabel || '',
+    traits.labelText || '',
+    traits.normalizedText || '',
+    traits.href || ''
+  ].join('|');
 
-      const getAssociatedLabel = (el) => {
-        if (el.id) {
-          const labelFor = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
-          if (labelFor && labelFor.textContent) return labelFor.textContent.trim();
-        }
-        const parentLabel = el.closest("label");
-        if (parentLabel && parentLabel.textContent) {
-          return parentLabel.textContent.trim();
-        }
-        const ariaLabel = el.getAttribute("aria-label");
-        if (ariaLabel) return ariaLabel.trim();
-        const ariaLabelledBy = el.getAttribute("aria-labelledby");
-        if (ariaLabelledBy) {
-          const ref = document.getElementById(ariaLabelledBy);
-          if (ref && ref.textContent) return ref.textContent.trim();
-        }
-        return null;
-      };
+  return crypto.createHash('sha256').update(payload).digest('hex');
+}
 
-      const generateSelectorCandidates = (el) => {
-        const candidates = [];
-        if (el.id && !/^\d/.test(el.id)) {
-          candidates.push(`#${CSS.escape(el.id)}`);
-        }
-        const name = el.getAttribute("name");
-        if (name) {
-          candidates.push(`${el.tagName.toLowerCase()}[name="${CSS.escape(name)}"]`);
-        }
-        const dataTestId =
-          el.getAttribute("data-testid") ||
-          el.getAttribute("data-test") ||
-          el.getAttribute("data-cy") ||
-          el.getAttribute("data-qa");
-        if (dataTestId) {
-          candidates.push(`[data-testid="${CSS.escape(dataTestId)}"]`);
-          candidates.push(`[data-test="${CSS.escape(dataTestId)}"]`);
-        }
-        const role = el.getAttribute("role");
-        if (role) {
-          candidates.push(`[role="${role}"]`);
-        }
-        if (el.className && typeof el.className === "string") {
-          const classes = el.className
-            .split(/\s+/)
-            .filter((c) => c && !c.includes(":") && !c.includes("[") && !c.startsWith("css-") && c.length < 30);
-          if (classes.length > 0) {
-            candidates.push(`${el.tagName.toLowerCase()}.${classes.slice(0, 2).join(".")}`);
-          }
-        }
-        return candidates;
-      };
-
-      // 1. Collect interactive elements
-      const query = [
-        "button",
-        "input",
-        "select",
-        "textarea",
-        "a[href]",
-        '[role="button"]',
-        '[role="link"]',
-        '[role="checkbox"]',
-        '[role="radio"]',
-        '[role="combobox"]',
-        '[role="menuitem"]',
-        '[role="tab"]',
-        '[role="option"]',
-        "[contenteditable]",
-        "[tabindex]:not([tabindex='-1'])",
-      ].join(", ");
-
-      const rawElements = Array.from(document.querySelectorAll(query));
-      let elementIndex = 0;
-      const interactiveElements = [];
-
-      for (const el of rawElements) {
-        const visible = isVisible(el);
-        if (!visible) continue;
-
-        elementIndex += 1;
-        const rect = el.getBoundingClientRect();
-        const tagName = el.tagName.toLowerCase();
-        const type = el.getAttribute("type") || (tagName === "textarea" ? "textarea" : tagName === "select" ? "select" : "text");
-        const role = el.getAttribute("role") || (tagName === "button" ? "button" : tagName === "a" ? "link" : type);
-        const text = (el.innerText || el.textContent || "").trim().slice(0, 150);
-        const label = getAssociatedLabel(el);
-        const placeholder = el.getAttribute("placeholder") || null;
-        const value = el.value !== undefined ? String(el.value).slice(0, 100) : null;
-        const checked = el.checked ?? null;
-        const required = el.required || el.getAttribute("aria-required") === "true";
-        const disabled = el.disabled || el.getAttribute("aria-disabled") === "true";
-        const readonly = el.readOnly || el.getAttribute("aria-readonly") === "true";
-        const selectorCandidates = generateSelectorCandidates(el);
-
-        interactiveElements.push({
-          elementId: `el_${elementIndex}`,
-          tagName,
-          role,
-          type,
-          text,
-          label,
-          ariaLabel: el.getAttribute("aria-label"),
-          placeholder,
-          name: el.getAttribute("name"),
-          id: el.id || null,
-          value,
-          checked,
-          required,
-          enabled: !disabled && !readonly,
-          visible: true,
-          boundingBox: {
-            x: Math.round(rect.x),
-            y: Math.round(rect.y),
-            width: Math.round(rect.width),
-            height: Math.round(rect.height),
-          },
-          selectorCandidates,
-        });
+/**
+ * Script to run inside the browser page context to extract interactive elements.
+ */
+const EXTRACTION_SCRIPT = () => {
+  // Find associated label text for an input element
+  const getLabelText = (el) => {
+    // 1. By ID matching <label for="...">
+    if (el.id) {
+      const label = document.querySelector(`label[for="${el.id}"]`);
+      if (label && label.innerText) {
+        return label.innerText.trim();
       }
-
-      // 2. Collect validation error messages and banners
-      const errorSelectors = [
-        '[class*="error"]',
-        '[class*="invalid"]',
-        '[role="alert"]',
-        '[aria-invalid="true"]',
-        ".text-danger",
-        ".feedback-error",
-      ];
-      const validationMessages = [];
-      for (const sel of errorSelectors) {
-        document.querySelectorAll(sel).forEach((el) => {
-          if (isVisible(el)) {
-            const txt = (el.innerText || "").trim();
-            if (txt && txt.length > 2 && txt.length < 250 && !validationMessages.includes(txt)) {
-              validationMessages.push(txt);
-            }
-          }
-        });
+    }
+    // 2. By ancestor <label> wrapper
+    let parent = el.parentElement;
+    while (parent) {
+      if (parent.tagName === 'LABEL') {
+        return parent.innerText.trim();
       }
+      parent = parent.parentElement;
+    }
+    // 3. Search surrounding text or placeholder
+    const placeholder = el.getAttribute('placeholder');
+    if (placeholder) return placeholder.trim();
 
-      // 3. Collect Headings
-      const headings = Array.from(document.querySelectorAll("h1, h2, h3, h4"))
-        .filter(isVisible)
-        .map((h) => (h.innerText || "").trim())
-        .filter((t) => t.length > 0)
-        .slice(0, 20);
+    const ariaLabel = el.getAttribute('aria-label');
+    if (ariaLabel) return ariaLabel.trim();
 
-      // 4. Loading indicators
-      const loadingSelectors = [
-        '[class*="spinner"]',
-        '[class*="loading"]',
-        '[aria-busy="true"]',
-        ".loader",
-      ];
-      const hasLoadingIndicator = loadingSelectors.some((sel) => {
-        const el = document.querySelector(sel);
-        return isVisible(el);
-      });
+    return '';
+  };
 
-      // 5. Detect Dialogs / Modals
-      const dialogs = Array.from(document.querySelectorAll('dialog, [role="dialog"], [role="alertdialog"], .modal'))
-        .filter(isVisible)
-        .map((d) => ({
-          title: (d.querySelector("h1, h2, h3, h4, .modal-title")?.innerText || "").trim(),
-          hasCloseButton: !!d.querySelector('button[aria-label*="close" i], button.close'),
-        }));
+  // Get semantic attributes/path context
+  const getAncestryPath = (el) => {
+    const parts = [];
+    let curr = el;
+    while (curr && curr !== document.body) {
+      let segment = curr.tagName.toLowerCase();
+      if (curr.id) {
+        segment += `#${curr.id}`;
+      } else if (curr.name) {
+        segment += `[name="${curr.name}"]`;
+      } else if (curr.className) {
+        const firstClass = curr.className.split(/\s+/)[0];
+        if (firstClass && !firstClass.includes('active') && !firstClass.includes('hover')) {
+          segment += `.${firstClass}`;
+        }
+      }
+      parts.unshift(segment);
+      curr = curr.parentElement;
+    }
+    return parts.join(' > ');
+  };
 
-      // 6. Visible text snippet
-      const visibleText = (document.body?.innerText || "").slice(0, 2000);
+  // Query all interactive elements
+  const candidates = Array.from(document.querySelectorAll(
+    'input, select, textarea, button, a, [role="button"], [role="checkbox"], [role="radio"], [role="option"], [clickable="true"]'
+  ));
 
-      return {
-        interactiveElements,
-        validationMessages,
-        headings,
-        dialogs,
-        hasLoadingIndicator,
-        visibleText,
-      };
-    });
+  return candidates.map((el, index) => {
+    const rect = el.getBoundingClientRect();
+    const style = window.getComputedStyle(el);
+    const visible = rect.width > 0 && 
+                    rect.height > 0 && 
+                    style.visibility !== 'hidden' && 
+                    style.display !== 'none' && 
+                    style.opacity !== '0';
 
-    return snapshot;
-  } catch (error) {
-    await logError("domObserver.extractDomSnapshot", error.message);
     return {
-      interactiveElements: [],
-      validationMessages: [],
-      headings: [],
-      dialogs: [],
-      hasLoadingIndicator: false,
-      visibleText: "",
+      tagName: el.tagName.toLowerCase(),
+      id: el.id || '',
+      name: el.getAttribute('name') || '',
+      type: el.getAttribute('type') || '',
+      role: el.getAttribute('role') || '',
+      placeholder: el.getAttribute('placeholder') || '',
+      ariaLabel: el.getAttribute('aria-label') || el.getAttribute('aria-labelledby') || '',
+      labelText: getLabelText(el),
+      normalizedText: (el.innerText || el.textContent || '').trim().substring(0, 150),
+      href: el.getAttribute('href') || '',
+      enabled: !el.disabled,
+      visible,
+      boundingBox: {
+        x: Math.round(rect.left + window.scrollX),
+        y: Math.round(rect.top + window.scrollY),
+        width: Math.round(rect.width),
+        height: Math.round(rect.height)
+      },
+      ancestryPath: getAncestryPath(el),
+      index
     };
-  }
+  });
 };
+
+/**
+ * Extracts and observes interactive DOM elements recursively from page and iframes.
+ * @param {import('playwright').Page} page
+ * @returns {Promise<Array<object>>}
+ */
+export async function observeDOM(page) {
+  try {
+    const elements = [];
+    const frames = page.frames();
+
+    for (const frame of frames) {
+      let frameElements = [];
+      try {
+        // Evaluate extraction script in frame context
+        frameElements = await frame.evaluate(EXTRACTION_SCRIPT);
+      } catch (err) {
+        // Skip cross-origin frames if evaluation fails
+        continue;
+      }
+
+      const frameId = frame.name() || frame.url();
+      for (const rawEl of frameElements) {
+        // Compute deterministic element fingerprint
+        const fingerprint = computeElementFingerprint(rawEl);
+
+        elements.push({
+          ...rawEl,
+          frameId,
+          frameUrl: frame.url(),
+          elementFingerprint: fingerprint,
+          elementId: `el_${fingerprint.substring(0, 10)}`
+        });
+      }
+    }
+
+    return elements;
+  } catch (error) {
+    await logError('domObserver.observeDOM', error.message);
+    return [];
+  }
+}

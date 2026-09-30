@@ -1,125 +1,86 @@
-import { FAILURE_TYPES, RETRY_BUDGETS } from "../../constant/application.constant.js";
-import { logJobEvent } from "../../utils/logger.js";
+import { FAILURE_TYPES, classifyFailure } from './failureClassifier.js';
+import { logJobEvent } from '../../utils/logger.js';
+
+export const RECOVERY_ACTIONS = {
+  RE_OBSERVE: 'RE_OBSERVE',
+  RE_PLAN: 'RE_PLAN',
+  BACKTRACK: 'BACKTRACK',
+  ASK_HUMAN: 'ASK_HUMAN',
+  FAIL_IMMEDIATELY: 'FAIL_IMMEDIATELY'
+};
 
 /**
- * Executes a structured recovery strategy for a classified failure.
+ * Handles browser failures, classifies the error, and formulates a precise, safe recovery strategy.
  *
- * @param {import('playwright').Page} page
- * @param {object} failure - Classified failure from classifyFailure
- * @param {object} action - Failed action
- * @param {number} attemptCount - Attempts so far for this action
- * @returns {Promise<object>} Recovery result contract
+ * @param {Error|string} error - Triggering error or mismatch
+ * @param {object} context - Execution context (page, agentState, previousAction, currentUrl, etc.)
+ * @returns {Promise<{ failureType: string, strategy: string, recommendation: string }>}
  */
-export const executeRecoveryStrategy = async (page, failure, action, attemptCount = 1) => {
-  const risk = action?.riskLevel || "LOW";
-  const budget = RETRY_BUDGETS[risk] ?? 2;
+export const orchestrateRecovery = async (error, context = {}) => {
+  const failureType = classifyFailure(error, context);
 
   await logJobEvent(
-    "recoveryManager",
-    "RECOVERY_ATTEMPT",
-    `Failure type: ${failure.type} | Attempt: ${attemptCount}/${budget} | Strategy: ${failure.strategy}`
+    'recoveryManager',
+    'CLASSIFIED',
+    `Failure encountered: ${failureType} | Error: ${error?.message || error}`
   );
 
-  // Check budget
-  if (attemptCount >= budget) {
-    return {
-      recovered: false,
-      retry: false,
-      strategy: "exhausted_budget",
-      reason: `Maximum retry budget (${budget}) exceeded for action risk level (${risk})`,
-      newObservationRequired: true,
-      humanRequired: true,
-    };
+  let strategy = RECOVERY_ACTIONS.RE_OBSERVE;
+  let recommendation = 'Re-observe page and locate alternate selectors.';
+
+  switch (failureType) {
+    case FAILURE_TYPES.TARGET_NOT_FOUND:
+    case FAILURE_TYPES.STALE_ELEMENT:
+      // Try refreshing page state representation
+      strategy = RECOVERY_ACTIONS.RE_OBSERVE;
+      recommendation = 'Page layout updated or target detached. Initiating page re-observation.';
+      break;
+
+    case FAILURE_TYPES.TARGET_AMBIGUOUS:
+      strategy = RECOVERY_ACTIONS.ASK_HUMAN;
+      recommendation = 'Multiple matching elements found. Halting to avoid incorrect clicks.';
+      break;
+
+    case FAILURE_TYPES.VALIDATION_ERROR:
+      strategy = RECOVERY_ACTIONS.ASK_HUMAN;
+      recommendation = 'Form submission validation failed. Halting for user validation correction.';
+      break;
+
+    case FAILURE_TYPES.NAVIGATION_ERROR:
+      strategy = RECOVERY_ACTIONS.BACKTRACK;
+      recommendation = 'Navigation failed or timed out. Attempting to backtrack or refresh.';
+      break;
+
+    case FAILURE_TYPES.LOOP_DETECTED:
+      strategy = RECOVERY_ACTIONS.ASK_HUMAN;
+      recommendation = 'Execution loop or state oscillation detected. Halting for safety.';
+      break;
+
+    case FAILURE_TYPES.HUMAN_REQUIRED:
+      strategy = RECOVERY_ACTIONS.ASK_HUMAN;
+      recommendation = 'CAPTCHA, MFA, or Security Verification encountered. Human intervention required.';
+      break;
+
+    case FAILURE_TYPES.WRONG_PAGE:
+      strategy = RECOVERY_ACTIONS.BACKTRACK;
+      recommendation = 'Browser navigated off the expected application route. Backtracking.';
+      break;
+
+    default:
+      strategy = RECOVERY_ACTIONS.FAIL_IMMEDIATELY;
+      recommendation = 'Unknown fatal error encountered. Aborting application run.';
+      break;
   }
 
-  // Handle immediate human escalation
-  if (failure.requiresHuman) {
-    return {
-      recovered: false,
-      retry: false,
-      strategy: failure.strategy,
-      reason: failure.message,
-      newObservationRequired: true,
-      humanRequired: true,
-    };
-  }
+  await logJobEvent(
+    'recoveryManager',
+    'RECOVERY_STRATEGY',
+    `Formulated Strategy: ${strategy} | Recommendation: ${recommendation}`
+  );
 
-  switch (failure.type) {
-    case FAILURE_TYPES.STALE_ELEMENT: {
-      // Invalidate cache and wait for DOM stabilization
-      await page.waitForTimeout(1000);
-      return {
-        recovered: true,
-        retry: true,
-        strategy: "stale_element_refresh",
-        reason: "Stale reference invalidated; target will be re-resolved from fresh observation",
-        newObservationRequired: true,
-        humanRequired: false,
-      };
-    }
-
-    case FAILURE_TYPES.TARGET_NOT_VISIBLE: {
-      // Scroll page to reveal elements
-      await page.mouse.wheel(0, 400).catch(() => {});
-      await page.waitForTimeout(800);
-      return {
-        recovered: true,
-        retry: true,
-        strategy: "viewport_scroll",
-        reason: "Scrolled viewport to bring hidden element into view",
-        newObservationRequired: true,
-        humanRequired: false,
-      };
-    }
-
-    case FAILURE_TYPES.PAGE_NOT_READY:
-    case FAILURE_TYPES.NETWORK_TIMEOUT: {
-      // Wait for network idle or DOM stabilization
-      await page.waitForLoadState("domcontentloaded", { timeout: 5000 }).catch(() => {});
-      await page.waitForTimeout(1500);
-      return {
-        recovered: true,
-        retry: true,
-        strategy: "wait_for_idle",
-        reason: "Waited for page readiness and network stabilization",
-        newObservationRequired: true,
-        humanRequired: false,
-      };
-    }
-
-    case FAILURE_TYPES.VALIDATION_ERROR: {
-      // A field was rejected by client-side validation
-      return {
-        recovered: true,
-        retry: true,
-        strategy: "replan_field_value",
-        reason: "Validation error captured; replanning answer mapping",
-        newObservationRequired: true,
-        humanRequired: false,
-      };
-    }
-
-    case FAILURE_TYPES.LOOP_DETECTED: {
-      return {
-        recovered: false,
-        retry: false,
-        strategy: "break_loop",
-        reason: "Execution loop detected: identical actions are repeatedly failing",
-        newObservationRequired: true,
-        humanRequired: true,
-      };
-    }
-
-    default: {
-      await page.waitForTimeout(1000);
-      return {
-        recovered: true,
-        retry: true,
-        strategy: "default_reobserve",
-        reason: "Re-observing page before replanning next action",
-        newObservationRequired: true,
-        humanRequired: false,
-      };
-    }
-  }
+  return {
+    failureType,
+    strategy,
+    recommendation
+  };
 };

@@ -1,110 +1,198 @@
-import { BROWSER_ACTIONS, APPLICATION_STATES } from "../../constant/application.constant.js";
-import { logJobEvent } from "../../utils/logger.js";
+import { browserActionItemSchema } from '../../agent/schema/browserActionSchema.js';
+import { BROWSER_ACTIONS } from '../../constant/application.constant.js';
+import { computeElementFingerprint } from '../observer/domObserver.js';
 
 /**
- * Validates an action proposed by the planner before browser execution.
- * Checks target existence, visibility, enabled state, current application state compatibility,
- * and high-risk safety requirements.
+ * Deterministically validates an action against the current page observation and execution context
+ * without interacting with the live browser context.
  *
- * @param {object} action - Proposed action
- * @param {object} context - Validation context
- * @param {object} context.observation - Current PageObservation
- * @param {string} context.currentState - Current application state
- * @param {boolean} [context.submissionConfirmed=false] - User approval for final submit
- * @param {Array} [context.recentActions=[]] - Recent actions for loop check
- * @returns {{ valid: boolean, reasons: string[] }}
+ * @param {object} action - The proposed action to validate
+ * @param {object} pageObservation - The current page observation (from browserObserver)
+ * @param {object} [executionContext] - Context containing executionHistory, retryBudget, humanConfirmed state, etc.
+ * @returns {object} { valid: boolean, reasons: Array<string>, warnings: Array<string>, riskLevel: string, normalizedAction: object|null }
  */
-export const validateProposedAction = (action, context = {}) => {
+export function validateAction(action, pageObservation, executionContext = {}) {
   const reasons = [];
+  const warnings = [];
+  let valid = true;
+  let normalizedAction = null;
 
-  if (!action || typeof action !== "object") {
-    return { valid: false, reasons: ["Action must be a valid object"] };
+  const history = executionContext.history || [];
+  const retryBudget = executionContext.retryBudget ?? 3;
+  const humanConfirmed = executionContext.humanConfirmed ?? false;
+
+  // 1. Validate Action Schema & Type
+  try {
+    normalizedAction = browserActionItemSchema.parse(action);
+  } catch (error) {
+    return {
+      valid: false,
+      reasons: [`Schema validation failed: ${error.message}`],
+      warnings: [],
+      riskLevel: action?.riskLevel || 'LOW',
+      normalizedAction: null
+    };
   }
 
-  const validActionTypes = Object.values(BROWSER_ACTIONS);
-  if (!validActionTypes.includes(action.type)) {
-    reasons.push(`Unknown action type: "${action.type}". Must be one of: ${validActionTypes.join(", ")}`);
+  const { type, target, value, expectedOutcome, riskLevel, requiresHumanConfirmation, observationRevision } = normalizedAction;
+
+  // 2. Validate Expected Outcome Requirement
+  const isPassive = [BROWSER_ACTIONS.WAIT, BROWSER_ACTIONS.SCROLL].includes(type);
+  if (!isPassive && (!expectedOutcome || expectedOutcome.trim() === '')) {
+    valid = false;
+    reasons.push('Active actions must specify an expectedOutcome');
   }
 
-  const observation = context.observation || {};
-  const currentState = context.currentState || APPLICATION_STATES.INIT;
-  const recentActions = context.recentActions || [];
-
-  // 1. Navigation / Global actions
-  if (action.type === BROWSER_ACTIONS.NAVIGATE) {
-    const url = action.target?.url || action.value;
-    if (!url || typeof url !== "string") {
-      reasons.push("NAVIGATE action requires target.url or value string");
+  // 3. Check Observation Revision Stability
+  if (observationRevision && pageObservation && pageObservation.pageRevision) {
+    if (observationRevision !== pageObservation.pageRevision) {
+      valid = false;
+      reasons.push(`Action is stale. Action observation revision (${observationRevision}) does not match current page revision (${pageObservation.pageRevision})`);
     }
-    return { valid: reasons.length === 0, reasons };
   }
 
-  if (action.type === BROWSER_ACTIONS.WAIT || action.type === BROWSER_ACTIONS.REQUEST_HUMAN || action.type === BROWSER_ACTIONS.FINISH) {
-    return { valid: reasons.length === 0, reasons };
+  // Find matches in the current page observation
+  let matchedElements = [];
+  if (pageObservation && pageObservation.interactiveElements) {
+    matchedElements = pageObservation.interactiveElements.filter((el) => {
+      // Fingerprint match is strongest
+      if (target?.elementFingerprint && el.elementFingerprint === target.elementFingerprint) {
+        return true;
+      }
+      // ID match
+      if (target?.elementId && el.elementId === target.elementId) {
+        return true;
+      }
+      if (target?.id && el.id === target.id) {
+        return true;
+      }
+      // Structural or selector fallbacks
+      if (target?.selector && el.ancestryPath && el.ancestryPath === target.selector) {
+        return true;
+      }
+      return false;
+    });
   }
 
-  // 2. Target existence in current observation
-  const target = action.target || {};
-  if (!target || (!target.elementId && !target.selector && !target.id && !target.text && !target.role)) {
-    reasons.push(`Action "${action.type}" requires a target locator specification`);
-  }
+  const isNavigation = type === BROWSER_ACTIONS.NAVIGATE;
+  const isGoBack = type === BROWSER_ACTIONS.GO_BACK;
+  const requiresTarget = !isNavigation && !isGoBack && ![BROWSER_ACTIONS.WAIT, BROWSER_ACTIONS.SCROLL].includes(type);
 
-  // If elementId is specified, check against current observation elements
-  if (target.elementId && Array.isArray(observation.interactiveElements)) {
-    const matchingEl = observation.interactiveElements.find((e) => e.elementId === target.elementId);
-    if (!matchingEl) {
-      reasons.push(`Target element (${target.elementId}) is not present in the current DOM observation`);
+  let targetElement = null;
+
+  if (requiresTarget) {
+    // 4. Target Existence & Uniqueness
+    if (matchedElements.length === 0) {
+      valid = false;
+      reasons.push('Target element not found in current page observation');
+    } else if (matchedElements.length > 1) {
+      valid = false;
+      reasons.push(`Target is ambiguous. Found ${matchedElements.length} matching elements`);
     } else {
-      if (!matchingEl.visible) {
-        reasons.push(`Target element (${target.elementId}) is not currently visible in viewport`);
+      targetElement = matchedElements[0];
+
+      // 5. Target Visibility
+      if (targetElement.visible === false) {
+        valid = false;
+        reasons.push('Target element is present but currently hidden/invisible');
       }
-      if (!matchingEl.enabled && action.type !== BROWSER_ACTIONS.SCROLL) {
-        reasons.push(`Target element (${target.elementId}) is disabled or readonly`);
+
+      // 6. Target Enabled State
+      if (targetElement.enabled === false) {
+        valid = false;
+        reasons.push('Target element is disabled and cannot be interacted with');
+      }
+
+      // 7. Frame Context
+      if (target?.frameId && targetElement.frameId !== target.frameId) {
+        valid = false;
+        reasons.push(`Target element frame context mismatch. Expected: "${target.frameId}", Actual: "${targetElement.frameId}"`);
+      }
+
+      // 8. Semantic Compatibility
+      if (type === BROWSER_ACTIONS.FILL || type === BROWSER_ACTIONS.TYPE) {
+        const fillableTags = ['input', 'textarea', 'select'];
+        const isRoleInput = targetElement.role === 'textbox' || targetElement.role === 'searchbox';
+        if (!fillableTags.includes(targetElement.tagName) && !isRoleInput) {
+          warnings.push(`Target element tag "${targetElement.tagName}" is unusual for a ${type} action`);
+        }
+
+        // Semantic field safety check for emails
+        const isEmailAction = (target?.text && target.text.toLowerCase().includes('email')) || 
+                              (target?.id && target.id.toLowerCase().includes('email')) || 
+                              (target?.name && target.name.toLowerCase().includes('email'));
+        const isEmailElement = (targetElement.id && targetElement.id.toLowerCase().includes('email')) || 
+                               (targetElement.name && targetElement.name.toLowerCase().includes('email')) || 
+                               (targetElement.labelText && targetElement.labelText.toLowerCase().includes('email'));
+        if (isEmailAction && !isEmailElement) {
+          valid = false;
+          reasons.push('Target element is not confidently an email field');
+        }
+      }
+
+      if (type === BROWSER_ACTIONS.SELECT && targetElement.tagName !== 'select') {
+        valid = false;
+        reasons.push(`SELECT action is incompatible with element tag "${targetElement.tagName}"`);
       }
     }
   }
 
-  // 3. Field semantic compatibility
-  if (action.type === BROWSER_ACTIONS.FILL || action.type === BROWSER_ACTIONS.TYPE) {
-    if (action.value === undefined || action.value === null) {
-      reasons.push(`Action "${action.type}" requires a defined value to enter`);
+  // 9. Required Values for specific types
+  if ([BROWSER_ACTIONS.FILL, BROWSER_ACTIONS.TYPE, BROWSER_ACTIONS.SELECT].includes(type)) {
+    if (value === undefined || value === null || String(value).trim() === '') {
+      valid = false;
+      reasons.push(`Action type ${type} requires a non-empty value`);
     }
   }
 
-  if (action.type === BROWSER_ACTIONS.UPLOAD) {
-    if (!action.value && !action.filePath) {
-      reasons.push("UPLOAD action requires a local file path");
+  // 10. Application State Constraints & Pre-Submit Gates
+  if (type === BROWSER_ACTIONS.CLICK && targetElement) {
+    const isSubmitIntent = normalizedAction.intent === 'submit_application' || 
+                           targetElement.type === 'submit' || 
+                           (targetElement.id && targetElement.id.toLowerCase().includes('submit')) || 
+                           (targetElement.normalizedText && targetElement.normalizedText.toLowerCase().includes('submit application'));
+    if (isSubmitIntent) {
+      const appReady = executionContext.applicationState?.readyToSubmit === true;
+      if (!appReady) {
+        valid = false;
+        reasons.push('SUBMIT intent blocked: Application is not explicitly in the correct pre-submit validated state');
+      }
     }
   }
 
-  // 4. Critical submission safety gate
-  if (action.intent === "submit_application" || action.target?.semanticIntent === "submit_application") {
-    if (currentState !== APPLICATION_STATES.PRE_SUBMISSION_REVIEW) {
-      reasons.push(
-        `Cannot execute submit when application state is "${currentState}". Must be in PRE_SUBMISSION_REVIEW.`
-      );
-    }
-    if (!context.submissionConfirmed) {
-      reasons.push("Final submission requires explicit user confirmation");
-    }
-    if (observation.validationMessages && observation.validationMessages.length > 0) {
-      reasons.push(`Cannot submit while validation errors are active: ${observation.validationMessages.join("; ")}`);
+  // 11. Loop Risk & Retry Budget
+  const actionTargetKey = target ? JSON.stringify(target) : 'no_target';
+  const recentAttempts = history.filter(h => h.type === type && JSON.stringify(h.target) === actionTargetKey);
+  if (recentAttempts.length >= retryBudget) {
+    valid = false;
+    reasons.push(`Action retry budget exceeded. Attempted this action ${recentAttempts.length} times recently without state transition`);
+  }
+
+  // Look for repeating cycles in history (Loop Risk)
+  if (history.length >= 4) {
+    const lastFour = history.slice(-4);
+    const loopDetected = lastFour[0].type === lastFour[2].type && 
+                         lastFour[1].type === lastFour[3].type && 
+                         JSON.stringify(lastFour[0].target) === JSON.stringify(lastFour[2].target) &&
+                         JSON.stringify(lastFour[1].target) === JSON.stringify(lastFour[3].target);
+    if (loopDetected) {
+      valid = false;
+      reasons.push('Loop detected: Repeating dual-action cycle in recent history');
     }
   }
 
-  // 5. Duplicate action loop check
-  if (recentActions.length >= 3) {
-    const last3 = recentActions.slice(-3);
-    const isRepeated = last3.every(
-      (a) => a.type === action.type && (a.target?.elementId === target.elementId || a.target?.text === target.text)
-    );
-    if (isRepeated) {
-      reasons.push(`Action (${action.type}) has already failed 3 times consecutively on the same target`);
-    }
+  // 12. Human Confirmation Requirement
+  const isHighRisk = ['HIGH', 'CRITICAL'].includes(riskLevel) || requiresHumanConfirmation;
+  if (isHighRisk && !humanConfirmed) {
+    valid = false;
+    reasons.push(`Action of risk level ${riskLevel} requires explicit human confirmation`);
   }
 
   return {
-    valid: reasons.length === 0,
+    valid,
     reasons,
+    warnings,
+    riskLevel,
+    normalizedAction
   };
-};
+}

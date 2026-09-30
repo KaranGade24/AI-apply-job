@@ -1,112 +1,77 @@
 import { getGeminiModel } from '../../agent/config/modelConfig.js';
-import { PORTAL_PAGE_TYPES } from '../../constant/application.constant.js';
 import { logJobEvent, logError } from '../../utils/logger.js';
 
+// Explicit application page states
+export const PAGE_STATES = {
+  JOB_PAGE: 'JOB_PAGE',
+  APPLICATION_ENTRY: 'APPLICATION_ENTRY',
+  APPLICATION_FORM: 'APPLICATION_FORM',
+  FORM_STEP: 'FORM_STEP',
+  REVIEW: 'REVIEW',
+  LOGIN_REQUIRED: 'LOGIN_REQUIRED',
+  OTP_REQUIRED: 'OTP_REQUIRED',
+  MFA_REQUIRED: 'MFA_REQUIRED',
+  CAPTCHA_REQUIRED: 'CAPTCHA_REQUIRED',
+  SUCCESS: 'SUCCESS',
+  ERROR: 'ERROR',
+  UNKNOWN: 'UNKNOWN'
+};
+
 /**
- * Uses Gemini AI LLM to analyze the rendered page content, classify the page structure,
- * identify matching positions, detect closed forms (e.g. Google Forms no longer accepting responses),
- * and formulate actionable next steps (direct email with Ref ID, browser apply, or form filling).
+ * Stage 1 AI Classifier: Analyzes normalized state to classify exactly which page/state the browser is on.
+ * Strictly answers: "What page/state is this?".
+ * Does NOT formulate actions or next steps.
  *
- * @param {object} extractedPageContent - Output from pageContentExtractor
- * @param {object} job - Target Job details ({ title, company, description, requirements })
+ * @param {object} normalizedState
  * @param {string} [userId]
- * @returns {Promise<object>} Structured AI classification and action plan
+ * @returns {Promise<{ state: string, confidence: number, hasStepper: boolean, currentStep: number, totalSteps: number, activeStepName: string, isFormClosed: boolean, reason: string }>}
  */
-export const classifyPageWithLlm = async (extractedPageContent, job = {}, userId = null) => {
+export const classifyPageStateLlm = async (normalizedState, userId = null) => {
   try {
-    const targetTitle = job.title || 'Software Developer';
-    const targetCompany = job.company || 'Company';
+    const prompt = `You are a Stage 1 Semantic Browser State Classifier.
+Analyze the following normalized browser state and determine which EXPLICIT PAGE STATE best matches this page.
 
-    const openingsList = (extractedPageContent.openingsList || extractedPageContent.openings || []).map((o) => {
-      if (typeof o === 'string') return o;
-      return `${o.title || o.text || 'Opening'} (Ref: ${o.referenceId || 'N/A'}, Exp: ${o.experience || 'N/A'}, Loc: ${o.location || 'N/A'})`;
-    }).slice(0, 20);
+EXPLICIT PAGE STATES:
+- "JOB_PAGE": A job posting, job description, or list of jobs.
+- "APPLICATION_ENTRY": The entry gateway or landing page of an application (e.g. contains "Apply Now", "Apply Manually", "Autofill with Resume" buttons).
+- "APPLICATION_FORM": A single-page job application form containing text inputs, textareas, file uploads, etc.
+- "FORM_STEP": One specific page/step of a multi-step wizard form (e.g. contact info, questions, resume upload).
+- "REVIEW": A summary or review page of the form fields filled so far before hitting submit.
+- "LOGIN_REQUIRED": A user credentials form, username/password fields, or sign-in buttons blocking entry.
+- "OTP_REQUIRED": One-Time Pin / Code entry form fields.
+- "MFA_REQUIRED": Multi-Factor Authentication gate screen (security questions, code app verification).
+- "CAPTCHA_REQUIRED": Active CAPTCHA challenges, bot protection grids, or click-shields.
+- "SUCCESS": An explicit submission confirmation page (Level 2, 3, or 4 success markers like thank you message, receipt, or submission confirmation).
+- "ERROR": The page indicates a fatal or operational error blocking normal application progress.
+- "UNKNOWN": Cannot be identified from active indicators.
 
-    const buttonsList = (extractedPageContent.buttons || [])
-      .map((b) => `${b.text} [Selector: ${b.selector || 'N/A'}]`)
-      .slice(0, 25);
-
-    const prompt = `You are an advanced AI Browser Automation & Semantic DOM Analysis Agent analyzing a rendered webpage during a job application workflow.
-
-TARGET JOB SOUGHT BY CANDIDATE:
-- Title: "${targetTitle}"
-- Company: "${targetCompany}"
-
-RENDERED DOM-TREE SEMANTIC BLUEPRINT:
-- Current Page URL: ${extractedPageContent.url || 'N/A'}
-- Page Title: "${extractedPageContent.title || 'N/A'}"
-- Headings Hierarchy: ${JSON.stringify(extractedPageContent.headings || [])}
-- Active Modal / Drawer State: ${JSON.stringify(extractedPageContent.modalState || { isOpen: false })}
-- Multi-Step Workflow / Stepper State: ${JSON.stringify(extractedPageContent.stepperState || { hasStepper: false })}
-- Form Sections & Input Hierarchy: ${JSON.stringify(extractedPageContent.formSections || [])}
-- Candidate Auth / Gateway State: ${JSON.stringify(extractedPageContent.authGateway || { isAuthRequired: false })}
-- Total Form Inputs: ${extractedPageContent.formFieldsCount || 0}
-- File Dropzones / Upload Inputs: ${extractedPageContent.fileInputsCount || 0}
-- Interactive Buttons / Action Links: ${JSON.stringify(buttonsList)}
-- Detected Openings / Roles in page: ${JSON.stringify(openingsList)}
-- Detected Emails: ${JSON.stringify(extractedPageContent.emails || [])}
-- Detected Reference IDs / Req Codes: ${JSON.stringify(extractedPageContent.referenceIds || [])}
-- Form Closed / Expired Alert: ${extractedPageContent.isFormClosed ? `YES - "${extractedPageContent.closedFormTitle}" (${extractedPageContent.closedFormMessage})` : 'NO'}
-- Direct Email Application Instructions: ${JSON.stringify(extractedPageContent.emailInstructions || null)}
-- Live Text Sample:
+NORMALIZED STATE BLUEPRINT:
+- URL: ${normalizedState.url}
+- Title: "${normalizedState.title}"
+- Headings: ${JSON.stringify(normalizedState.headings || [])}
+- Forms Present: ${JSON.stringify(normalizedState.forms || [])}
+- Active Modal: ${JSON.stringify(normalizedState.modal || { isOpen: false })}
+- Stepper: ${JSON.stringify(normalizedState.stepper || { hasStepper: false })}
+- Validation Errors Visible: ${JSON.stringify(normalizedState.validationErrors || [])}
+- Loading: ${JSON.stringify(normalizedState.loading || { isLoading: false })}
+- Success Evidence: ${JSON.stringify(normalizedState.successEvidence || { level: 0 })}
+- Is Form Closed: ${normalizedState.isFormClosed ? 'YES' : 'NO'}
+- Text Snippet:
 """
-${(extractedPageContent.textSnippet || '').slice(0, 3500)}
+${(normalizedState.textSnippet || '').slice(0, 2000)}
 """
 
-SEMANTIC CLASSIFICATION RULES (DO NOT DEFAULT TO 'unknown' IF DOM CONTAINS ACTIONABLE CONTROLS):
-1. PRIMARY ACTION RULE:
-   - If the page contains job listings, position cards, accordion openings, or an [Apply] button (even if a footer or sidebar has a general "Send resume to careers@..." email), you MUST choose "click_opening_apply" or "click_button" to apply directly via the web portal!
-   - ONLY recommend "send_email" if the page has NO interactive apply buttons, NO online form, and explicitly instructs candidates to apply solely via email.
-   - If a form is closed/expired ("The form is no longer accepting responses"), recommend "form_closed_fallback_email" if an email exists.
+RETURN STRICT JSON ONLY MATCHING THE FOLLOWING SCHEMA. Do NOT include markdown blocks, notes, or explanations outside the JSON block.
 
-2. Analyze the page structure and workflow stage:
-   - "multi_step_wizard": The application is a multi-step workflow (stepper indicated, e.g. "Step 1: Contact Info -> Step 2: Experience -> Step 3: Questions").
-   - "modal_application_form": An active modal, drawer, or dialog overlay contains application inputs or questionnaire.
-   - "application_form": A standard application form on the page with input fields and submit controls.
-   - "ats_account_gateway": Candidate sign-in or account creation is required before accessing the application form (e.g. Workday account login, password fields).
-   - "external_ats": An enterprise ATS job details page (Workday, Greenhouse, Lever, SmartRecruiters, Taleo, etc.) with an Apply / Autofill trigger.
-   - "job_description_page": A single job posting description with an Apply / Submit button.
-   - "job_listings_accordion": A directory of multiple job openings with accordions, cards, or position listings with Apply buttons.
-   - "form_closed": An online form or job posting that is expired or no longer accepting responses.
-   - "email_instructions": A page instructing candidates to email their resume directly with a reference code.
-
-2. Extract Workflow & Match Details:
-   - Match the target role "${targetTitle}" to the best opening on the page (Title, Req ID / Ref ID, Experience, Location).
-   - Determine current step name and number if multi-step.
-   - Identify the exact next target selector or button text to advance (e.g., [data-automation-id="apply-button"], "Apply Manually", "Next", "Save & Continue", "Submit").
-
-RETURN STRICT JSON ONLY:
 {
-  "pageType": "multi_step_wizard" | "modal_application_form" | "application_form" | "ats_account_gateway" | "external_ats" | "job_description_page" | "job_listings_accordion" | "form_closed" | "email_instructions",
-  "workflow": {
-    "isMultiStep": boolean,
-    "currentStep": number,
-    "totalSteps": number,
-    "currentStepName": string,
-    "isModal": boolean
-  },
-  "isFormClosed": boolean,
-  "closedFormTitle": string,
-  "closedFormMessage": string,
-  "summary": "Clear 1-2 sentence semantic summary of the current page status, workflow stage, company, and next action",
-  "matchedRole": {
-    "title": "Exact role title matched from the page",
-    "referenceId": "Extracted reference ID or Req ID (e.g. JR100355, IN-NJ-01)",
-    "experience": "Extracted experience requirement",
-    "location": "Extracted location",
-    "targetButtonText": "Apply",
-    "targetSelector": "Selector if known (e.g. [data-automation-id='apply-button'])",
-    "isAccordion": boolean
-  },
-  "detectedOpenings": ["List of all role names detected on page"],
-  "emailContact": {
-    "email": "careers email if available, else empty",
-    "subject": "Suggested subject line including Reference ID if available",
-    "referenceId": "Extracted reference ID"
-  },
-  "nextRecommendedAction": "fill_form" | "click_next_step" | "click_opening_apply" | "click_button" | "upload_resume" | "send_email" | "form_closed_fallback_email" | "human_review",
-  "targetSelector": "Best selector to click or interact with next",
-  "actionReason": "Clear semantic rationale explaining the decision"
+  "state": "JOB_PAGE | APPLICATION_ENTRY | APPLICATION_FORM | FORM_STEP | REVIEW | LOGIN_REQUIRED | OTP_REQUIRED | MFA_REQUIRED | CAPTCHA_REQUIRED | SUCCESS | ERROR | UNKNOWN",
+  "confidence": <float between 0.0 and 1.0>,
+  "hasStepper": <boolean>,
+  "currentStep": <number>,
+  "totalSteps": <number>,
+  "activeStepName": "<string>",
+  "isFormClosed": <boolean>,
+  "reason": "<clear semantic reasoning of your state selection>"
 }`;
 
     const model = await getGeminiModel(userId);
@@ -116,141 +81,149 @@ RETURN STRICT JSON ONLY:
     const cleaned = content.replace(/^```json/i, '').replace(/^```/, '').replace(/```$/, '').trim();
     const parsed = JSON.parse(cleaned);
 
+    const mappedState = PAGE_STATES[parsed.state] ? parsed.state : PAGE_STATES.UNKNOWN;
+
     await logJobEvent(
       'pageClassifierLlm',
-      'CLASSIFIED',
-      `Page Type: ${parsed.pageType} | Form Closed: ${parsed.isFormClosed ? 'YES' : 'NO'} | Matched: "${parsed.matchedRole?.title || 'None'}" (Ref: ${parsed.matchedRole?.referenceId || 'N/A'}) | Action: ${parsed.nextRecommendedAction}`
+      'STATE_CLASSIFIED',
+      `State: ${mappedState} | Confidence: ${parsed.confidence} | Has Stepper: ${parsed.hasStepper} | Step: ${parsed.currentStep}/${parsed.totalSteps}`
     );
 
     return {
-      pageType: parsed.pageType || (extractedPageContent.isFormClosed ? PORTAL_PAGE_TYPES.FORM_CLOSED : PORTAL_PAGE_TYPES.EXTERNAL_ATS),
-      workflow: parsed.workflow || {
-        isMultiStep: Boolean(extractedPageContent.stepperState?.hasStepper),
-        currentStep: extractedPageContent.stepperState?.currentStep || 1,
-        totalSteps: extractedPageContent.stepperState?.totalSteps || 1,
-        currentStepName: extractedPageContent.stepperState?.activeStepName || '',
-        isModal: Boolean(extractedPageContent.modalState?.isOpen),
-      },
-      isFormClosed: parsed.isFormClosed !== undefined ? parsed.isFormClosed : extractedPageContent.isFormClosed,
-      closedFormTitle: parsed.closedFormTitle || extractedPageContent.closedFormTitle || '',
-      closedFormMessage: parsed.closedFormMessage || extractedPageContent.closedFormMessage || '',
-      summary: parsed.summary || 'Rendered page analyzed.',
-      matchedRole: parsed.matchedRole || {
-        title: job.title || '',
-        referenceId: extractedPageContent.referenceIds?.[0] || '',
-        experience: '',
-        location: '',
-        targetButtonText: 'Apply',
-        targetSelector: parsed.targetSelector || '',
-        isAccordion: false,
-      },
-      targetSelector: parsed.targetSelector || parsed.matchedRole?.targetSelector || '',
-      detectedOpenings: parsed.detectedOpenings || (extractedPageContent.openingsList || []).map((o) => o.title),
-      openingsList: extractedPageContent.openingsList || [],
-      emailContact: parsed.emailContact || {
-        email: extractedPageContent.emails?.[0] || '',
-        subject: `Application for ${job.title || 'Position'}`,
-        referenceId: extractedPageContent.referenceIds?.[0] || '',
-      },
-      nextRecommendedAction: parsed.nextRecommendedAction || (extractedPageContent.isFormClosed ? 'send_email' : 'fill_form'),
-      actionReason: parsed.actionReason || '',
+      state: mappedState,
+      confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0.5,
+      hasStepper: Boolean(parsed.hasStepper || normalizedState.stepper?.hasStepper),
+      currentStep: parsed.currentStep || normalizedState.stepper?.currentStep || 1,
+      totalSteps: parsed.totalSteps || normalizedState.stepper?.totalSteps || 1,
+      activeStepName: parsed.activeStepName || normalizedState.stepper?.activeStepName || '',
+      isFormClosed: parsed.isFormClosed !== undefined ? parsed.isFormClosed : normalizedState.isFormClosed,
+      reason: parsed.reason || 'AI Page State classification.'
     };
+
   } catch (error) {
-    await logError('pageClassifierLlm.classifyPageWithLlm', error.message);
-
-    // Fallback heuristic classification
-    const isClosed = extractedPageContent.isFormClosed;
-    const formFields = extractedPageContent.formFieldsCount || 0;
-    const isForm = formFields >= 2;
-    const isModal = Boolean(extractedPageContent.modalState?.isOpen);
-    const isMultiStep = Boolean(extractedPageContent.stepperState?.hasStepper);
-    const isAuthRequired = Boolean(extractedPageContent.authGateway?.isAuthRequired);
-    const hasOpenings = (extractedPageContent.openingsList || extractedPageContent.openings || []).length > 0;
-    const hasEmail = (extractedPageContent.emails || []).length > 0;
-    const pageUrl = (extractedPageContent.url || '').toLowerCase();
-    const hasApplyBtn = (extractedPageContent.buttons || []).some((b) => b.isApplyRelated || /apply/i.test(b.text));
-
-    const isWorkdayOrAts =
-      pageUrl.includes('myworkdayjobs.com') ||
-      pageUrl.includes('greenhouse.io') ||
-      pageUrl.includes('lever.co') ||
-      pageUrl.includes('smartrecruiters.com') ||
-      pageUrl.includes('taleo.net') ||
-      pageUrl.includes('icims.com') ||
-      pageUrl.includes('jobvite.com') ||
-      pageUrl.includes('bamboohr.com') ||
-      pageUrl.includes('careers') ||
-      pageUrl.includes('/job/');
-
-    let pageType = PORTAL_PAGE_TYPES.EXTERNAL_ATS;
-    let nextAction = 'click_opening_apply';
-
-    if (isClosed) {
-      pageType = PORTAL_PAGE_TYPES.FORM_CLOSED;
-      nextAction = hasEmail ? 'send_email' : 'human_review';
-    } else if (isModal) {
-      pageType = PORTAL_PAGE_TYPES.MODAL_APPLICATION_FORM;
-      nextAction = 'fill_form';
-    } else if (isMultiStep) {
-      pageType = PORTAL_PAGE_TYPES.MULTI_STEP_WIZARD;
-      nextAction = 'fill_form';
-    } else if (isAuthRequired) {
-      pageType = PORTAL_PAGE_TYPES.ATS_ACCOUNT_GATEWAY;
-      nextAction = 'human_review';
-    } else if (isForm) {
-      pageType = PORTAL_PAGE_TYPES.APPLICATION_FORM;
-      nextAction = 'fill_form';
-    } else if (isWorkdayOrAts || hasApplyBtn) {
-      pageType = PORTAL_PAGE_TYPES.EXTERNAL_ATS;
-      nextAction = 'click_opening_apply';
-    } else if (hasOpenings) {
-      pageType = PORTAL_PAGE_TYPES.JOB_LISTINGS_ACCORDION;
-      nextAction = 'click_opening_apply';
-    } else if (hasEmail) {
-      pageType = PORTAL_PAGE_TYPES.EMAIL_INSTRUCTIONS;
-      nextAction = 'send_email';
-    }
-
+    await logError('pageClassifierLlm.classifyPageStateLlm', error.message);
     return {
-      pageType,
-      workflow: {
-        isMultiStep,
-        currentStep: extractedPageContent.stepperState?.currentStep || 1,
-        totalSteps: extractedPageContent.stepperState?.totalSteps || 1,
-        currentStepName: extractedPageContent.stepperState?.activeStepName || '',
-        isModal,
-      },
-      isFormClosed: isClosed,
-      closedFormTitle: extractedPageContent.closedFormTitle || '',
-      closedFormMessage: extractedPageContent.closedFormMessage || '',
-      summary: isClosed
-        ? `Application form is closed (${extractedPageContent.closedFormTitle || 'External Form'}). Direct email application recommended.`
-        : isModal
-        ? `Application modal active (${extractedPageContent.modalState?.title || 'Form dialog'}).`
-        : isMultiStep
-        ? `Multi-step application flow: Step ${extractedPageContent.stepperState?.currentStep} of ${extractedPageContent.stepperState?.totalSteps} (${extractedPageContent.stepperState?.activeStepName || 'Active'}).`
-        : isWorkdayOrAts
-        ? `External Career / ATS Portal detected for "${job.title || 'position'}". Ready for application.`
-        : hasOpenings
-        ? `Multiple job openings detected on careers page (${extractedPageContent.openingsList?.length || 0} roles).`
-        : `Career portal active for "${job.title || 'Position'}".`,
-      matchedRole: {
-        title: job.title || '',
-        referenceId: extractedPageContent.referenceIds?.[0] || '',
-        experience: '',
-        location: '',
-        targetButtonText: 'Apply',
-        isAccordion: hasOpenings,
-      },
-      detectedOpenings: (extractedPageContent.openingsList || extractedPageContent.openings || []).map((o) => o.title || o),
-      openingsList: extractedPageContent.openingsList || [],
-      emailContact: {
-        email: extractedPageContent.emails?.[0] || '',
-        subject: `Application for ${job.title || 'Position'} - Ref ID: ${extractedPageContent.referenceIds?.[0] || ''}`,
-        referenceId: extractedPageContent.referenceIds?.[0] || '',
-      },
-      nextRecommendedAction: nextAction,
-      actionReason: 'Intelligent semantic DOM fallback classification.',
+      state: PAGE_STATES.UNKNOWN,
+      confidence: 0.0,
+      hasStepper: false,
+      currentStep: 1,
+      totalSteps: 1,
+      activeStepName: '',
+      isFormClosed: false,
+      reason: `Classification Exception: ${error.message}`
     };
   }
+};
+
+/**
+ * Backward-compatible page classifier wrapper.
+ * Integrates internal classifyPageStateLlm to preserve compatibility across legacy systems (e.g., Naukri scripts).
+ *
+ * @param {object} extractedPageContent - Output from pageContentExtractor
+ * @param {object} job - Target Job details
+ * @param {string} [userId]
+ * @returns {Promise<object>} Legacy formatted classification details
+ */
+export const classifyPageWithLlm = async (extractedPageContent, job = {}, userId = null) => {
+  const normalized = {
+    url: extractedPageContent.url || '',
+    title: extractedPageContent.title || '',
+    headings: extractedPageContent.headings || [],
+    forms: extractedPageContent.formSections || [],
+    formFieldsCount: extractedPageContent.formFieldsCount || 0,
+    fileInputsCount: extractedPageContent.fileInputsCount || 0,
+    modal: {
+      isOpen: extractedPageContent.modalState?.isOpen || false,
+      title: extractedPageContent.modalState?.title || '',
+      inputCount: extractedPageContent.modalState?.inputCount || 0
+    },
+    stepper: {
+      hasStepper: extractedPageContent.stepperState?.hasStepper || false,
+      currentStep: extractedPageContent.stepperState?.currentStep || 1,
+      totalSteps: extractedPageContent.stepperState?.totalSteps || 1,
+      activeStepName: extractedPageContent.stepperState?.activeStepName || ''
+    },
+    validationErrors: extractedPageContent.validationErrors || [],
+    loading: extractedPageContent.loadingState || { isLoading: false },
+    successEvidence: extractedPageContent.successEvidence || { level: 0 },
+    isFormClosed: extractedPageContent.isFormClosed || false,
+    textSnippet: extractedPageContent.textSnippet || ''
+  };
+
+  const pageStateResult = await classifyPageStateLlm(normalized, userId);
+
+  // Map explicit states back to raw legacy strings
+  let legacyPageType = 'external_ats';
+  let legacyNextRecommendedAction = 'fill_form';
+
+  switch (pageStateResult.state) {
+    case PAGE_STATES.JOB_PAGE:
+      legacyPageType = 'job_description_page';
+      legacyNextRecommendedAction = 'click_opening_apply';
+      break;
+    case PAGE_STATES.APPLICATION_ENTRY:
+      legacyPageType = 'external_ats';
+      legacyNextRecommendedAction = 'click_opening_apply';
+      break;
+    case PAGE_STATES.APPLICATION_FORM:
+    case PAGE_STATES.FORM_STEP:
+      legacyPageType = 'application_form';
+      legacyNextRecommendedAction = 'fill_form';
+      break;
+    case PAGE_STATES.REVIEW:
+      legacyPageType = 'application_form';
+      legacyNextRecommendedAction = 'fill_form';
+      break;
+    case PAGE_STATES.LOGIN_REQUIRED:
+      legacyPageType = 'ats_account_gateway';
+      legacyNextRecommendedAction = 'human_review';
+      break;
+    case PAGE_STATES.SUCCESS:
+      legacyPageType = 'external_ats';
+      legacyNextRecommendedAction = 'human_review';
+      break;
+    default:
+      legacyPageType = 'external_ats';
+      legacyNextRecommendedAction = 'fill_form';
+      break;
+  }
+
+  if (pageStateResult.isFormClosed) {
+    legacyPageType = 'form_closed';
+    legacyNextRecommendedAction = 'form_closed_fallback_email';
+  }
+
+  return {
+    pageType: legacyPageType,
+    workflow: {
+      isMultiStep: pageStateResult.hasStepper,
+      currentStep: pageStateResult.currentStep,
+      totalSteps: pageStateResult.totalSteps,
+      currentStepName: pageStateResult.activeStepName,
+      isModal: Boolean(extractedPageContent.modalState?.isOpen)
+    },
+    isFormClosed: pageStateResult.isFormClosed,
+    closedFormTitle: extractedPageContent.closedFormTitle || '',
+    closedFormMessage: extractedPageContent.closedFormMessage || '',
+    summary: pageStateResult.reason,
+    matchedRole: {
+      title: job.title || '',
+      referenceId: extractedPageContent.referenceIds?.[0] || '',
+      experience: '',
+      location: '',
+      targetButtonText: 'Apply',
+      targetSelector: '',
+      isAccordion: false
+    },
+    detectedOpenings: (extractedPageContent.openingsList || []).map(o => o.title),
+    openingsList: extractedPageContent.openingsList || [],
+    emailContact: {
+      email: extractedPageContent.emails?.[0] || '',
+      subject: `Application for ${job.title || 'Position'}`,
+      referenceId: extractedPageContent.referenceIds?.[0] || ''
+    },
+    nextRecommendedAction: legacyNextRecommendedAction,
+    targetSelector: '',
+    actionReason: pageStateResult.reason
+  };
 };

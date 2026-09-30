@@ -5,34 +5,25 @@ import {
   HANDOFF_METHODS,
   PAGE_TYPES,
   APPLICATION_STATUS,
-  APPLICATION_STATES,
-  VERIFICATION_LEVELS,
   AGENT_LOOP_LIMITS,
 } from '../../constant/application.constant.js';
 import { BrowserManager } from '../../browser/browserManager.js';
-import { observeBrowser } from '../../browser/observer/browserObserver.js';
-import { validateProposedAction } from '../../browser/executor/actionValidator.js';
-import { executeBrowserAction } from '../../browser/executor/browserExecutor.js';
-import { verifyStateTransition } from '../../browser/verifier/stateVerifier.js';
-import { classifyFailure } from '../../browser/recovery/failureClassifier.js';
-import { executeRecoveryStrategy } from '../../browser/recovery/recoveryManager.js';
-import { evaluateSubmissionSafety } from '../../browser/safety/submissionGuard.js';
-import { recordApplicationEvent } from '../../repositories/applicationEvent.repository.js';
-import { upsertBrowserSession, updateSessionCheckpoint } from '../../repositories/browserSession.repository.js';
 import { extractPageContent } from '../pageAnalysis/pageContentExtractor.js';
 import { normalizePage } from '../pageAnalysis/pageNormalizer.js';
 import { classifyPageWithLlm } from '../pageAnalysis/pageClassifierLlm.js';
 import { detectStateChange } from '../pageAnalysis/pageStateDetector.js';
 import { decideNextAction } from './agentDecision.js';
-import { executeSingleBrowserAction } from '../browser/browserActionExecutor.js';
-import { verifyActionResult } from '../browser/actionVerifier.js';
-import { isUrlSafe } from '../browser/urlValidator.js';
+import { executeSingleBrowserAction } from '../../browser/browserActionExecutor.js';
+import { verifyActionResult } from '../../browser/actionVerifier.js';
+import { isUrlSafe } from '../../browser/urlValidator.js';
 import { inspectForm } from '../form/formInspector.js';
 import { resolveAllFormAnswers } from '../answer/answerResolver.js';
 import { fillFormFields } from '../form/formFiller.js';
 import { validateFormFields } from '../form/formValidator.js';
 import { verifyFilledFields } from '../form/formVerifier.js';
 import { isGoogleFormUrl } from '../googleForm/googleFormFiller.js';
+import { orchestrateRecovery, RECOVERY_ACTIONS } from '../../browser/recovery/recoveryManager.js';
+import { detectExecutionLoop, computeCompositeActionHash } from '../../browser/recovery/loopDetector.js';
 import {
   createAgentState,
   loadState,
@@ -43,6 +34,7 @@ import {
   isActiveRunTimedOut,
   persistState,
   addWorkflowLog,
+  computePageFingerprint,
 } from './agentState.js';
 import { updateApplicationStatus } from '../../repositories/application.repository.js';
 import {
@@ -112,24 +104,35 @@ const isFormPage = (pageClassification, normalizedState) => {
  * @param {string} userId
  * @returns {Promise<{ recovered: boolean, newDecision?: object }>}
  */
-const attemptRecovery = async (page, state, failedDecision, normalizedState, job, userId) => {
+const attemptRecovery = async (page, state, failedDecision, normalizedState, job, userId, error = null) => {
   const retries = state.counters.retriesForCurrentAction;
 
-  // Step 1: Already retried maximum times
   if (retries >= AGENT_LOOP_LIMITS.MAX_RETRIES_PER_ACTION) {
     await logJobEvent('agentLoop', 'RECOVERY_EXHAUSTED', `Max retries (${retries}) reached for action: ${failedDecision.type}`);
     return { recovered: false };
   }
 
-  // Step 2: Scroll and wait for dynamic content
+  // Delegate recovery decisions to the canonical recovery subsystem
+  const recovery = await orchestrateRecovery(error || `Action failed: ${failedDecision.type}`, {
+    page,
+    agentState: state,
+    previousAction: failedDecision,
+    currentUrl: page.url(),
+    currentPage: normalizedState?.pageType
+  });
+
+  if (recovery.strategy === RECOVERY_ACTIONS.FAIL_IMMEDIATELY || recovery.strategy === RECOVERY_ACTIONS.ASK_HUMAN) {
+    return { recovered: false, reason: recovery.recommendation };
+  }
+
+  // If strategy is BACKTRACK or RE_OBSERVE
   if (retries === 1) {
-    await logJobEvent('agentLoop', 'RECOVERY_SCROLL', 'Scrolling page to reveal dynamic content');
+    await logJobEvent('agentLoop', 'RECOVERY_SCROLL', 'Scrolling page to reveal potential target elements');
     await page.evaluate(() => window.scrollBy(0, 400)).catch(() => {});
     await page.waitForTimeout(1500);
   }
 
-  // Step 3: Re-observe and ask AI for a new target
-  await logJobEvent('agentLoop', 'RECOVERY_REPLAN', 'Re-observing page for alternative action');
+  await logJobEvent('agentLoop', 'RECOVERY_REPLAN', 'Re-observing and re-planning browser action');
   const freshRaw = await extractPageContent(page);
   const freshNormalized = normalizePage(freshRaw);
   const freshClassification = await classifyPageWithLlm(freshRaw, job, userId);
@@ -270,7 +273,7 @@ const executeFormMode = async (page, state, job, candidateInfo, userId, applicat
     }
 
     // ── STEP 5: Verify ALL fields filled via DOM check (NO LLM) ────────
-    const verification = await verifyFilledFields(page, resolvedAnswers);
+    const verification = await verifyFilledFields(page, resolvedAnswers, formFields);
 
     if (!verification.allFilled && verification.emptyFields.length > 0) {
       await logJobEvent(
@@ -288,14 +291,24 @@ const executeFormMode = async (page, state, job, candidateInfo, userId, applicat
         await page.waitForTimeout(1000);
         await fillFormFields(page, formFields, retryAnswers, { resumePdfPath });
 
-        // Second verification — if still empty, log and proceed (don't loop forever)
-        const retryVerification = await verifyFilledFields(page, retryAnswers);
+        // Second verification — if still empty, check if any required fields are unverified
+        const retryVerification = await verifyFilledFields(page, retryAnswers, formFields);
         if (!retryVerification.allFilled) {
-          await logJobEvent(
-            'agentLoop',
-            'FORM_VERIFY_WARN',
-            `${retryVerification.emptyFields.length} fields still empty after retry. Proceeding anyway.`,
-          );
+          const failedRequiredFields = retryVerification.emptyFields.filter(f => f.required);
+          if (failedRequiredFields.length > 0) {
+            await logJobEvent(
+              'agentLoop',
+              'FORM_VERIFY_FAILURE',
+              `Required field verification failed: ${failedRequiredFields.map(f => f.question || f.fieldId).join(', ')}. Blocking progression.`
+            );
+            throw new Error(`Progression Blocked: Verification failed for required fields: ${failedRequiredFields.map(f => f.question || f.fieldId).join(', ')}`);
+          } else {
+            await logJobEvent(
+              'agentLoop',
+              'FORM_VERIFY_WARN',
+              `${retryVerification.emptyFields.length} optional fields still empty after retry. Proceeding with warning.`,
+            );
+          }
         }
       }
     }
@@ -447,9 +460,31 @@ export const executeAgentLoop = async ({
     });
     await page.waitForTimeout(2500);
 
+    // === ROBUST RESUME PATH: OBSERVE, COMPARE, DETERMINE CURRENT STATE ===
+    const isResumingApp = state.currentPage && state.currentPage.fingerprint;
+    const initialRaw = await extractPageContent(page);
+    const initialNormalized = normalizePage(initialRaw);
+    const currentFingerprint = computePageFingerprint(initialNormalized);
+
+    if (isResumingApp) {
+      await logJobEvent('agentLoop', 'RESUME_VERIFY', 'Resuming application. Scanning actual page layout...');
+      const savedFingerprint = state.currentPage.fingerprint;
+      const savedUrl = state.currentPage.url;
+
+      if (currentFingerprint !== savedFingerprint || page.url() !== savedUrl) {
+        await logJobEvent(
+          'agentLoop',
+          'RESUME_STATE_CHANGED',
+          `Warning: Actual page differs from last verified state (Saved URL: ${savedUrl} vs Actual URL: ${page.url()}). Re-evaluating current state dynamically.`
+        );
+      } else {
+        await logJobEvent('agentLoop', 'RESUME_STATE_MATCHED', 'Clean state match verified. Resuming browser execution.');
+      }
+    }
+
     if (applicationId) {
       await updateApplicationStatus(applicationId, APPLICATION_STATUS.AI_RUNNING, {
-        logMessage: `Agent navigating: ${startUrl}`,
+        logMessage: `Agent executing run from startUrl: ${startUrl}`,
       });
     }
 
@@ -669,117 +704,78 @@ export const executeAgentLoop = async ({
         }
       }
 
-      // === VALIDATE PROPOSED ACTION ===
-      const preObservation = await observeBrowser(page);
-      const actionValidation = validateProposedAction(decision.decision, {
-        observation: preObservation,
-        currentState: state.currentState || APPLICATION_STATES.FORM_FILLING,
-        recentActions: state.actions || [],
-      });
-
-      if (!actionValidation.valid) {
-        await logJobEvent(
-          'agentLoop',
-          'ACTION_VALIDATION_FAILED',
-          `Proposed action rejected: ${actionValidation.reasons.join('; ')}`
-        );
-        continue;
-      }
-
-      // === EXECUTE BROWSER ACTION (DETERMINISTIC) ===
+      // === EXECUTE BROWSER ACTION ===
       previousNormalized = normalizedState;
-      const actionResult = await executeBrowserAction(page, decision.decision, {
+
+      const actionResult = await executeSingleBrowserAction(page, decision.decision, {
         resumePdfPath,
         context,
       });
 
-      // === OBSERVE RESULT & VERIFY STATE TRANSITION ===
-      await page.waitForTimeout(1000);
-      const postObservation = await observeBrowser(page);
+      // === VERIFY ACTION (automatic — not AI-requested) ===
+      await page.waitForTimeout(2000);
       const postRaw = await extractPageContent(page);
       const postNormalized = normalizePage(postRaw);
+      const verification = verifyActionResult(previousNormalized, postNormalized);
 
-      const verification = await verifyStateTransition(
-        page,
-        decision.decision,
-        preObservation,
-        postObservation
-      );
-
-      // === RECORD PERSISTENT AUDIT EVENT & AGENT STATE ===
+      // === RECORD ===
       recordAction(state, decision.decision, actionResult, verification);
       await persistState(applicationId, state);
-
-      if (applicationId) {
-        await recordApplicationEvent({
-          applicationId,
-          type: verification.verified ? 'ACTION_VERIFIED' : 'ACTION_UNVERIFIED',
-          state: state.currentState || APPLICATION_STATES.FORM_FILLING,
-          url: page.url(),
-          actionId: actionResult.actionId,
-          payload: decision.decision,
-          evidence: verification.evidence,
-          verificationLevel: verification.verificationLevel,
-          error: actionResult.error || (!verification.verified ? verification.reason : null),
-        }).catch(() => {});
-      }
 
       await logJobEvent(
         'agentLoop',
         'ACTION_COMPLETE',
-        `${decision.decision.type} → ok=${actionResult.ok} | verified=${verification.verified} (Level: ${verification.verificationLevel}) | url=${page.url()}`
+        `${decision.decision.type} → success=${actionResult.success} | pageChanged=${verification.pageChanged} | url=${page.url()}`,
       );
 
-      // === RECOVERY ON FAILURE OR UNVERIFIED RESULT ===
-      if (!actionResult.ok || !verification.verified) {
-        const failure = classifyFailure(actionResult, verification, postObservation);
-        const recovery = await executeRecoveryStrategy(
-          page,
-          failure,
-          decision.decision,
-          state.counters.retriesForCurrentAction || 1
-        );
-
-        if (!recovery.retry) {
+      // === RECOVERY on failure ===
+      if (!actionResult.success) {
+        const recovery = await attemptRecovery(page, state, decision.decision, postNormalized, job, userId, actionResult.error);
+        if (!recovery.recovered) {
           state.pendingHumanAction = {
-            reason: recovery.reason || 'Action failed and recovery exhausted',
+            reason: recovery.reason || `Action "${decision.decision.type}" failed after ${AGENT_LOOP_LIMITS.MAX_RETRIES_PER_ACTION} retries`,
             savedUrl: page.url(),
           };
           await persistState(applicationId, state);
           break;
         }
+        // Recovery produced a new decision — it will be handled in the next loop iteration
       }
 
-      // === SUBMISSION VERIFICATION CHECK ===
-      if (
-        (decision.decision.intent === 'submit_application' || verification.confirmationId) &&
-        verification.verified &&
-        (verification.verificationLevel === VERIFICATION_LEVELS.LEVEL_3 ||
-          verification.verificationLevel === VERIFICATION_LEVELS.LEVEL_4)
-      ) {
-        await logJobEvent('agentLoop', 'SUBMISSION_VERIFIED', `Level: ${verification.verificationLevel} | ID: ${verification.confirmationId || 'N/A'}`);
-        await addWorkflowLog(applicationId, 'SUBMISSION_VERIFIED', `Submission verified with level: ${verification.verificationLevel}`);
-        
-        if (applicationId) {
-          await JobApplication.findByIdAndUpdate(applicationId, {
-            status: APPLICATION_STATUS.APPLICATION_COMPLETED,
-            currentState: APPLICATION_STATES.APPLICATION_COMPLETED,
-            'submissionVerification.verified': true,
-            'submissionVerification.verificationLevel': verification.verificationLevel,
-            'submissionVerification.confirmationId': verification.confirmationId,
-            'submissionVerification.submittedAt': new Date(),
-          });
-        }
+      // === HIGH-FIDELITY COMPOSITE ACTION LOOP DETECTION ===
+      state.compositeActionHistory = state.compositeActionHistory || [];
+      const compositeHash = computeCompositeActionHash({
+        pageFingerprint: state.currentPage?.fingerprint || '',
+        action: decision.decision,
+        result: actionResult,
+        applicationState: state.formState
+      });
+      state.compositeActionHistory.push(compositeHash);
 
+      const compositeLoop = detectExecutionLoop(state.compositeActionHistory);
+      if (compositeLoop.loopDetected) {
+        await logJobEvent('agentLoop', 'COMPOSITE_LOOP_DETECTED', compositeLoop.reason);
+        await addWorkflowLog(applicationId, 'COMPOSITE_LOOP_DETECTED', compositeLoop.reason);
+        state.pendingHumanAction = {
+          reason: `Loop detected: ${compositeLoop.reason}`,
+          savedUrl: page.url()
+        };
+        await persistState(applicationId, state);
+        break;
+      }
+
+      // === SUCCESS CHECK ===
+      if (verification.successDetected) {
+        await logJobEvent('agentLoop', 'SUCCESS_DETECTED', 'Submission success detected on page');
+        await addWorkflowLog(applicationId, 'SUCCESS_DETECTED', 'Application submission confirmed');
         await persistState(applicationId, state);
 
         return {
-          status: APPLICATION_STATUS.APPLICATION_COMPLETED,
+          status: APPLICATION_STATUS.APPLIED,
           terminalState: 'success',
           agentState: state,
           pageUrl: page.url(),
-          confirmationId: verification.confirmationId,
-          message: 'Application verified and submitted successfully.',
+          message: 'Application submitted successfully.',
         };
       }
     }

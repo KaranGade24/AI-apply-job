@@ -9,10 +9,10 @@ import {
 } from './naukriApplicationParser.js';
 import { inspectForm } from '../../../application/form/formInspector.js';
 import { resolveAllFormAnswers } from '../../../application/answer/answerResolver.js';
-import { executeBrowserActions } from '../../../application/browser/browserActionExecutor.js';
+import { executeBrowserActions } from '../../../browser/browserActionExecutor.js';
 import { fillFormFields } from '../../../application/form/formFiller.js';
 import { verifyFilledFields } from '../../../application/form/formVerifier.js';
-import { validateBrowserActionPlan } from '../../../application/browser/browserActionValidator.js';
+import { validateBrowserActionPlan } from '../../../browser/browserActionValidator.js';
 import {
   APPLICATION_STATUS,
   FORM_ACTIONS,
