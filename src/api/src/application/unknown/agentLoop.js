@@ -42,6 +42,7 @@ import {
   injectGoogleSessionIntoContext,
 } from '../../services/googleSession.service.js';
 import { JobApplication } from '../../model/JobApplication.js';
+import { BrowserSessionRepository } from '../../repositories/browserSession.repository.js';
 
 /**
  * Checks whether the current page classification should trigger a method handoff.
@@ -438,7 +439,8 @@ export const executeAgentLoop = async ({
     // 2. Initialize browser
     const effectiveStorageState =
       sessionState ||
-      (state.pendingHumanAction?.savedStorageState) ||
+      BrowserSessionRepository.decryptStorageState(state.pendingHumanAction?.savedStorageState) ||
+      (applicationId ? await BrowserSessionRepository.loadStorageState(applicationId) : null) ||
       (userId ? await getDecryptedGoogleSession(userId).catch(() => null) : null);
 
     browser = await BrowserManager.launch();

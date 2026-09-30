@@ -1,44 +1,65 @@
+import { pathToFileURL } from 'url';
 import { connectToDatabase, disconnectFromDatabase } from '../config/database.config.js';
 import { JobApplication } from '../model/JobApplication.js';
-import { encryptValue } from '../utils/encryption.js';
-import { logError } from '../utils/logger.js';
+import { BrowserSessionRepository } from '../repositories/browserSession.repository.js';
+import { logError, logJobEvent } from '../utils/logger.js';
 
-async function migrateSessionEncryption() {
-  console.log('--- STARTING SESSION STORAGE STATE ENCRYPTION MIGRATION ---');
+/**
+ * Migration script to encrypt legacy plaintext savedStorageState documents in MongoDB.
+ * Uses central logger, skips already-encrypted documents, and avoids process.exit in library code.
+ *
+ * @returns {Promise<{ inspected: number, migrated: number }>}
+ */
+export async function migrateSessionEncryption() {
+  await logJobEvent('migration', 'SESSION_ENCRYPTION_START', 'Starting session storage state encryption migration');
+  let inspected = 0;
+  let migrated = 0;
+
   try {
-    await connectToDatabase();
-
     const apps = await JobApplication.find({
-      'workflow.agentState.pendingHumanAction.savedStorageState': { $exists: true, $ne: null }
+      'workflow.agentState.pendingHumanAction.savedStorageState': { $exists: true, $ne: null },
     });
 
-    console.log(`Found ${apps.length} applications with saved storage state to inspect.`);
+    inspected = apps.length;
+    await logJobEvent('migration', 'SESSION_ENCRYPTION_INSPECT', `Found ${inspected} applications to inspect for storageState encryption`);
 
-    let migratedCount = 0;
     for (const app of apps) {
       const pending = app.workflow?.agentState?.pendingHumanAction;
-      if (pending && pending.savedStorageState && !pending.savedStorageState.cipherText) {
-        const plainTextState = typeof pending.savedStorageState === 'string'
-          ? pending.savedStorageState
-          : JSON.stringify(pending.savedStorageState);
+      const raw = pending?.savedStorageState;
 
-        const encrypted = encryptValue(plainTextState);
-        app.workflow.agentState.pendingHumanAction.savedStorageState = encrypted;
-        await app.save();
-        migratedCount++;
-        console.log(`Migrated encryption for application ID: ${app._id}`);
+      // Skip already encrypted docs
+      if (!raw || (typeof raw === 'object' && raw.cipherText && raw.iv && raw.authTag)) {
+        continue;
       }
+
+      // Encrypt and persist
+      const encrypted = BrowserSessionRepository.encryptStorageState(raw);
+      app.workflow.agentState.pendingHumanAction.savedStorageState = encrypted;
+      await app.save();
+      migrated++;
+      await logJobEvent('migration', 'SESSION_MIGRATED', `Migrated encryption for application ID: ${app._id}`);
     }
 
-    console.log(`Successfully migrated ${migratedCount} application session states.`);
+    await logJobEvent('migration', 'SESSION_ENCRYPTION_COMPLETE', `Successfully completed migration. Migrated ${migrated} of ${inspected} records.`);
+    return { inspected, migrated };
   } catch (error) {
-    console.error('Migration failed:', error);
     await logError('migrateSessionEncryption', error.message);
-  } finally {
-    await disconnectFromDatabase();
-    console.log('--- MIGRATION COMPLETED ---');
-    process.exit(0);
+    throw error;
   }
 }
 
-migrateSessionEncryption();
+// Only execute directly when invoked via CLI (node migrateSessionEncryption.js)
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  (async () => {
+    try {
+      await connectToDatabase();
+      await migrateSessionEncryption();
+    } catch (err) {
+      await logError('migrateSessionEncryption.cli', err.message);
+    } finally {
+      await disconnectFromDatabase();
+    }
+  })();
+}
+
+export default migrateSessionEncryption;

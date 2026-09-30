@@ -1,5 +1,5 @@
 import { KNOWN_ATS_DOMAINS } from '../constant/application.constant.js';
-import { logJobEvent } from '../../utils/logger.js';
+import { logJobEvent } from '../utils/logger.js';
 
 /**
  * Validates navigation targets before execution to protect against prompt injection

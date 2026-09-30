@@ -23,6 +23,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { getApplicationsApi } from '../../services/applicationService';
+import { openProtectedFile } from '../../services/api';
 import { getDiscoveredJobsApi, deleteJobApi } from '../../services/jobService';
 import { useNaukri } from '../../context/NaukriContext';
 
@@ -128,10 +129,12 @@ export const DashboardPage = () => {
     }
   };
 
-  const handleViewResume = (appId) => {
-    const token = localStorage.getItem('token');
-    const url = `/api/applications/${appId}/pdf${token ? `?token=${token}` : ''}`;
-    window.open(url, '_blank');
+  const handleViewResume = async (appId) => {
+    try {
+      await openProtectedFile(`/api/applications/${appId}/pdf`, `Tailored_Resume_${appId}.pdf`);
+    } catch (err) {
+      showToast('Failed to open resume: ' + err.message);
+    }
   };
 
   const isNaukriConnected = naukriStatus?.connected || naukriStatus?.status === 'connected';

@@ -31,3 +31,12 @@ build/
 *.swo
 .DS_Store
 Thumbs.db
+
+# Resumes, Uploads and Temporary PDF Storage
+resume_temp/*
+!resume_temp/.gitkeep
+uploads/*
+!uploads/**/.gitkeep
+!uploads/.gitkeep
+*.pdf
+!**/.gitkeep

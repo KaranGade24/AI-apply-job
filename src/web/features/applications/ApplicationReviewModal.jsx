@@ -29,6 +29,7 @@ import {
   EyeOff,
 } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
+import { openProtectedFile } from '../../services/api';
 import {
   previewDraftApi,
   getApplicationDetailsApi,
@@ -320,26 +321,10 @@ export const ApplicationReviewModal = ({
     if (!application?._id) return;
     try {
       showToast('Opening tailored PDF resume...');
-      const token = localStorage.getItem('token');
-      const res = await fetch(`/api/applications/${application._id}/pdf`, {
-        headers: {
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-      });
-
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.message || 'PDF not generated yet');
-      }
-
-      const blob = await res.blob();
-      const fileUrl = window.URL.createObjectURL(blob);
-      window.open(fileUrl, '_blank');
-      showToast('Tailored PDF opened in new tab!');
+      await openProtectedFile(`/api/applications/${application._id}/pdf`, `Tailored_Resume_${application._id}.pdf`);
+      showToast('Tailored PDF opened in new tab!', 'success');
     } catch (err) {
-      const token = localStorage.getItem('token');
-      const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
-      window.open(`/api/applications/${application._id}/pdf${tokenParam}`, '_blank');
+      showToast(err.message || 'Could not load PDF resume', 'error');
     }
   };
 
@@ -3146,14 +3131,13 @@ export const ApplicationReviewModal = ({
                         </button>
                       )}
                       {application?.resume?.pdfPath && (
-                        <a 
-                          href={`/api/applications/${application._id}/pdf?token=${localStorage.getItem('token')}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-[11px] font-bold hover:bg-blue-700 shadow-sm transition-all"
+                        <button 
+                          type="button"
+                          onClick={handleDownloadPdf}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-[11px] font-bold hover:bg-blue-700 shadow-sm transition-all cursor-pointer"
                         >
                           <Download className="w-3.5 h-3.5" /> Download PDF
-                        </a>
+                        </button>
                       )}
                     </div>
                   </div>

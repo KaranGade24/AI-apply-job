@@ -20,7 +20,7 @@ import { jsonSyntaxErrorHandler } from './src/middlewares/jsonError.middleware.j
 import { swaggerOptions } from './src/config/swagger.js';
 import { DEFAULT_PORT } from './src/constant/api.constant.js';
 import { appError, globalErrorHandler } from './src/utils/errors.js';
-import { logJobEvent } from './src/utils/logger.js';
+import { logJobEvent, sanitizeSecrets } from './src/utils/logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -33,19 +33,20 @@ app.use((req, res, next) => {
   const { method, originalUrl } = req;
   const authHeader = req.headers.authorization ? 'Bearer ***' : 'None';
   
-  // Never log request bodies for auth, answers or resume routes
-  const isExcludedRoute = originalUrl.includes('/api/auth') || 
-                          originalUrl.includes('/answers') || 
+  // Never log request bodies for sensitive routes
+  const isExcludedRoute = originalUrl.includes('/api/google-session') ||
+                          originalUrl.includes('/api/job-sources') ||
+                          originalUrl.includes('/api/settings') ||
+                          originalUrl.includes('/answers') ||
+                          originalUrl.includes('/api/auth') || 
                           originalUrl.includes('/api/resume');
 
   const logMessage = `API REQ: ${method} ${originalUrl} | Auth: ${authHeader}`;
   logJobEvent('server', 'REQUEST', logMessage, 'mix');
 
   if (req.body && Object.keys(req.body).length > 0 && !isExcludedRoute) {
-    const safeBody = { ...req.body };
-    if (safeBody.password) safeBody.password = '***';
-    if (safeBody.token) safeBody.token = '***';
-    logJobEvent('server', 'REQ_BODY', JSON.stringify(safeBody), 'mix');
+    const sanitizedBodyStr = sanitizeSecrets(JSON.stringify(req.body));
+    logJobEvent('server', 'REQ_BODY', sanitizedBodyStr, 'mix');
   }
 
   res.on('finish', () => {

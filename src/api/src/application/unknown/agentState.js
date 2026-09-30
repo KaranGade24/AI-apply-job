@@ -2,6 +2,8 @@ import crypto from 'crypto';
 import { logJobEvent, logError } from '../../utils/logger.js';
 import { AGENT_LOOP_LIMITS } from '../../constant/application.constant.js';
 import { JobApplication } from '../../model/JobApplication.js';
+import { encryptValue } from '../../utils/encryption.js';
+import { BrowserSessionRepository } from '../../repositories/browserSession.repository.js';
 
 /**
  * Computes a deterministic fingerprint for a normalized page state.
@@ -230,6 +232,16 @@ export const persistState = async (applicationId, state) => {
   try {
     if (!applicationId) return;
 
+    let pendingHumanAction = state.pendingHumanAction ? { ...state.pendingHumanAction } : null;
+    if (pendingHumanAction && pendingHumanAction.savedStorageState) {
+      const raw = pendingHumanAction.savedStorageState;
+      const isEncrypted = typeof raw === 'object' && raw !== null && raw.cipherText && raw.iv && raw.authTag;
+      if (!isEncrypted) {
+        const serialized = typeof raw === 'string' ? raw : JSON.stringify(raw);
+        pendingHumanAction.savedStorageState = encryptValue(serialized);
+      }
+    }
+
     await JobApplication.findByIdAndUpdate(applicationId, {
       'workflow.agentState': {
         visitedPages: state.visitedPages.slice(-20), // Keep last 20 for DB size
@@ -237,7 +249,7 @@ export const persistState = async (applicationId, state) => {
         currentPage: state.currentPage,
         discoveredMethod: state.discoveredMethod,
         counters: state.counters,
-        pendingHumanAction: state.pendingHumanAction,
+        pendingHumanAction,
       },
       'workflow.currentStage': state.discoveredMethod
         ? 'handoff'
@@ -264,6 +276,13 @@ export const loadState = async (applicationId) => {
     if (!application?.workflow?.agentState) return null;
 
     const saved = application.workflow.agentState;
+    let pendingHumanAction = saved.pendingHumanAction || null;
+    if (pendingHumanAction && pendingHumanAction.savedStorageState) {
+      pendingHumanAction = {
+        ...pendingHumanAction,
+        savedStorageState: BrowserSessionRepository.decryptStorageState(pendingHumanAction.savedStorageState),
+      };
+    }
 
     return {
       applicationId,
@@ -287,7 +306,7 @@ export const loadState = async (applicationId) => {
         samePageVisits: 0,
       },
       activeRunStartedAt: Date.now(),
-      pendingHumanAction: saved.pendingHumanAction || null,
+      pendingHumanAction,
     };
   } catch (error) {
     await logError('agentState.loadState', error.message);

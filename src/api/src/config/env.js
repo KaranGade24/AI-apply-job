@@ -1,6 +1,7 @@
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { logError } from '../utils/logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -12,22 +13,30 @@ dotenv.config();
 
 export const NODE_ENV = process.env.NODE_ENV || 'development';
 export const PORT = Number(process.env.PORT || 3000);
-export const GEMINI_API_KEY = process.env.GEMINI_API_KEY || 'AIzaSy_mock_dev_key';
-export const JWT_SECRET = process.env.JWT_SECRET || 'dev_jwt_secret_fallback_12345';
-export const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || process.env.JWT_SECRET || 'dev_encryption_key_32_bytes_long_abc';
-export const MONGO_URI = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/ai_apply_job_db';
 
-// Fail-fast validation in production if critical secrets are missing
-if (NODE_ENV === 'production') {
+export const GEMINI_API_KEY = process.env.GEMINI_API_KEY || (NODE_ENV === 'test' ? 'test_gemini_api_key' : '');
+export const JWT_SECRET = process.env.JWT_SECRET || (NODE_ENV === 'test' ? 'test_jwt_secret_key_12345' : '');
+export const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || (NODE_ENV === 'test' ? 'test_encryption_key_different_54321' : '');
+export const MONGO_URI = process.env.MONGO_URI || (NODE_ENV === 'test' ? 'mongodb://127.0.0.1:27017/test_db' : '');
+
+// Validate on ALL environments except when NODE_ENV === 'test'
+if (NODE_ENV !== 'test') {
   const missingEnvs = [];
-  if (!process.env.JWT_SECRET || process.env.JWT_SECRET.includes('fallback')) missingEnvs.push('JWT_SECRET');
-  if (!process.env.MONGO_URI) missingEnvs.push('MONGO_URI');
-  if (!process.env.GEMINI_API_KEY) missingEnvs.push('GEMINI_API_KEY');
-  if (!process.env.ENCRYPTION_KEY) missingEnvs.push('ENCRYPTION_KEY');
+  if (!JWT_SECRET) missingEnvs.push('JWT_SECRET');
+  if (!MONGO_URI) missingEnvs.push('MONGO_URI');
+  if (!GEMINI_API_KEY) missingEnvs.push('GEMINI_API_KEY');
+  if (!ENCRYPTION_KEY) missingEnvs.push('ENCRYPTION_KEY');
 
   if (missingEnvs.length > 0) {
-    console.error(`❌ FATAL PRODUCTION CONFIGURATION ERROR: Missing required environment variables: ${missingEnvs.join(', ')}`);
-    process.exit(1);
+    const errorMsg = `Configuration Error: Missing required environment variables: ${missingEnvs.join(', ')}`;
+    logError('config.env', errorMsg);
+    throw new Error(errorMsg);
+  }
+
+  if (ENCRYPTION_KEY === JWT_SECRET) {
+    const errorMsg = 'Configuration Error: ENCRYPTION_KEY must differ from JWT_SECRET for security hygiene.';
+    logError('config.env', errorMsg);
+    throw new Error(errorMsg);
   }
 }
 

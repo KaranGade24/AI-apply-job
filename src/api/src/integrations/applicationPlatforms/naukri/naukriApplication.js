@@ -1,5 +1,6 @@
 import { BrowserManager } from '../../../browser/browserManager.js';
 import { findNaukriAccountByUserId } from '../../../repositories/naukriAccount.repository.js';
+import { BrowserSessionRepository } from '../../../repositories/browserSession.repository.js';
 import { decryptValue } from '../../../utils/encryption.js';
 import { detectNaukriAuthState } from '../../jobSources/naukri/naukriAuthDetector.js';
 import {
@@ -342,7 +343,7 @@ export const runNaukriApplication = async ({
               'workflow.agentState.pendingHumanAction': {
                 reason: 'Review filled form before final submission',
                 savedUrl: activePage.url(),
-                savedStorageState: currentStorageState,
+                savedStorageState: BrowserSessionRepository.encryptStorageState(currentStorageState),
               },
             });
 
@@ -834,7 +835,7 @@ export const runNaukriApplication = async ({
               ? 'Review candidate account credentials and submit'
               : 'Review filled application form before submission',
             savedUrl: activePage.url(),
-            savedStorageState: storageState,
+            savedStorageState: BrowserSessionRepository.encryptStorageState(storageState),
           },
         });
 
@@ -1076,7 +1077,7 @@ export const runNaukriApplication = async ({
                     ? 'Review candidate account credentials and submit'
                     : `Review filled fields for step ${stepInspection.stepperState?.currentStep || loopStep + 1}`,
                   savedUrl: activePage.url(),
-                  savedStorageState: storageState,
+                  savedStorageState: BrowserSessionRepository.encryptStorageState(storageState),
                 },
               });
 

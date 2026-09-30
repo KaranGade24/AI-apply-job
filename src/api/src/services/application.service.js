@@ -32,6 +32,7 @@ import { classifyPageWithLlm } from "../application/pageAnalysis/pageClassifierL
 import { navigatePortalWithAiDecision } from "../application/pageAnalysis/pageNavigator.js";
 import { BrowserManager } from "../browser/browserManager.js";
 import { findNaukriAccountByUserId } from "../repositories/naukriAccount.repository.js";
+import { BrowserSessionRepository } from "../repositories/browserSession.repository.js";
 import { decryptValue } from "../utils/encryption.js";
 import { logError, logJobEvent } from "../utils/logger.js";
 import { appError } from "../utils/errors.js";
@@ -414,7 +415,9 @@ export const resumeUnknownApplicationWithAnswersService = async (applicationId, 
     application.jobId?.sourceUrl;
 
   const savedStorageState =
-    application.workflow?.agentState?.pendingHumanAction?.savedStorageState || null;
+    (await BrowserSessionRepository.loadStorageState(applicationId)) ||
+    BrowserSessionRepository.decryptStorageState(application.workflow?.agentState?.pendingHumanAction?.savedStorageState) ||
+    null;
 
   const candidateResume =
     application.resume?.tailoredResumeData ||
@@ -520,9 +523,12 @@ export const confirmFinalApplicationService = async (applicationId, userId, payl
  * or clicks the final submit button on the review page, verifies submission, and marks APPLIED.
  */
 export const submitFinalUnknownApplicationService = async (applicationId, userId, payload = {}) => {
-  const application = await JobApplication.findById(applicationId).populate('jobId');
+  const application = await getApplicationById(applicationId, userId);
   if (!application) {
     throw new appError("Application not found", 404);
+  }
+  if (application.populate) {
+    await application.populate('jobId');
   }
 
   // 1. Update review fields if candidate edited any answers
@@ -551,7 +557,9 @@ export const submitFinalUnknownApplicationService = async (applicationId, userId
     application.jobId?.sourceUrl;
 
   const savedStorageState =
-    application.workflow?.agentState?.pendingHumanAction?.savedStorageState || null;
+    (await BrowserSessionRepository.loadStorageState(applicationId)) ||
+    BrowserSessionRepository.decryptStorageState(application.workflow?.agentState?.pendingHumanAction?.savedStorageState) ||
+    null;
 
   let browser = null;
   let context = null;
@@ -766,7 +774,7 @@ export const submitFinalUnknownApplicationService = async (applicationId, userId
             'workflow.agentState.pendingHumanAction': {
               reason: 'Unresolved questions require candidate input',
               savedUrl: page.url(),
-              savedStorageState: newStorageState || savedStorageState,
+              savedStorageState: BrowserSessionRepository.encryptStorageState(newStorageState || savedStorageState),
             },
           });
 
@@ -833,7 +841,7 @@ export const submitFinalUnknownApplicationService = async (applicationId, userId
           'workflow.agentState.pendingHumanAction': {
             reason: 'Review filled step before continuing',
             savedUrl: page.url(),
-            savedStorageState: newStorageState || savedStorageState,
+            savedStorageState: BrowserSessionRepository.encryptStorageState(newStorageState || savedStorageState),
           },
         });
 
@@ -907,8 +915,11 @@ export const saveEditedAnswersService = async (applicationId, userId, answers = 
  * Refills unknown application form in live browser with user's updated answers and re-verifies via DOM check
  */
 export const refillUnknownApplicationFormService = async (applicationId, userId, answers = []) => {
-  const application = await JobApplication.findById(applicationId).populate('jobId');
+  const application = await getApplicationById(applicationId, userId);
   if (!application) throw new appError("Application not found", 404);
+  if (application.populate) {
+    await application.populate('jobId');
+  }
 
   const savedUrl =
     application.workflow?.agentState?.pendingHumanAction?.savedUrl ||
@@ -916,7 +927,9 @@ export const refillUnknownApplicationFormService = async (applicationId, userId,
     application.jobId?.sourceUrl;
 
   const savedStorageState =
-    application.workflow?.agentState?.pendingHumanAction?.savedStorageState || null;
+    (await BrowserSessionRepository.loadStorageState(applicationId)) ||
+    BrowserSessionRepository.decryptStorageState(application.workflow?.agentState?.pendingHumanAction?.savedStorageState) ||
+    null;
 
   let browser = null;
   let context = null;
@@ -976,7 +989,7 @@ export const refillUnknownApplicationFormService = async (applicationId, userId,
       'form.fields': formFields,
       'form.reviewFields': updatedReview,
       'form.answers': formattedAnswers,
-      'workflow.agentState.pendingHumanAction.savedStorageState': newStorageState || savedStorageState,
+      'workflow.agentState.pendingHumanAction.savedStorageState': BrowserSessionRepository.encryptStorageState(newStorageState || savedStorageState),
       'workflow.agentState.pendingHumanAction.savedUrl': page.url(),
     });
 
@@ -1308,7 +1321,7 @@ export const createDirectApplicationService = async (userId, appData) => {
  */
 export const tailorApplicationService = async (userId, applicationId) => {
   try {
-    const app = await findApplicationById(applicationId);
+    const app = await getApplicationById(applicationId, userId);
     if (!app) {
       throw new appError("Application not found", 404);
     }
@@ -1557,7 +1570,7 @@ export const analyzeEmployerPortalService = async (applicationId, userId) => {
   let page = null;
 
   try {
-    const application = await findApplicationById(applicationId);
+    const application = await getApplicationById(applicationId, userId);
     if (!application) {
       throw new appError("Application not found", 404);
     }
@@ -1710,7 +1723,7 @@ export const advanceEmployerPortalActionService = async (applicationId, userId, 
   let page = null;
 
   try {
-    const application = await findApplicationById(applicationId);
+    const application = await getApplicationById(applicationId, userId);
     if (!application) {
       throw new appError("Application not found", 404);
     }
@@ -1901,7 +1914,7 @@ export const advanceEmployerPortalActionService = async (applicationId, userId, 
           'workflow.agentState.pendingHumanAction': {
             reason: 'Review filled form before final submission',
             savedUrl: actualApplicationUrl,
-            savedStorageState: currentStorageState,
+            savedStorageState: BrowserSessionRepository.encryptStorageState(currentStorageState),
           },
           pageAnalysis: {
             ...postAnalysis,
@@ -1955,7 +1968,7 @@ export const advanceEmployerPortalActionService = async (applicationId, userId, 
  */
 export const tailorRoleOutreachService = async (applicationId, userId, roleDetails = {}) => {
   try {
-    const application = await findApplicationById(applicationId);
+    const application = await getApplicationById(applicationId, userId);
     if (!application) {
       throw new appError("Application not found", 404);
     }
@@ -2118,7 +2131,7 @@ RETURN STRICT JSON ONLY:
  */
 export const sendDirectRoleEmailService = async (applicationId, userId, emailPayload = {}) => {
   try {
-    const application = await findApplicationById(applicationId);
+    const application = await getApplicationById(applicationId, userId);
     if (!application) {
       throw new appError("Application not found", 404);
     }

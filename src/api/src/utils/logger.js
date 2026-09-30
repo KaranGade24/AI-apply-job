@@ -32,12 +32,17 @@ export const sanitizeSecrets = (input) => {
     // Redact passwords
     .replace(/(['"]?password['"]?\s*[:=]\s*['"])([^'"]+)(['"])/gi, '$1[REDACTED_PASSWORD]$3')
     // Redact authorization tokens & JWTs
-    .replace(/(['"]?authorization['"]?\s*[:=]\s*['"])([^'"]+)(['"])/gi, '$1[REDACTED_TOKEN]$3')
+    .replace(/(['"]?(?:authorization|token|jwt|accessToken|refreshToken)['"]?\s*[:=]\s*['"])([^'"]+)(['"])/gi, '$1[REDACTED_TOKEN]$3')
     .replace(/bearer\s+[a-zA-Z0-9_\-\.]+/gi, 'Bearer [REDACTED_TOKEN]')
-    // Redact cookies & storageState
-    .replace(/(['"]?cookie['"]?\s*[:=]\s*['"])([^'"]+)(['"])/gi, '$1[REDACTED_COOKIE]$3')
-    .replace(/["']?storageState["']?\s*[:=]\s*(\{[^}]+\}|"[^"]+"|\'[^\']+\})/gi, 'storageState="[REDACTED_STORAGE_STATE]"')
+    // Redact cookies
+    .replace(/(['"]?cookie[s]?['"]?\s*[:=]\s*['"])([^'"]+)(['"])/gi, '$1[REDACTED_COOKIE]$3')
+    .replace(/(['"]?cookie[s]?['"]?\s*[:=]\s*)(\[[^\]]*\]|\{[^}]*\})/gi, '$1"[REDACTED_COOKIES]"')
+    // Redact storageState
+    .replace(/(['"]?storageState['"]?\s*[:=]\s*)(\{[^}]*\}|"[^"]*"|\'[^\']*\})/gi, '$1"[REDACTED_STORAGE_STATE]"')
+    // Redact OTPs
+    .replace(/(['"]?(?:otp|oneTimePassword|verificationCode)['"]?\s*[:=]\s*['"]?)([0-9a-zA-Z]{4,8})(['"]?)/gi, '$1[REDACTED_OTP]$3')
     // Redact API keys
+    .replace(/(['"]?(?:apiKey|api_key|secretKey|secret_key)['"]?\s*[:=]\s*['"])([^'"]+)(['"])/gi, '$1[REDACTED_API_KEY]$3')
     .replace(/AIzaSy[a-zA-Z0-9_\-_]{33}/g, '[REDACTED_API_KEY]');
 };
 

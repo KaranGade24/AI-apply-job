@@ -95,7 +95,7 @@ export const updateStatusDirect = async (req, res, next) => {
     }
 
     const updated =
-      await applicationService.updateApplicationStatusDirectService(id, status);
+      await applicationService.updateApplicationStatusDirectService(userId, id, status);
     return res.status(200).json({
       success: true,
       message: "Application status updated successfully",

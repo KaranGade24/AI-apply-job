@@ -7,6 +7,7 @@ import { generateResumePdfApi, getMyResumesApi, saveResumeDataApi, parseResumeAp
 import { ResumePreviewModal } from './ResumePreviewModal';
 import { SettingsContext } from '../../context/SettingsContext';
 import { useAuth } from '../../hooks/useAuth';
+import { openProtectedFile } from '../../services/api';
 
 export const ResumeBuilderPage = () => {
   const { user } = useAuth();
@@ -281,15 +282,14 @@ export const ResumeBuilderPage = () => {
                       Uploaded on {new Date(originalResume.createdAt).toLocaleDateString()}
                     </p>
                   </div>
-                  <a 
-                    href={`/api/resume/${originalResume._id}/download?token=${localStorage.getItem('token')}`}
-                    target="_blank"
-                    rel="noreferrer"
+                  <button 
+                    type="button"
+                    onClick={() => openProtectedFile(`/api/resume/${originalResume._id}/download`, originalResume.originalFile || 'Original_Resume.pdf')}
                     className="p-1.5 text-slate-400 hover:text-blue-600 rounded-lg transition-colors cursor-pointer"
                     title="Download Original File"
                   >
                     <ExternalLink className="w-4 h-4" />
-                  </a>
+                  </button>
                 </div>
 
                 <div className="grid grid-cols-2 gap-2">
