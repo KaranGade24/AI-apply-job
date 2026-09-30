@@ -19,15 +19,50 @@ try {
 }
 
 /**
- * Sanitizes and redacts sensitive data (cookies, passwords, tokens, storageState) from logs.
+ * Recursively redacts sensitive keys from an object or array.
  *
- * @param {string|object} input
- * @returns {string} Sanitized string
+ * @param {any} item
+ * @returns {any}
  */
-export const sanitizeSecrets = (input) => {
-  if (!input) return '';
-  const text = typeof input === 'object' ? JSON.stringify(input) : String(input);
+const redactObject = (item) => {
+  if (item === null || item === undefined) return item;
+  if (Array.isArray(item)) {
+    return item.map((element) => redactObject(element));
+  }
+  if (typeof item === 'object') {
+    const redacted = {};
+    for (const [key, value] of Object.entries(item)) {
+      if (/password/i.test(key)) {
+        redacted[key] = '[REDACTED_PASSWORD]';
+      } else if (/^(authorization|token|jwt|accessToken|refreshToken)$/i.test(key)) {
+        redacted[key] = '[REDACTED_TOKEN]';
+      } else if (/^cookies?$/i.test(key)) {
+        redacted[key] = '[REDACTED_COOKIES]';
+      } else if (/^storageState$/i.test(key)) {
+        redacted[key] = '[REDACTED_STORAGE_STATE]';
+      } else if (/^(otp\w*|oneTime\w*|verificationCode)$/i.test(key)) {
+        redacted[key] = '[REDACTED_OTP]';
+      } else if (/^(apiKey|api_key|secretKey|secret_key)$/i.test(key)) {
+        redacted[key] = '[REDACTED_API_KEY]';
+      } else {
+        redacted[key] = redactObject(value);
+      }
+    }
+    return redacted;
+  }
+  if (typeof item === 'string') {
+    return applyRegexSanitization(item);
+  }
+  return item;
+};
 
+/**
+ * Regex-based secret redaction fallback for plain non-JSON strings.
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+const applyRegexSanitization = (text) => {
   return text
     // Redact passwords
     .replace(/(['"]?password['"]?\s*[:=]\s*['"])([^'"]+)(['"])/gi, '$1[REDACTED_PASSWORD]$3')
@@ -39,11 +74,45 @@ export const sanitizeSecrets = (input) => {
     .replace(/(['"]?cookie[s]?['"]?\s*[:=]\s*)(\[[^\]]*\]|\{[^}]*\})/gi, '$1"[REDACTED_COOKIES]"')
     // Redact storageState
     .replace(/(['"]?storageState['"]?\s*[:=]\s*)(\{[^}]*\}|"[^"]*"|\'[^\']*\})/gi, '$1"[REDACTED_STORAGE_STATE]"')
-    // Redact OTPs
-    .replace(/(['"]?(?:otp|oneTimePassword|verificationCode)['"]?\s*[:=]\s*['"]?)([0-9a-zA-Z]{4,8})(['"]?)/gi, '$1[REDACTED_OTP]$3')
+    // Redact OTPs (matches otp\w* like otpCode, otp_code, oneTimeCode, numeric and string)
+    .replace(/(['"]?(?:otp\w*|oneTime\w*|verificationCode)['"]?\s*[:=]\s*['"]?)([^'"\s,}\]]+)(['"]?)/gi, '$1[REDACTED_OTP]$3')
     // Redact API keys
     .replace(/(['"]?(?:apiKey|api_key|secretKey|secret_key)['"]?\s*[:=]\s*['"])([^'"]+)(['"])/gi, '$1[REDACTED_API_KEY]$3')
-    .replace(/AIzaSy[a-zA-Z0-9_\-_]{33}/g, '[REDACTED_API_KEY]');
+    .replace(/AIzaSy[a-zA-Z0-9_\-]{20,45}/g, '[REDACTED_API_KEY]');
+};
+
+/**
+ * Sanitizes and redacts sensitive data (cookies, passwords, tokens, storageState, OTPs, API keys) from logs.
+ * Parses JSON when possible to prevent leaving trailing brackets or corrupting nested structures.
+ *
+ * @param {string|object} input
+ * @returns {string} Sanitized string
+ */
+export const sanitizeSecrets = (input) => {
+  if (input === null || input === undefined || input === '') return '';
+
+  if (typeof input === 'object') {
+    try {
+      const redacted = redactObject(input);
+      return JSON.stringify(redacted);
+    } catch {
+      return applyRegexSanitization(String(input));
+    }
+  }
+
+  const strInput = String(input);
+  try {
+    const trimmed = strInput.trim();
+    if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+      const parsed = JSON.parse(trimmed);
+      const redacted = redactObject(parsed);
+      return JSON.stringify(redacted);
+    }
+  } catch {
+    // Fall back to regex if not valid JSON
+  }
+
+  return applyRegexSanitization(strInput);
 };
 
 export const logAuthEvent = async (eventType, userIdentifier, status, additionalInfo = '', mode = 'mix') => {

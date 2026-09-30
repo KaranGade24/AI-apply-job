@@ -5,7 +5,9 @@
     "dev": "concurrently \"node src/api/server.js\" \"vite\"",
     "server": "node src/api/server.js",
     "client": "vite",
-    "build": "vite build"
+    "build": "vite build",
+    "test": "node --import ./src/api/src/test/setup.js --test src/api/src/test/*.test.js",
+    "migrate:session-encryption": "node src/api/src/scripts/migrateSessionEncryption.js"
   },
   "dependencies": {
     "@google/genai": "^2.23.0",
