@@ -1,7 +1,7 @@
 import { tool } from '@langchain/core/tools';
 import { geminiModel } from '../config/modelConfig.js';
 import { jobUrlResolverResultSchema } from '../schema/jobUrlResolverSchema.js';
-import { JOB_VIA_REFERRAL_CATEGORIES } from '../../constant/jobviareferral.constant.js';
+import { JOB_VIA_REFERRAL_CATEGORIES } from '../../constant/jobViaReferral.constant.js';
 import { logError, logJobEvent } from '../../utils/logger.js';
 
 /**

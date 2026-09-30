@@ -264,6 +264,6 @@ applicationRouter.put("/:id/resume", authMiddleware, applicationController.updat
  *       404:
  *         description: PDF resume not found
  */
-applicationRouter.get("/:id/pdf", optionalAuthMiddleware, applicationController.downloadPdf);
+applicationRouter.get("/:id/pdf", authMiddleware, applicationController.downloadPdf);
 
 export default applicationRouter;

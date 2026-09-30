@@ -59,7 +59,7 @@ const isApplicationLocked = (status) => {
  * Safely verifies if an application belongs to the requesting user
  */
 const isUserAuthorized = (docUserId, reqUserId) => {
-  if (!docUserId || !reqUserId) return true;
+  if (!docUserId || !reqUserId) return false;
   const docIdStr = (docUserId._id || docUserId).toString();
   const reqIdStr = (reqUserId._id || reqUserId).toString();
   return docIdStr === reqIdStr;
@@ -1339,9 +1339,9 @@ export const tailorApplicationService = async (userId, applicationId) => {
 /**
  * Directly updates application status
  */
-export const updateApplicationStatusDirectService = async (id, status) => {
+export const updateApplicationStatusDirectService = async (userId, id, status) => {
   try {
-    const app = await findApplicationById(id);
+    const app = await getApplicationById(id, userId);
     if (!app) {
       throw new appError("Application not found", 404);
     }

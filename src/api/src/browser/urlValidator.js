@@ -1,4 +1,4 @@
-import { KNOWN_ATS_DOMAINS } from '../../constant/application.constant.js';
+import { KNOWN_ATS_DOMAINS } from '../constant/application.constant.js';
 import { logJobEvent } from '../../utils/logger.js';
 
 /**

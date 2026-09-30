@@ -20,31 +20,38 @@ import { jsonSyntaxErrorHandler } from './src/middlewares/jsonError.middleware.j
 import { swaggerOptions } from './src/config/swagger.js';
 import { DEFAULT_PORT } from './src/constant/api.constant.js';
 import { appError, globalErrorHandler } from './src/utils/errors.js';
+import { logJobEvent } from './src/utils/logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
 
-// Request logging middleware for backend debugging
+// Request logging middleware using centralized logger with strict body redaction & route exclusions
 app.use((req, res, next) => {
   const start = Date.now();
   const { method, originalUrl } = req;
   const authHeader = req.headers.authorization ? 'Bearer ***' : 'None';
-  console.log(`\n--------------------------------------------------`);
-  console.log(`📥 [API REQ] ${method} ${originalUrl} | Auth: ${authHeader}`);
-  if (req.body && Object.keys(req.body).length > 0) {
+  
+  // Never log request bodies for auth, answers or resume routes
+  const isExcludedRoute = originalUrl.includes('/api/auth') || 
+                          originalUrl.includes('/answers') || 
+                          originalUrl.includes('/api/resume');
+
+  const logMessage = `API REQ: ${method} ${originalUrl} | Auth: ${authHeader}`;
+  logJobEvent('server', 'REQUEST', logMessage, 'mix');
+
+  if (req.body && Object.keys(req.body).length > 0 && !isExcludedRoute) {
     const safeBody = { ...req.body };
     if (safeBody.password) safeBody.password = '***';
     if (safeBody.token) safeBody.token = '***';
-    console.log(`📦 [REQ BODY]`, JSON.stringify(safeBody, null, 2));
+    logJobEvent('server', 'REQ_BODY', JSON.stringify(safeBody), 'mix');
   }
 
   res.on('finish', () => {
     const duration = Date.now() - start;
-    const emoji = res.statusCode >= 400 ? '❌' : '✅';
-    console.log(`${emoji} [API RES] ${method} ${originalUrl} -> Status ${res.statusCode} (${duration}ms)`);
-    console.log(`--------------------------------------------------\n`);
+    const resMsg = `API RES: ${method} ${originalUrl} -> Status ${res.statusCode} (${duration}ms)`;
+    logJobEvent('server', 'RESPONSE', resMsg, 'mix');
   });
 
   next();
@@ -58,13 +65,6 @@ app.use(flexibleJsonParser);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(jsonSyntaxErrorHandler);
-
-// Serve static uploaded resumes & generated PDF files
-const uploadsPath = path.resolve(process.cwd(), 'uploads');
-const uploadsRelPath = path.join(__dirname, '../../uploads');
-
-app.use('/uploads', express.static(uploadsPath));
-app.use('/uploads', express.static(uploadsRelPath));
 
 // Root API Health Check
 app.get('/', (req, res) => {
@@ -84,7 +84,11 @@ app.use('/api/skipped-applications', skippedApplicationRouter);
 app.use('/api/settings', settingRouter);
 app.use('/api/job-sources/naukri', naukriSessionRouter);
 app.use('/api/google-session', googleSessionRouter);
-app.use('/api/test-pages', testPlaygroundRouter);
+
+// Mount test playground ONLY when not in production
+if (process.env.NODE_ENV !== 'production') {
+  app.use('/api/test-pages', testPlaygroundRouter);
+}
 
 // 404 Handler for undefined API endpoints
 app.use((req, res, next) => {
