@@ -46,6 +46,14 @@ const jobApplicationSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    applyUrl: {
+      type: String,
+      default: "",
+    },
+    result: {
+      type: mongoose.Schema.Types.Mixed,
+      default: null,
+    },
     applicationMethod: {
       type: String,
       enum: Object.values(APPLICATION_METHOD),
@@ -348,3 +356,5 @@ const jobApplicationSchema = new mongoose.Schema(
 jobApplicationSchema.index({ userId: 1, jobId: 1 }, { unique: true });
 
 export const JobApplication = mongoose.model("JobApplication", jobApplicationSchema);
+export const Application = JobApplication;
+export default JobApplication;

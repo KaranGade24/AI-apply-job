@@ -21,6 +21,7 @@ import { swaggerOptions } from './src/config/swagger.js';
 import { DEFAULT_PORT } from './src/constant/api.constant.js';
 import { appError, globalErrorHandler } from './src/utils/errors.js';
 import { logJobEvent, sanitizeSecrets } from './src/utils/logger.js';
+import { SessionRegistry } from './src/agent/browser/session/sessionRegistry.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -101,7 +102,7 @@ app.use(globalErrorHandler);
 
 const PORT = process.env.API_PORT || DEFAULT_PORT || 5000;
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`🚀 Standalone Backend API Server is running on port ${PORT}`);
   console.log(`📚 Swagger documentation available at: http://localhost:${PORT}/api-docs`);
   
@@ -110,3 +111,6 @@ app.listen(PORT, () => {
     console.error('Failed async DB connect:', err.message);
   });
 });
+
+// Setup graceful shutdown hooks for browser sessions
+SessionRegistry.setupShutdownHooks(server);

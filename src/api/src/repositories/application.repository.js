@@ -433,3 +433,25 @@ export const deleteApplication = async (id) => {
     throw error;
   }
 };
+
+export const ApplicationRepository = {
+  findApplicationById,
+  findApplicationByJobAndUser,
+  findApplicationByUserAndJob: findApplicationByJobAndUser,
+  findNextPendingApplication,
+  createApplication,
+  updateApplicationStatus,
+  updateStatus: updateApplicationStatus,
+  updateApplicationEmail,
+  updateApplicationResume,
+  updateApplicationPhone,
+  updateApplicationGoogleForm,
+  updateApplicationUnknownResult,
+  getUserApplications,
+  findApplicationsByUserId: getUserApplications,
+  deleteApplication,
+  normalizeApplicationMethod,
+  normalizeApplicationStatus,
+};
+
+export default ApplicationRepository;

@@ -2,53 +2,52 @@ import mongoose from 'mongoose';
 
 const applicationQuestionSchema = new mongoose.Schema(
   {
-    applicationId: {
+    userId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'JobApplication',
+      ref: 'User',
       required: true,
       index: true,
     },
-    questionId: {
+    questionKey: {
       type: String,
       required: true,
+      index: true,
     },
     questionText: {
       type: String,
       required: true,
     },
-    fieldType: {
+    category: {
       type: String,
-      default: 'text',
-    },
-    options: [String],
-    currentValue: {
-      type: mongoose.Schema.Types.Mixed,
-    },
-    source: {
-      type: String,
-      default: 'website',
-    },
-    reason: {
-      type: String,
-    },
-    required: {
-      type: Boolean,
-      default: true,
-    },
-    resolved: {
-      type: Boolean,
-      default: false,
+      default: 'general',
+      index: true,
     },
     answer: {
       type: mongoose.Schema.Types.Mixed,
+      default: null,
+    },
+    source: {
+      type: String,
+      enum: ['profile', 'resume', 'approvedBefore', 'llm', 'human'],
+      default: 'human',
     },
     confidence: {
       type: Number,
-      default: 1.0,
+      default: 1,
+    },
+    userConfirmed: {
+      type: Boolean,
+      default: true,
     },
   },
-  { timestamps: true }
+  {
+    timestamps: true,
+  }
 );
 
-export const ApplicationQuestion = mongoose.model('ApplicationQuestion', applicationQuestionSchema);
+// Compound unique index per user and questionKey
+applicationQuestionSchema.index({ userId: 1, questionKey: 1 }, { unique: true });
+
+export const ApplicationQuestion =
+  mongoose.models.ApplicationQuestion || mongoose.model('ApplicationQuestion', applicationQuestionSchema);
 export default ApplicationQuestion;

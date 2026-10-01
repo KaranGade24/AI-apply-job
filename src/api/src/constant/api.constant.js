@@ -19,3 +19,9 @@ export const ALLOWED_MIME_TYPES = [
 ];
 
 export const ALLOWED_EXTENSIONS = ['.pdf', '.doc', '.docx', '.txt'];
+
+// Session and Timeouts
+export const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+export const DEFAULT_PAGE_TIMEOUT_MS = 30000;
+export const DEFAULT_ACTION_TIMEOUT_MS = 10000;
+

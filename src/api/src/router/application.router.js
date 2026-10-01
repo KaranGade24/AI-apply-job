@@ -1,8 +1,150 @@
 import express from "express";
 import * as applicationController from "../controller/application.controller.js";
+import * as agentExecutionController from "../controller/agentExecution.controller.js";
 import { authMiddleware, optionalAuthMiddleware } from "../middlewares/auth.middleware.js";
 
 const applicationRouter = express.Router();
+
+/**
+ * @swagger
+ * /api/applications/{id}/start:
+ *   post:
+ *     summary: Start or advance autonomous browser application workflow
+ *     tags: [Applications]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Workflow initiated
+ *       401:
+ *         description: Unauthorized
+ *       409:
+ *         description: Already running
+ */
+applicationRouter.post("/:id/start", authMiddleware, agentExecutionController.startApplication);
+
+/**
+ * @swagger
+ * /api/applications/{id}/status:
+ *   get:
+ *     summary: Retrieve automation execution status and progress
+ *     tags: [Applications]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Current automation status
+ */
+applicationRouter.get("/:id/status", authMiddleware, agentExecutionController.getStatus);
+
+/**
+ * @swagger
+ * /api/applications/{id}/questions:
+ *   get:
+ *     summary: Retrieve pending human-in-the-loop questionnaire questions
+ *     tags: [Applications]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: List of pending questions
+ */
+applicationRouter.get("/:id/questions", authMiddleware, agentExecutionController.getQuestions);
+
+/**
+ * @swagger
+ * /api/applications/{id}/answers:
+ *   post:
+ *     summary: Submit human answers to pending questions and resume paused workflow
+ *     tags: [Applications]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               answers:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *     responses:
+ *       200:
+ *         description: Answers accepted and workflow resumed
+ */
+applicationRouter.post("/:id/answers", authMiddleware, agentExecutionController.submitAnswers);
+
+/**
+ * @swagger
+ * /api/applications/{id}/review:
+ *   get:
+ *     summary: Retrieve pre-submission summary and answers verification hash
+ *     tags: [Applications]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Application review summary
+ */
+applicationRouter.get("/:id/review", authMiddleware, agentExecutionController.getReview);
+
+/**
+ * @swagger
+ * /api/applications/{id}/confirm:
+ *   post:
+ *     summary: Approve pre-submission review and execute final submission
+ *     tags: [Applications]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Final submission triggered
+ */
+applicationRouter.post("/:id/confirm", authMiddleware, agentExecutionController.confirmReview);
+
+/**
+ * @swagger
+ * /api/applications/{id}/cancel:
+ *   post:
+ *     summary: Cancel active application workflow
+ *     tags: [Applications]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Workflow cancelled
+ */
+applicationRouter.post("/:id/cancel", authMiddleware, agentExecutionController.cancelApplication);
 
 /**
  * @swagger

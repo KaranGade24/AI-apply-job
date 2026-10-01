@@ -44,7 +44,7 @@ router.get('/:id/download', authMiddleware, downloadOriginalResume);
  *       500:
  *         description: Internal server or AI parsing error
  */
-router.post('/upload', upload.single('resume'), authMiddleware, uploadResume);
+router.post('/upload', authMiddleware, upload.single('resume'), uploadResume);
 
 /**
  * @swagger
