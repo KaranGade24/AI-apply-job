@@ -11,7 +11,7 @@ import { logJobEvent, logError } from "../utils/logger.js";
  */
 export const connectNaukriController = async (req, res, next) => {
   try {
-    const userId = req.user?.userId || req.user?._id || req.user?.id || req.body?.userId;
+    const userId = req.user?.userId;
     await logJobEvent(
       "connectNaukriController",
       "REQ",
@@ -37,8 +37,7 @@ export const connectNaukriController = async (req, res, next) => {
  */
 export const getNaukriStatusController = async (req, res, next) => {
   try {
-    const userId =
-      req.user?.userId || req.user?._id || req.user?.id || req.query?.userId;
+    const userId = req.user?.userId;
     const status = await getNaukriSessionStatusService(userId);
 
     return res.status(200).json({
@@ -59,7 +58,7 @@ export const getNaukriStatusController = async (req, res, next) => {
  */
 export const saveManualLoginController = async (req, res, next) => {
   try {
-    const userId = req.user?.userId || req.user?._id || req.user?.id || req.body?.userId;
+    const userId = req.user?.userId;
     const { storageState, cookies, oneTimeLogin } = req.body;
 
     const result = await saveManualLoginService(userId, {
@@ -87,7 +86,7 @@ export const saveManualLoginController = async (req, res, next) => {
  */
 export const disconnectNaukriController = async (req, res, next) => {
   try {
-    const userId = req.user?.userId || req.user?._id || req.user?.id || req.body?.userId;
+    const userId = req.user?.userId;
     const result = await disconnectNaukriService(userId);
 
     return res.status(200).json({

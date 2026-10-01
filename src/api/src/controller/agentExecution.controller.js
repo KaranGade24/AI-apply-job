@@ -1,6 +1,9 @@
-import * as agentRunnerService from '../services/agentRunner.service.js';
-import { submitAnswersRequestSchema, confirmReviewRequestSchema } from '../agent/schema/agentStateSchema.js';
-import { appError } from '../utils/errors.js';
+import * as agentRunnerService from "../services/agentRunner.service.js";
+import {
+  submitAnswersRequestSchema,
+  confirmReviewRequestSchema,
+} from "../agent/schema/agentStateSchema.js";
+import { appError } from "../utils/errors.js";
 
 /**
  * POST /api/applications/:id/start
@@ -9,11 +12,15 @@ import { appError } from '../utils/errors.js';
 export const startApplication = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const userId = req.user?._id || req.user?.id;
-    if (!userId) throw new appError('Unauthorized', 401);
+    const userId = req.user?.userId;
+    if (!userId) throw new appError("Unauthorized", 401);
 
-    const result = await agentRunnerService.startApplicationWorkflow(id, userId, req.body || {});
-    res.status(200).json({ status: 'success', data: result });
+    const result = await agentRunnerService.startApplicationWorkflow(
+      id,
+      userId,
+      req.body || {},
+    );
+    res.status(200).json({ status: "success", data: result });
   } catch (error) {
     next(error);
   }
@@ -26,11 +33,11 @@ export const startApplication = async (req, res, next) => {
 export const getStatus = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const userId = req.user?._id || req.user?.id;
-    if (!userId) throw new appError('Unauthorized', 401);
+    const userId = req.user?.userId;
+    if (!userId) throw new appError("Unauthorized", 401);
 
     const result = await agentRunnerService.getWorkflowStatus(id, userId);
-    res.status(200).json({ status: 'success', data: result });
+    res.status(200).json({ status: "success", data: result });
   } catch (error) {
     next(error);
   }
@@ -43,11 +50,11 @@ export const getStatus = async (req, res, next) => {
 export const getQuestions = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const userId = req.user?._id || req.user?.id;
-    if (!userId) throw new appError('Unauthorized', 401);
+    const userId = req.user?.userId;
+    if (!userId) throw new appError("Unauthorized", 401);
 
     const result = await agentRunnerService.getWorkflowQuestions(id, userId);
-    res.status(200).json({ status: 'success', data: result });
+    res.status(200).json({ status: "success", data: result });
   } catch (error) {
     next(error);
   }
@@ -60,16 +67,23 @@ export const getQuestions = async (req, res, next) => {
 export const submitAnswers = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const userId = req.user?._id || req.user?.id;
-    if (!userId) throw new appError('Unauthorized', 401);
+    const userId = req.user?.userId;
+    if (!userId) throw new appError("Unauthorized", 401);
 
     const parsed = submitAnswersRequestSchema.safeParse(req.body);
     if (!parsed.success) {
-      throw new appError(`Invalid answers payload: ${parsed.error.errors.map((e) => e.message).join(', ')}`, 400);
+      throw new appError(
+        `Invalid answers payload: ${parsed.error.errors.map((e) => e.message).join(", ")}`,
+        400,
+      );
     }
 
-    const result = await agentRunnerService.submitWorkflowAnswers(id, userId, parsed.data.answers);
-    res.status(200).json({ status: 'success', data: result });
+    const result = await agentRunnerService.submitWorkflowAnswers(
+      id,
+      userId,
+      parsed.data.answers,
+    );
+    res.status(200).json({ status: "success", data: result });
   } catch (error) {
     next(error);
   }
@@ -82,11 +96,11 @@ export const submitAnswers = async (req, res, next) => {
 export const getReview = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const userId = req.user?._id || req.user?.id;
-    if (!userId) throw new appError('Unauthorized', 401);
+    const userId = req.user?.userId;
+    if (!userId) throw new appError("Unauthorized", 401);
 
     const result = await agentRunnerService.getWorkflowReview(id, userId);
-    res.status(200).json({ status: 'success', data: result });
+    res.status(200).json({ status: "success", data: result });
   } catch (error) {
     next(error);
   }
@@ -99,16 +113,23 @@ export const getReview = async (req, res, next) => {
 export const confirmReview = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const userId = req.user?._id || req.user?.id;
-    if (!userId) throw new appError('Unauthorized', 401);
+    const userId = req.user?.userId;
+    if (!userId) throw new appError("Unauthorized", 401);
 
     const parsed = confirmReviewRequestSchema.safeParse(req.body);
     if (!parsed.success) {
-      throw new appError(`Invalid review confirmation payload: ${parsed.error.errors.map((e) => e.message).join(', ')}`, 400);
+      throw new appError(
+        `Invalid review confirmation payload: ${parsed.error.errors.map((e) => e.message).join(", ")}`,
+        400,
+      );
     }
 
-    const result = await agentRunnerService.confirmWorkflowReview(id, userId, parsed.data);
-    res.status(200).json({ status: 'success', data: result });
+    const result = await agentRunnerService.confirmWorkflowReview(
+      id,
+      userId,
+      parsed.data,
+    );
+    res.status(200).json({ status: "success", data: result });
   } catch (error) {
     next(error);
   }
@@ -121,11 +142,11 @@ export const confirmReview = async (req, res, next) => {
 export const cancelApplication = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const userId = req.user?._id || req.user?.id;
-    if (!userId) throw new appError('Unauthorized', 401);
+    const userId = req.user?.userId;
+    if (!userId) throw new appError("Unauthorized", 401);
 
     const result = await agentRunnerService.cancelWorkflow(id, userId);
-    res.status(200).json({ status: 'success', data: result });
+    res.status(200).json({ status: "success", data: result });
   } catch (error) {
     next(error);
   }

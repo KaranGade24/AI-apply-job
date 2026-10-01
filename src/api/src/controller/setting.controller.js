@@ -19,7 +19,7 @@ export const getSettingsHandler = async (req, res, next) => {
 
 export const updateSettingsHandler = async (req, res, next) => {
   try {
-    const userId = req.user?.userId || req.body?.userId;
+    const userId = req.user?.userId;
     const updateData = req.body;
     if (!updateData) {
       throw new appError("Update data is required", 400);
