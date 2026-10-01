@@ -7,6 +7,26 @@ import { NAUKRI_APPLICATION_SELECTORS } from './naukriApplicationSelectors.js';
  */
 export const detectApplyAction = async (page) => {
   try {
+    if (!page || page.isClosed()) {
+      return { hasApply: false, isCompanySite: false, isAlreadyApplied: false, selector: '' };
+    }
+
+    // 0. Dismiss any blocking popups, drawers, or notification prompts
+    await page.evaluate(() => {
+      const dismissSelectors = [
+        '.crossIcon', '.cross-icon', '[class*="close-icon"]', '[class*="closeIcon"]',
+        'button[class*="close"]', '.naukri-drawer-close', '#close-icon',
+        '[class*="cross"]', '.chatbot_drawer .cross', '[aria-label="Close"]',
+        '.drawerWrapper .crossIcon'
+      ];
+      for (const sel of dismissSelectors) {
+        const el = document.querySelector(sel);
+        if (el && el.offsetParent !== null) {
+          el.click();
+        }
+      }
+    }).catch(() => {});
+
     const isAlreadyApplied = await page
       .locator(NAUKRI_APPLICATION_SELECTORS.SUCCESS_BANNER)
       .first()
@@ -22,6 +42,7 @@ export const detectApplyAction = async (page) => {
       };
     }
 
+    // 1. Try company site button selector
     const companySiteBtn = page.locator(NAUKRI_APPLICATION_SELECTORS.COMPANY_SITE_BUTTON).first();
     const isCompanySite = await companySiteBtn.isVisible().catch(() => false);
 
@@ -34,19 +55,58 @@ export const detectApplyAction = async (page) => {
       };
     }
 
+    // 2. Try direct apply button selector
     const applyBtn = page.locator(NAUKRI_APPLICATION_SELECTORS.APPLY_BUTTON).first();
     const isDirectApply = await applyBtn.isVisible().catch(() => false);
 
     if (isDirectApply) {
-      // Check if text of apply button says "company site" or "external"
       const btnText = (await applyBtn.textContent().catch(() => '')).toLowerCase();
-      const isExternal = btnText.includes('company') || btnText.includes('external') || btnText.includes('site') || btnText.includes('employer');
+      const isExternal = btnText.includes('company') || btnText.includes('external') || btnText.includes('site') || btnText.includes('employer') || btnText.includes('website');
 
       return {
         hasApply: true,
         isCompanySite: isExternal,
         isAlreadyApplied: false,
         selector: NAUKRI_APPLICATION_SELECTORS.APPLY_BUTTON,
+      };
+    }
+
+    // 3. Fallback: Full DOM search for modern Naukri buttons
+    const fallbackInfo = await page.evaluate(() => {
+      const candidates = Array.from(document.querySelectorAll('button, a, [role="button"], div[class*="apply-button"], span[class*="apply"]'));
+      for (const el of candidates) {
+        const text = (el.textContent || el.innerText || el.getAttribute('aria-label') || '').trim().toLowerCase();
+        if (/already applied|applied/i.test(text) && !text.includes('apply on')) {
+          return { isAlreadyApplied: true };
+        }
+        if (/apply\s*on\s*company|apply\s*on\s*website|apply\s*on\s*site|apply\s*on\s*employer|company\s*site/i.test(text)) {
+          return { hasApply: true, isCompanySite: true, text };
+        }
+        if (/^apply$|^apply\s*now$/i.test(text) || (text.startsWith('apply') && !text.includes('filter') && !text.includes('similar') && !text.includes('alert'))) {
+          return { hasApply: true, isCompanySite: false, text };
+        }
+      }
+      return null;
+    }).catch(() => null);
+
+    if (fallbackInfo?.isAlreadyApplied) {
+      return {
+        hasApply: false,
+        isCompanySite: false,
+        isAlreadyApplied: true,
+        selector: '',
+      };
+    }
+
+    if (fallbackInfo?.hasApply) {
+      const targetSelector = fallbackInfo.isCompanySite
+        ? 'button:has-text("company site"), a:has-text("company site"), button:has-text("Apply on"), a:has-text("Apply on"), [class*="company-site" i]'
+        : 'button:has-text("Apply"), a:has-text("Apply"), [class*="apply" i]';
+      return {
+        hasApply: true,
+        isCompanySite: fallbackInfo.isCompanySite,
+        isAlreadyApplied: false,
+        selector: targetSelector,
       };
     }
 

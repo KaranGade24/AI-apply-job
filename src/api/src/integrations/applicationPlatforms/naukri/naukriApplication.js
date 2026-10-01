@@ -235,17 +235,54 @@ export const runNaukriApplication = async ({
       );
 
       const newPagePromise = context
-        .waitForEvent("page", { timeout: 6000 })
+        .waitForEvent("page", { timeout: 7000 })
         .catch(() => null);
+
       const companySiteBtn = page
-        .locator(applyAction.selector || "#company-site-button")
+        .locator(applyAction.selector || "#company-site-button, button:has-text('company site'), a:has-text('company site'), button:has-text('Apply on'), a:has-text('Apply on')")
         .first();
-      await companySiteBtn.click().catch(() => {});
+
+      await companySiteBtn.scrollIntoViewIfNeeded().catch(() => {});
+      let siteBtnClicked = false;
+      await companySiteBtn.click({ timeout: 4000 }).then(() => { siteBtnClicked = true; }).catch(() => {});
+      if (!siteBtnClicked) {
+        await companySiteBtn.click({ force: true, timeout: 3000 }).then(() => { siteBtnClicked = true; }).catch(() => {});
+      }
+      if (!siteBtnClicked) {
+        await page.evaluate((sel) => {
+          const el = (sel ? document.querySelector(sel) : null) ||
+            Array.from(document.querySelectorAll('button, a, div[role="button"]')).find(b =>
+              /apply\s*on\s*company|apply\s*on\s*website|apply\s*on\s*site|company\s*site/i.test((b.textContent || '').trim())
+            );
+          if (el) el.click();
+        }, applyAction.selector).catch(() => {});
+      }
+
       const popup = await newPagePromise;
       if (popup) {
         await popup.waitForLoadState("domcontentloaded").catch(() => {});
         activePage = popup;
+      } else {
+        await page.waitForTimeout(2000);
+        const allPages = context.pages();
+        if (allPages.length > 1) {
+          activePage = allPages[allPages.length - 1];
+          await activePage.waitForLoadState("domcontentloaded").catch(() => {});
+        }
       }
+
+      // Check if an intermediate redirect confirmation dialog appeared on Naukri
+      const redirectProceedBtn = activePage.locator('button:has-text("Proceed"), button:has-text("Continue"), button:has-text("Yes"), a:has-text("Proceed"), a:has-text("Continue")').first();
+      if (await redirectProceedBtn.isVisible({ timeout: 2500 }).catch(() => false)) {
+        const nextPopupPromise = context.waitForEvent("page", { timeout: 6000 }).catch(() => null);
+        await redirectProceedBtn.click({ timeout: 3000 }).catch(() => {});
+        const nextPopup = await nextPopupPromise;
+        if (nextPopup) {
+          await nextPopup.waitForLoadState("domcontentloaded").catch(() => {});
+          activePage = nextPopup;
+        }
+      }
+
       await activePage.waitForTimeout(3000);
 
       // Extract rendered portal content and analyze with Gemini AI
@@ -531,12 +568,23 @@ export const runNaukriApplication = async ({
       );
 
       const applyLocator = page
-        .locator(applyAction.selector || "#apply-button")
+        .locator(applyAction.selector || "#apply-button, button.apply-button, [class*='apply-button' i], button:has-text('Apply'), a:has-text('Apply')")
         .first();
-      await applyLocator
-        .waitFor({ state: "visible", timeout: 5000 })
-        .catch(() => {});
-      await applyLocator.click().catch(() => {});
+
+      await applyLocator.scrollIntoViewIfNeeded().catch(() => {});
+      let directClicked = false;
+      await applyLocator.click({ timeout: 4000 }).then(() => { directClicked = true; }).catch(() => {});
+      if (!directClicked) {
+        await applyLocator.click({ force: true, timeout: 3000 }).then(() => { directClicked = true; }).catch(() => {});
+      }
+      if (!directClicked) {
+        await page.evaluate((sel) => {
+          const el = (sel ? document.querySelector(sel) : null) ||
+            document.querySelector('#apply-button, .apply-button, button.apply-button') ||
+            Array.from(document.querySelectorAll('button, a')).find(b => /^apply$|^apply\s*now$/i.test((b.textContent || '').trim()));
+          if (el) el.click();
+        }, applyAction.selector).catch(() => {});
+      }
       await page.waitForTimeout(3000);
 
       // Check if application was completed directly without questionnaire
