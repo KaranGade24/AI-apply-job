@@ -1168,13 +1168,14 @@ export const runNaukriApplication = async ({
       // CHECKPOINT 2: Final Review Before Submission
       // If user has not yet reviewed/confirmed these specific fields in the frontend modal, pause and send to user
       const userHasConfirmedForm =
-        Array.isArray(finalEditedAnswers) &&
+        Boolean(confirmSubmission) ||
+        (Array.isArray(finalEditedAnswers) &&
         finalEditedAnswers.length > 0 &&
         finalEditedAnswers.some((a) =>
           formInspection.fields.some(
             (f) => f.questionId === a.questionId || f.fieldId === a.fieldId,
           ),
-        );
+        ));
 
       if (!userHasConfirmedForm) {
         const reviewFields = formInspection.fields.map((f) => {

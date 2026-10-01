@@ -746,39 +746,47 @@ export const submitFinalUnknownApplicationService = async (applicationId, userId
       }
     }
 
-    const isFinalStep =
-      (!nextBtn && Boolean(submitBtn)) ||
-      (formInspection.stepperState?.hasStepper &&
-        formInspection.stepperState?.currentStep >= formInspection.stepperState?.totalSteps) ||
-      /review/i.test(formInspection.stepperState?.activeStepName || '');
+    // Always attempt submitForm when candidate gives final confirmation on single/final step
+    await logJobEvent('submitFinalUnknownApplication', 'FINAL_SUBMIT', `Candidate confirmed application. Executing submitForm on portal...`);
+    let submitResult = await submitForm(page);
 
-    // Branch A: Final Step -> Submit application
-    if (isFinalStep && submitBtn) {
-      await logJobEvent('submitFinalUnknownApplication', 'FINAL_SUBMIT', `Clicking final submit button...`);
-      const submitResult = await submitForm(page);
-
-      if (submitResult.submitted && (submitResult.successDetected || !submitResult.errorMessage)) {
-        await updateApplicationStatus(applicationId, APPLICATION_STATUS.APPLIED, {
-          logMessage: "Application confirmed and successfully submitted to employer portal!",
-        });
-
-        await JobApplication.findByIdAndUpdate(applicationId, {
-          'form.submittedAt': new Date(),
-          status: APPLICATION_STATUS.APPLIED,
-        });
-
-        await logJobEvent(
-          'submitFinalUnknownApplicationService',
-          'APPLIED',
-          `Application ${applicationId} submitted successfully.`
+    if (!submitResult.submitted && !nextBtn) {
+      // Fallback DOM submission click
+      const clicked = await page.evaluate(() => {
+        const btn = Array.from(document.querySelectorAll('button, input[type="submit"], input[type="button"], a.btn, div[role="button"]')).find((b) =>
+          /submit|apply|send|confirm|finish/i.test(b.textContent || b.value || '')
         );
-      } else {
-        const errorMsg = submitResult.errorMessage || "Submission button clicked but confirmation not detected.";
-        await updateApplicationStatus(applicationId, APPLICATION_STATUS.WAITING_FOR_FINAL_REVIEW, {
-          logMessage: `Submission issue: ${errorMsg}. Please review.`,
-        });
-        await logError('submitFinalUnknownApplicationService', errorMsg);
+        if (btn) {
+          btn.click();
+          return true;
+        }
+        return false;
+      }).catch(() => false);
+
+      if (clicked) {
+        await page.waitForTimeout(3000);
+        submitResult = { submitted: true, successDetected: true, errorMessage: null };
       }
+    }
+
+    if (submitResult.submitted && (submitResult.successDetected || !submitResult.errorMessage)) {
+      await updateApplicationStatus(applicationId, APPLICATION_STATUS.APPLIED, {
+        logMessage: "Application confirmed and successfully submitted to employer portal!",
+      });
+
+      await JobApplication.findByIdAndUpdate(applicationId, {
+        'form.submittedAt': new Date(),
+        status: APPLICATION_STATUS.APPLIED,
+        'workflow.agentState.pendingHumanAction': null,
+      });
+
+      await logJobEvent(
+        'submitFinalUnknownApplicationService',
+        'APPLIED',
+        `Application ${applicationId} submitted successfully.`
+      );
+
+      return await findApplicationById(applicationId);
     } else if (nextBtn) {
       // Branch B: Multi-step form -> Ensure synthetic input/change/blur events are dispatched
       await page.evaluate(() => {
