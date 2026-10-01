@@ -30,6 +30,7 @@ import {
 } from "lucide-react";
 import { Button } from "../../components/ui/Button";
 import { openProtectedFile } from "../../services/api";
+import { parseResumeApi } from "../../services/resumeService";
 import {
   previewDraftApi,
   getApplicationDetailsApi,
@@ -132,6 +133,19 @@ export const ApplicationReviewModal = ({
             ? "googleForm"
             : "email");
 
+  const isAppliedState =
+    currentStatus === "Applied" ||
+    application?.status === "Applied" ||
+    application?.status === "applied" ||
+    currentStatus === "applied";
+
+  const resolvedCandidateName =
+    (candidateInfo?.fullName && candidateInfo.fullName !== "Candidate" ? candidateInfo.fullName : null) ||
+    (candidateInfo?.personal?.firstName ? `${candidateInfo.personal.firstName} ${candidateInfo.personal.lastName || ''}`.trim() : null) ||
+    application?.userProfile?.fullName ||
+    (application?.userProfile?.personal?.firstName ? `${application.userProfile.personal.firstName} ${application.userProfile.personal.lastName || ''}`.trim() : null) ||
+    "Karan Santosh Gade";
+
   // Compute robust effective review fields from form.reviewFields, form.fields, or form.answers
   const baseReviewFields =
     application?.form?.reviewFields && application.form.reviewFields.length > 0
@@ -172,7 +186,7 @@ export const ApplicationReviewModal = ({
     const qLower = (f.question || f.fieldId || "").toLowerCase();
     if (!ans || String(ans).trim() === "" || String(ans).startsWith("Enter ")) {
       if (/full\s*name|your\s*name|candidate\s*name|applicant\s*name|^name$/i.test(qLower)) {
-        ans = candidateInfo?.fullName || application?.userProfile?.fullName || "Karan Santosh Gade";
+        ans = resolvedCandidateName;
       } else if (/email/i.test(qLower)) {
         ans = candidateInfo?.email || application?.userProfile?.email || "gadekaran24@gmail.com";
       } else if (/phone|mobile|contact/i.test(qLower)) {
@@ -549,6 +563,101 @@ export const ApplicationReviewModal = ({
 
   // Checkpoint 1 & 2 Interactive Form Renderer for all channels (Naukri, Workday, Company Site, Portal)
   const renderFormCheckpoints = () => {
+    if (isAppliedState) {
+      return (
+        <div className="p-6 rounded-2xl border border-emerald-200 bg-linear-to-r from-emerald-50 via-teal-50/60 to-emerald-50/80 space-y-5 shadow-sm">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-emerald-200/80 pb-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-md">
+                <CheckCircle2 className="w-6 h-6" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="px-2.5 py-0.5 bg-emerald-700 text-white rounded font-black text-[10px] uppercase tracking-wider">
+                    Application Applied & Confirmed
+                  </span>
+                  <span className="text-xs font-semibold text-emerald-800 font-mono">
+                    {formatDate(application?.form?.submittedAt || application?.updatedAt || new Date())}
+                  </span>
+                </div>
+                <h3 className="text-base font-bold text-slate-900 mt-1">
+                  Submitted to {job.company || "Employer"} Portal
+                </h3>
+              </div>
+            </div>
+
+            <a
+              href={application?.pageAnalysis?.currentUrl || job?.applicationUrl || job?.sourceUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer shrink-0"
+            >
+              <span>View Portal Submission</span>
+              <ExternalLink className="w-3.5 h-3.5" />
+            </a>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+            <div className="p-3 bg-white/80 rounded-xl border border-emerald-100 space-y-1">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                Candidate Name
+              </span>
+              <span className="font-bold text-slate-900 text-xs">
+                {resolvedCandidateName}
+              </span>
+            </div>
+
+            <div className="p-3 bg-white/80 rounded-xl border border-emerald-100 space-y-1">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                Target Role
+              </span>
+              <span className="font-bold text-slate-900 text-xs truncate block">
+                {job.title || "Software Developer"}
+              </span>
+            </div>
+
+            <div className="p-3 bg-white/80 rounded-xl border border-emerald-100 space-y-1 sm:col-span-2">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                Attached ATS Resume
+              </span>
+              <div className="flex items-center justify-between gap-2 pt-0.5">
+                <span className="font-mono text-emerald-800 font-semibold text-xs truncate">
+                  {application?.resume?.fileName || "Karan_Gade_Resume_8446726903.pdf"}
+                </span>
+                {application?.resume?.pdfPath && (
+                  <button
+                    type="button"
+                    onClick={() => openProtectedFile(application.resume.pdfPath)}
+                    className="text-xs font-bold text-emerald-700 hover:text-emerald-900 underline inline-flex items-center gap-1 cursor-pointer shrink-0"
+                  >
+                    <Download className="w-3 h-3" />
+                    <span>View PDF</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Submitted Form Fields Summary */}
+          {effectiveReviewFields.length > 0 && (
+            <div className="space-y-2 pt-2 border-t border-emerald-200/60">
+              <span className="text-xs font-bold text-emerald-900 block">
+                Submitted Form Fields ({effectiveReviewFields.length})
+              </span>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto p-2 bg-white/60 rounded-xl border border-emerald-200/60">
+                {effectiveReviewFields.map((f) => (
+                  <div key={f.questionId} className="p-2 bg-white rounded-lg border border-slate-200 text-xs flex justify-between gap-2">
+                    <span className="font-semibold text-slate-700 truncate">{f.question}:</span>
+                    <span className="font-mono font-bold text-emerald-800 truncate">{f.answer || "Filled"}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
     // Filter out missing questions if they already have answers or values from Profile / Resume
     const missingList = (application?.form?.missingQuestions || []).filter(
       (q) => {
@@ -731,6 +840,52 @@ export const ApplicationReviewModal = ({
                           )}
                         </button>
                       </div>
+                    </div>
+                  ) : q.type === "file" || /upload|resume|cv|file|attachment|document/i.test(q.question || q.questionId || "") ? (
+                    <div className="p-3 bg-emerald-50/70 rounded-xl border border-emerald-200 space-y-2 shadow-2xs">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <FileText className="w-4 h-4 text-emerald-600 shrink-0" />
+                          <div>
+                            <span className="text-xs font-bold text-emerald-900 block">
+                              Resume / File Attachment
+                            </span>
+                            <span className="text-[11px] text-emerald-800 font-mono font-medium">
+                              {missingAnswers[q.questionId] || application?.resume?.fileName || "Tailored_ATS_Resume.pdf"}
+                            </span>
+                          </div>
+                        </div>
+                        <label className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-emerald-300 hover:bg-emerald-100/60 text-emerald-800 rounded-lg text-xs font-bold transition-colors shrink-0 shadow-2xs">
+                          <FileText className="w-3.5 h-3.5 text-emerald-600" />
+                          <span>Choose / Select File</span>
+                          <input
+                            type="file"
+                            accept=".pdf,.doc,.docx"
+                            className="hidden"
+                            onChange={async (e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                setMissingAnswers((prev) => ({
+                                  ...prev,
+                                  [q.questionId]: file.name,
+                                }));
+                                try {
+                                  showToast("Uploading resume file...");
+                                  const formData = new FormData();
+                                  formData.append("resume", file);
+                                  await parseResumeApi(formData);
+                                  showToast("Custom resume file uploaded & parsed successfully!", "success");
+                                } catch (err) {
+                                  showToast("Attached: " + file.name, "info");
+                                }
+                              }
+                            }}
+                          />
+                        </label>
+                      </div>
+                      <p className="text-[10px] text-emerald-700 font-medium">
+                        Your active ATS resume is automatically prepared. You can click to select a custom PDF/DOCX file from your device.
+                      </p>
                     </div>
                   ) : (
                     <input
@@ -959,19 +1114,28 @@ export const ApplicationReviewModal = ({
                           </div>
                         </div>
                         <label className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-emerald-300 hover:bg-emerald-100/60 text-emerald-800 rounded-lg text-xs font-bold transition-colors shrink-0 shadow-2xs">
-                          <Download className="w-3.5 h-3.5 text-emerald-600" />
+                          <FileText className="w-3.5 h-3.5 text-emerald-600" />
                           <span>Choose / Select File</span>
                           <input
                             type="file"
                             accept=".pdf,.doc,.docx"
                             className="hidden"
-                            onChange={(e) => {
+                            onChange={async (e) => {
                               const file = e.target.files?.[0];
                               if (file) {
                                 setReviewAnswers((prev) => ({
                                   ...prev,
                                   [field.questionId]: file.name,
                                 }));
+                                try {
+                                  showToast("Uploading custom resume file...");
+                                  const formData = new FormData();
+                                  formData.append("resume", file);
+                                  await parseResumeApi(formData);
+                                  showToast("Custom resume file uploaded & attached successfully!", "success");
+                                } catch (err) {
+                                  showToast("Attached: " + file.name, "info");
+                                }
                               }
                             }}
                           />
@@ -1995,7 +2159,7 @@ export const ApplicationReviewModal = ({
                   {/* 1. NAUKRI 1-CLICK APPLY CHANNEL */}
                   {isNaukriDirect && (
                     <div className="space-y-4">
-                      <AgentActivityPanel applicationId={application?._id} />
+                      {!isAppliedState && <AgentActivityPanel applicationId={application?._id} />}
                       {/* Security Challenge / Session Banner */}
                       {application?.form?.humanReason === "sessionExpired" && (
                         <div className="p-4 rounded-xl border border-red-200 bg-red-50 text-red-800 text-xs flex items-start gap-3">
@@ -2035,6 +2199,7 @@ export const ApplicationReviewModal = ({
                       )}
 
                       {/* Header Channel Bar */}
+                      {!isAppliedState && (
                       <div className="p-4 rounded-xl border border-blue-200 bg-blue-50/70 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                         <div className="space-y-1">
                           <div className="flex items-center gap-2">
@@ -2075,11 +2240,13 @@ export const ApplicationReviewModal = ({
                           </a>
                         </div>
                       </div>
+                      )}
 
                       {/* Checkpoint 1 & 2 Interactive Forms */}
                       {renderFormCheckpoints()}
 
                       {/* Tailored ATS Resume Summary */}
+                      {!isAppliedState && (
                       <div className="p-4 rounded-xl border border-slate-200 bg-white space-y-3">
                         <div className="flex items-center justify-between">
                           <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
@@ -2107,13 +2274,14 @@ export const ApplicationReviewModal = ({
                           directly on Naukri without external email dispatch.
                         </p>
                       </div>
+                      )}
                     </div>
                   )}
 
                   {/* 2. NAUKRI APPLY ON COMPANY SITE CHANNEL */}
                   {isCompanySite && (
                     <div className="space-y-4">
-                      <AgentActivityPanel applicationId={application?._id} />
+                      {!isAppliedState && <AgentActivityPanel applicationId={application?._id} />}
                       {/* Manual Application Required / No Online Form Banner */}
                       {(application?.pageAnalysis?.manualApplyRequired ||
                         application?.form?.humanReason === "MANUAL_APPLY_REQUIRED") && (
@@ -2145,6 +2313,7 @@ export const ApplicationReviewModal = ({
                         </div>
                       )}
 
+                      {!isAppliedState && (
                       <div className="p-4 rounded-xl border border-purple-200 bg-purple-50/70 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                         <div className="space-y-1">
                           <div className="flex items-center gap-2">
@@ -2184,11 +2353,13 @@ export const ApplicationReviewModal = ({
                           </a>
                         </div>
                       </div>
+                      )}
 
                       {/* Checkpoint 1 & 2 Interactive Forms for Company Site (Workday / ATS) */}
                       {renderFormCheckpoints()}
 
                       {/* AI Page & Portal Intelligence Card */}
+                      {!isAppliedState && (
                       <div className="p-4 rounded-xl border border-indigo-200 bg-linear-to-br from-indigo-50/70 via-white to-purple-50/50 space-y-3.5 shadow-xs">
                         <div className="flex items-start justify-between gap-3">
                           <div className="flex items-center gap-2">
@@ -2746,8 +2917,10 @@ export const ApplicationReviewModal = ({
                           </div>
                         )}
                       </div>
+                      )}
 
                       {/* Quick Auto-Fill Cheat Sheet for Company Portal Forms (No email/pitch) */}
+                      {!isAppliedState && (
                       <div className="border border-slate-200 rounded-xl p-4 space-y-3 bg-white">
                         <div className="flex items-center justify-between">
                           <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
@@ -2765,14 +2938,14 @@ export const ApplicationReviewModal = ({
                                 Full Name
                               </span>
                               <span className="font-semibold text-slate-800">
-                                {candidateInfo?.fullName || "Karan Gade"}
+                                {resolvedCandidateName}
                               </span>
                             </div>
                             <button
                               type="button"
                               onClick={() =>
                                 copyToClipboard(
-                                  candidateInfo?.fullName || "Karan Gade",
+                                  resolvedCandidateName,
                                   "name",
                                 )
                               }
@@ -2868,6 +3041,7 @@ export const ApplicationReviewModal = ({
                           </div>
                         </div>
                       </div>
+                      )}
                     </div>
                   )}
 

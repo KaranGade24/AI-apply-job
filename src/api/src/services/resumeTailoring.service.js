@@ -98,9 +98,26 @@ export const tailorResumeForJobDescription = async ({
     const basePersonal = baseResume.personalInfo || baseResume.personal || {};
     const tailoredPersonal = tailored.personalInfo || {};
 
+    let resolvedFullName = basePersonal.fullName || basePersonal.name || tailoredPersonal.fullName;
+    if (!resolvedFullName || resolvedFullName === "Candidate" || resolvedFullName === "Candidate Resume") {
+      if (userId) {
+        const { findUserProfileByUserId, findUserById } = await import("../repositories/user.repository.js");
+        const uProfile = await findUserProfileByUserId(userId).catch(() => null);
+        const uRecord = await findUserById(userId).catch(() => null);
+        if (uProfile?.personal?.firstName || uProfile?.personal?.lastName) {
+          resolvedFullName = `${uProfile.personal.firstName || ''} ${uProfile.personal.lastName || ''}`.trim();
+        } else if (uProfile?.fullName && uProfile.fullName !== "Candidate") {
+          resolvedFullName = uProfile.fullName;
+        } else if (uRecord?.username && uRecord.username !== "Candidate") {
+          resolvedFullName = uRecord.username;
+        }
+      }
+    }
+    if (!resolvedFullName) resolvedFullName = "Candidate";
+
     tailored.personalInfo = {
       ...tailoredPersonal,
-      fullName: basePersonal.fullName || basePersonal.name || tailoredPersonal.fullName || "Candidate",
+      fullName: resolvedFullName,
       firstName: basePersonal.firstName || tailoredPersonal.firstName || "",
       lastName: basePersonal.lastName || tailoredPersonal.lastName || "",
       phone: basePersonal.phone || basePersonal.contactNo || basePersonal.phoneNumber || tailoredPersonal.phone || "",

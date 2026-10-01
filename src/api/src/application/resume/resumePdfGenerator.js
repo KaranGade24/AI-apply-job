@@ -115,9 +115,26 @@ export const ensureEffectiveResumePdfOnDisk = async ({
     }
 
     if (!effectiveData) {
+      let candidateName = 'Candidate Applicant';
+      let candidateEmail = '';
+      let candidatePhone = '';
+      if (userId) {
+        const { findUserProfileByUserId, findUserById } = await import('../../repositories/user.repository.js');
+        const uProfile = await findUserProfileByUserId(userId).catch(() => null);
+        const uRecord = await findUserById(userId).catch(() => null);
+        if (uProfile?.personal?.firstName || uProfile?.personal?.lastName) {
+          candidateName = `${uProfile.personal.firstName || ''} ${uProfile.personal.lastName || ''}`.trim();
+        } else if (uProfile?.fullName) {
+          candidateName = uProfile.fullName;
+        } else if (uRecord?.username) {
+          candidateName = uRecord.username;
+        }
+        candidateEmail = uRecord?.email || uProfile?.email || '';
+        candidatePhone = uProfile?.personal?.phone || '';
+      }
       effectiveData = {
-        personalInfo: { fullName: 'Candidate Applicant' },
-        summary: 'Experienced Full Stack Engineer',
+        personalInfo: { fullName: candidateName, email: candidateEmail, phone: candidatePhone },
+        summary: 'Experienced Full Stack Engineer with strong expertise in building scalable web applications.',
         skills: ['JavaScript', 'React', 'Node.js', 'Express', 'MongoDB'],
       };
     }

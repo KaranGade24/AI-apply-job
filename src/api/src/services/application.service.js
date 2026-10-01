@@ -1555,6 +1555,17 @@ export const previewOrGenerateDraftService = async (userId, payload) => {
         await updateApplicationStatus(existing._id, existing.status, { error: null });
       }
 
+      const uProfile = await findUserProfileByUserId(userId).catch(() => null);
+      const uRecord = await findUserById(userId).catch(() => null);
+      const resolvedProfileName =
+        uProfile?.personal?.firstName || uProfile?.personal?.lastName
+          ? `${uProfile.personal.firstName || ''} ${uProfile.personal.lastName || ''}`.trim()
+          : uProfile?.fullName && uProfile.fullName !== "Candidate"
+            ? uProfile.fullName
+            : uRecord?.username && uRecord.username !== "Candidate"
+              ? uRecord.username
+              : "Candidate";
+
       if (existing && !forceRegenerate && !payload?.triggerTailor) {
         return {
           application: existing,
@@ -1564,9 +1575,11 @@ export const previewOrGenerateDraftService = async (userId, payload) => {
           status: existing.status,
           candidateInfo: {
             fullName:
-              existing.resume?.tailoredResumeData?.personalInfo?.fullName || "Candidate",
-            email: existing.resume?.tailoredResumeData?.personalInfo?.email || "",
-            phone: existing.resume?.tailoredResumeData?.personalInfo?.phone || "",
+              (existing.resume?.tailoredResumeData?.personalInfo?.fullName && existing.resume.tailoredResumeData.personalInfo.fullName !== "Candidate"
+                ? existing.resume.tailoredResumeData.personalInfo.fullName
+                : null) || resolvedProfileName,
+            email: existing.resume?.tailoredResumeData?.personalInfo?.email || uRecord?.email || "",
+            phone: existing.resume?.tailoredResumeData?.personalInfo?.phone || uProfile?.personal?.phone || "",
             skills: existing.resume?.tailoredResumeData?.skills || skills || [],
           },
         };
@@ -1591,9 +1604,11 @@ export const previewOrGenerateDraftService = async (userId, payload) => {
               status: tailoredApp.status || APPLICATION_STATUS.WAITING_FOR_REVIEW,
               candidateInfo: {
                 fullName:
-                  tailoredApp.resume?.tailoredResumeData?.personalInfo?.fullName || "Candidate",
-                email: tailoredApp.resume?.tailoredResumeData?.personalInfo?.email || "",
-                phone: tailoredApp.resume?.tailoredResumeData?.personalInfo?.phone || "",
+                  (tailoredApp.resume?.tailoredResumeData?.personalInfo?.fullName && tailoredApp.resume.tailoredResumeData.personalInfo.fullName !== "Candidate"
+                    ? tailoredApp.resume.tailoredResumeData.personalInfo.fullName
+                    : null) || resolvedProfileName,
+                email: tailoredApp.resume?.tailoredResumeData?.personalInfo?.email || uRecord?.email || "",
+                phone: tailoredApp.resume?.tailoredResumeData?.personalInfo?.phone || uProfile?.personal?.phone || "",
                 skills: tailoredApp.resume?.tailoredResumeData?.skills || skills || [],
               },
             };
@@ -1608,11 +1623,17 @@ export const previewOrGenerateDraftService = async (userId, payload) => {
     }
 
     // 2. Fallback candidate info from active resume or user
+    const uProfile = await findUserProfileByUserId(userId).catch(() => null);
+    const uRecord = await findUserById(userId).catch(() => null);
     const activeResume = await getActiveResumeByUserId(userId).catch(() => null);
     const parsedData = activeResume?.parsedData || {};
-    const candidateName = parsedData.personalInfo?.fullName || "Candidate";
-    const candidateEmail = parsedData.personalInfo?.email || "";
-    const candidatePhone = parsedData.personalInfo?.phone || "";
+    const candidateName =
+      (parsedData.personalInfo?.fullName && parsedData.personalInfo.fullName !== "Candidate" ? parsedData.personalInfo.fullName : null) ||
+      (uProfile?.personal?.firstName || uProfile?.personal?.lastName ? `${uProfile.personal.firstName || ''} ${uProfile.personal.lastName || ''}`.trim() : null) ||
+      (uProfile?.fullName && uProfile.fullName !== "Candidate" ? uProfile.fullName : null) ||
+      (uRecord?.username && uRecord.username !== "Candidate" ? uRecord.username : "Candidate");
+    const candidateEmail = parsedData.personalInfo?.email || uRecord?.email || "";
+    const candidatePhone = parsedData.personalInfo?.phone || uProfile?.personal?.phone || "";
     const candidateSkills = Array.isArray(parsedData.skills)
       ? parsedData.skills
       : skills || ["React", "Node.js", "TypeScript"];

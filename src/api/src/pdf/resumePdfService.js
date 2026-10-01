@@ -55,7 +55,7 @@ export const generateResumePdf = async ({ resumeData, template = "ATS Modern", f
     let personalInfo = { ...(resumeData.personalInfo || resumeData.personal || {}) };
 
     // Fetch user profile or user record if userId is provided or info is incomplete
-    if (userId || !personalInfo.fullName || !personalInfo.phone || !personalInfo.email) {
+    if (userId || !personalInfo.fullName || personalInfo.fullName === "Candidate" || personalInfo.fullName === "Candidate Resume" || !personalInfo.phone || !personalInfo.email) {
       try {
         let userProfile = null;
         let userRecord = null;
@@ -68,10 +68,12 @@ export const generateResumePdf = async ({ resumeData, template = "ATS Modern", f
         const profilePersonal = userProfile?.personal || {};
         const profileLinks = userProfile?.links || {};
 
-        if (!personalInfo.fullName && !personalInfo.name) {
+        if (!personalInfo.fullName || personalInfo.fullName === "Candidate" || personalInfo.fullName === "Candidate Resume") {
           if (profilePersonal.firstName || profilePersonal.lastName) {
             personalInfo.fullName = `${profilePersonal.firstName || ''} ${profilePersonal.lastName || ''}`.trim();
-          } else if (userRecord?.username) {
+          } else if (userProfile?.fullName && userProfile.fullName !== "Candidate") {
+            personalInfo.fullName = userProfile.fullName;
+          } else if (userRecord?.username && userRecord.username !== "Candidate") {
             personalInfo.fullName = userRecord.username;
           }
         }
@@ -125,8 +127,8 @@ export const generateResumePdf = async ({ resumeData, template = "ATS Modern", f
     const firstName = rawFirstName.replace(/[^a-zA-Z0-9]/g, "") || "Candidate";
 
     // Last Name
-    const rawLastName = personalInfo.lastName || (nameParts.length > 1 ? nameParts.slice(1).join("_") : "Resume");
-    const lastName = rawLastName.replace(/[^a-zA-Z0-9_]/g, "") || "Resume";
+    const rawLastName = personalInfo.lastName || (nameParts.length > 1 ? nameParts.slice(1).join("_") : "NA");
+    const lastName = rawLastName.replace(/[^a-zA-Z0-9_]/g, "") || "NA";
 
     // Contact Number
     const rawPhone = personalInfo.phone || personalInfo.contactNo || personalInfo.phoneNumber || "";
