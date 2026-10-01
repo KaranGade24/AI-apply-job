@@ -808,6 +808,29 @@ export const runNaukriApplication = async ({
       );
 
       for (let loopStep = 1; loopStep <= 4; loopStep++) {
+        // Ensure activePage points to the most relevant open page in context
+        if (context) {
+          const openPages = context.pages().filter((p) => !p.isClosed());
+          const candidatePage =
+            openPages.find((p) => {
+              const u = (p.url() || "").toLowerCase();
+              return (
+                !u.includes("about:blank") &&
+                (!u.includes("naukri.com") || openPages.length === 1)
+              );
+            }) || openPages[openPages.length - 1];
+          if (candidatePage) {
+            activePage = candidatePage;
+          }
+        }
+
+        if (activePage && !activePage.isClosed()) {
+          await activePage.waitForLoadState("domcontentloaded").catch(() => {});
+          if ((activePage.url() || "").toLowerCase().includes("about:blank")) {
+            await safeWait(activePage, 1500);
+          }
+        }
+
         const extracted = await extractPageContent(activePage);
         const analysis = await classifyPageWithLlm(extracted, job, userId);
 
@@ -918,7 +941,7 @@ export const runNaukriApplication = async ({
       // Re-inspect form after the navigation loop
       formInspection = await inspectForm(activePage);
 
-      // If still no questionnaire fields on the final page, return the analyzed portal state gracefully (never throw 400)
+      // If still no questionnaire fields on the final page, check for email contact or prompt manual apply
       if (
         !formInspection.isQuestionnairePresent ||
         !formInspection.fields ||
@@ -931,29 +954,95 @@ export const runNaukriApplication = async ({
           userId,
         );
 
-        await updateApplicationStatus(
-          applicationId,
-          APPLICATION_STATUS.WAITING_FOR_REVIEW,
-          {
-            logMessage: `Employer portal active: ${finalAnalysis.summary || activePage.url()}`,
-          },
-        );
+        // Check if page or job text contains an employer / HR contact email
+        let detectedEmail = finalAnalysis.emailContact?.email || null;
+        if (!detectedEmail) {
+          const bodyText =
+            ((await activePage
+              .evaluate(() => document.body?.innerText || "")
+              .catch(() => "")) +
+              " " +
+              (job.description || "") +
+              " " +
+              (job.company || "")) ||
+            "";
+          const emailMatches = bodyText.match(
+            /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g,
+          );
+          if (emailMatches && emailMatches.length > 0) {
+            const valid = emailMatches.find(
+              (e) =>
+                !e.includes("naukri.com") &&
+                !e.includes("example.com") &&
+                !e.includes("w3.org") &&
+                !e.includes("sentry") &&
+                !e.includes("google") &&
+                !e.includes("schema.org"),
+            );
+            if (valid) detectedEmail = valid;
+          }
+        }
 
+        if (detectedEmail) {
+          const refId =
+            finalAnalysis.emailContact?.referenceId ||
+            finalAnalysis.matchedRole?.referenceId ||
+            "";
+          const subj = `Application: ${job.title}${refId ? ` (Ref: ${refId})` : ""}`;
+          await JobApplication.findByIdAndUpdate(applicationId, {
+            applicationMethod: "email",
+            "email.recipient": detectedEmail,
+            "email.subject": subj,
+            "email.body": `Dear Hiring Team,\n\nI am applying for the ${job.title} position at ${job.company}.${refId ? ` (Reference ID: ${refId})` : ""} My tailored ATS resume is attached for your review.\n\nBest regards,\n${userDoc?.fullName || "Applicant"}`,
+            status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
+          });
+
+          await updateApplicationStatus(
+            applicationId,
+            APPLICATION_STATUS.WAITING_FOR_REVIEW,
+            {
+              logMessage: `Direct email outreach prepared for ${detectedEmail}`,
+            },
+          );
+
+          return {
+            status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
+            isCompanySite: true,
+            emailContact: { email: detectedEmail, referenceId: refId },
+            message: `No online form link found on button. Found employer contact email (${detectedEmail}). Prepared direct email outreach draft for your review.`,
+          };
+        }
+
+        // If no email found either -> prompt user to apply manually
+        const manualMessage =
+          "The employer posting has no direct online application form or active button link. Please apply manually on the employer's careers site.";
         await JobApplication.findByIdAndUpdate(applicationId, {
           status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
+          "form.requiresHuman": true,
+          "form.humanReason": "MANUAL_APPLY_REQUIRED",
           pageAnalysis: {
             ...finalAnalysis,
             pageTitle: finalExtracted.title,
             currentUrl: activePage.url(),
             analyzedAt: new Date(),
+            manualApplyRequired: true,
+            manualApplyMessage: manualMessage,
           },
         });
 
+        await updateApplicationStatus(
+          applicationId,
+          APPLICATION_STATUS.WAITING_FOR_REVIEW,
+          {
+            logMessage: `Manual application required: No active online link or email found on job posting.`,
+          },
+        );
+
         return {
           status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
-          message:
-            finalAnalysis.summary ||
-            "Employer career portal reached. Ready to proceed.",
+          humanReason: "MANUAL_APPLY_REQUIRED",
+          manualApplyRequired: true,
+          message: manualMessage,
           pageAnalysis: finalAnalysis,
         };
       }

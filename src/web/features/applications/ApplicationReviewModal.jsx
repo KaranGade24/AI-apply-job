@@ -1992,6 +1992,37 @@ export const ApplicationReviewModal = ({
                   {isCompanySite && (
                     <div className="space-y-4">
                       <AgentActivityPanel applicationId={application?._id} />
+                      {/* Manual Application Required / No Online Form Banner */}
+                      {(application?.pageAnalysis?.manualApplyRequired ||
+                        application?.form?.humanReason === "MANUAL_APPLY_REQUIRED") && (
+                        <div className="p-4 rounded-xl border border-amber-300 bg-amber-50 text-amber-900 text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                          <div className="flex items-start gap-3">
+                            <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                            <div>
+                              <span className="font-bold text-amber-950 block">
+                                Manual Application Required
+                              </span>
+                              <p className="mt-0.5 text-amber-800">
+                                {application?.pageAnalysis?.manualApplyMessage ||
+                                  "The employer posting has no direct online application form or active button link. Please apply manually on the employer's website."}
+                              </p>
+                            </div>
+                          </div>
+                          <a
+                            href={
+                              application?.pageAnalysis?.currentUrl ||
+                              job.applicationUrl ||
+                              job.sourceUrl
+                            }
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1.5 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold transition-colors whitespace-nowrap shrink-0 shadow-xs"
+                          >
+                            Open Employer Site <ExternalLink className="w-3.5 h-3.5" />
+                          </a>
+                        </div>
+                      )}
+
                       <div className="p-4 rounded-xl border border-purple-200 bg-purple-50/70 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                         <div className="space-y-1">
                           <div className="flex items-center gap-2">
