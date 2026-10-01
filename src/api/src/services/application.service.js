@@ -365,6 +365,25 @@ export const submitMissingAnswersService = async (applicationId, userId, answers
       `Received ${answers.length} user answers for application ${applicationId}`
     );
 
+    // 1. If LangGraph workflow is actively paused waiting for user answers, resume it
+    try {
+      const { browserAgentGraph } = await import('../agent/graph/browserAgentGraph.js');
+      const threadConfig = {
+        configurable: {
+          thread_id: `app_thread_${applicationId}`,
+          checkpoint_ns: "browser_agent",
+        },
+      };
+      const stateSnapshot = await browserAgentGraph.getState(threadConfig).catch(() => null);
+      if (stateSnapshot && stateSnapshot.next && stateSnapshot.next.length > 0) {
+        const { submitWorkflowAnswers } = await import('./agentRunner.service.js');
+        await submitWorkflowAnswers(applicationId, userId, answers);
+        return await findApplicationById(applicationId);
+      }
+    } catch {
+      // Fall through to standard runner
+    }
+
     const isNaukri = isNaukriApplication(application);
     if (isNaukri) {
       try {
@@ -505,6 +524,25 @@ export const confirmFinalApplicationService = async (applicationId, userId, payl
       'CONFIRMED',
       `User confirmed final application ${applicationId}. Submitting...`
     );
+
+    // 0. If LangGraph workflow is actively paused at reviewGateNode, confirm and resume it
+    try {
+      const { browserAgentGraph } = await import('../agent/graph/browserAgentGraph.js');
+      const threadConfig = {
+        configurable: {
+          thread_id: `app_thread_${applicationId}`,
+          checkpoint_ns: "browser_agent",
+        },
+      };
+      const stateSnapshot = await browserAgentGraph.getState(threadConfig).catch(() => null);
+      if (stateSnapshot && stateSnapshot.next && stateSnapshot.next.length > 0) {
+        const { submitWorkflowReviewConfirmation } = await import('./agentRunner.service.js');
+        await submitWorkflowReviewConfirmation(applicationId, userId, payload.reviewHash || '', payload.confirmedAnswers || []);
+        return await findApplicationById(applicationId);
+      }
+    } catch {
+      // Fall through to standard runner
+    }
 
     // 1. Direct Email Application (e.g. InnoWise or employer specifies email / mailto)
     if (
