@@ -141,10 +141,13 @@ export const ApplicationReviewModal = ({
 
   const resolvedCandidateName =
     (candidateInfo?.fullName && candidateInfo.fullName !== "Candidate" ? candidateInfo.fullName : null) ||
+    (candidateInfo?.name && candidateInfo.name !== "Candidate" ? candidateInfo.name : null) ||
+    application?.resume?.tailoredResumeData?.personalInfo?.fullName ||
+    application?.resume?.parsedData?.personalInfo?.fullName ||
     (candidateInfo?.personal?.firstName ? `${candidateInfo.personal.firstName} ${candidateInfo.personal.lastName || ''}`.trim() : null) ||
-    application?.userProfile?.fullName ||
+    (application?.userProfile?.fullName && application.userProfile.fullName !== "Candidate" ? application.userProfile.fullName : null) ||
     (application?.userProfile?.personal?.firstName ? `${application.userProfile.personal.firstName} ${application.userProfile.personal.lastName || ''}`.trim() : null) ||
-    "Karan Santosh Gade";
+    "Candidate";
 
   // Compute robust effective review fields from form.reviewFields, form.fields, or form.answers
   const baseReviewFields =

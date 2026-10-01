@@ -68,25 +68,22 @@ export const tailorResumeForJobDescription = async ({
       ]);
     } catch (llmError) {
       await logError("resumeTailoringService.llm", llmError.message);
-      const targetSkills = jobDetails.skills || ["JavaScript", "React", "Node.js", "SQL"];
       const baseResume = candidateResume || {};
+      const basePersonal = baseResume.personalInfo || baseResume.personal || {};
       const safeBaseSkills = Array.isArray(baseResume.skills)
         ? baseResume.skills
         : (typeof baseResume.skills === "string" ? [baseResume.skills] : []);
 
       result = {
         tailoredResume: {
-          personalInfo: baseResume.personalInfo || {
-            fullName: "Candidate",
-            email: "candidate@example.com",
-          },
-          summary: `Experienced software developer skilled in ${targetSkills.slice(0, 4).join(", ")}. Strong track record building high-performance solutions for ${jobDetails.company || "innovative companies"}.`,
-          skills: Array.from(new Set([...safeBaseSkills, ...targetSkills])),
+          personalInfo: basePersonal,
+          summary: baseResume.summary || (safeBaseSkills.length > 0 ? `Experienced software engineer skilled in ${safeBaseSkills.slice(0, 5).join(", ")}.` : "Experienced software engineer with a strong track record of technical achievements."),
+          skills: safeBaseSkills,
           experience: baseResume.experience || [],
           education: baseResume.education || [],
           projects: baseResume.projects || [],
         },
-        resumeStrategy: "Fallback alignment due to LLM error",
+        resumeStrategy: "Original candidate resume content strictly preserved",
         error: llmError.message,
       };
     }

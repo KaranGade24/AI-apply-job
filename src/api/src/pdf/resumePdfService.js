@@ -127,8 +127,8 @@ export const generateResumePdf = async ({ resumeData, template = "ATS Modern", f
     const firstName = rawFirstName.replace(/[^a-zA-Z0-9]/g, "") || "Candidate";
 
     // Last Name
-    const rawLastName = personalInfo.lastName || (nameParts.length > 1 ? nameParts.slice(1).join("_") : "NA");
-    const lastName = rawLastName.replace(/[^a-zA-Z0-9_]/g, "") || "NA";
+    const rawLastName = personalInfo.lastName || (nameParts.length > 1 ? nameParts.slice(1).join("_") : "");
+    const lastName = rawLastName.replace(/[^a-zA-Z0-9_]/g, "");
 
     // Contact Number
     const rawPhone = personalInfo.phone || personalInfo.contactNo || personalInfo.phoneNumber || "";
@@ -138,8 +138,9 @@ export const generateResumePdf = async ({ resumeData, template = "ATS Modern", f
     // Random Cryptic Unique ID (8 hex chars)
     const randomCrypticId = crypto.randomBytes(4).toString("hex");
 
-    // Strictly format: <FirstName>_<LastName>_<ContactNo>_<RandomCrypticId>.pdf
-    const pdfFilename = `${firstName}_${lastName}_${contactNo}_${randomCrypticId}.pdf`;
+    // Strictly format: <FirstName>_<LastName>_<ContactNo>_<RandomCrypticId>.pdf or <FirstName>_<ContactNo>_<RandomCrypticId>.pdf
+    const namePrefix = lastName ? `${firstName}_${lastName}` : firstName;
+    const pdfFilename = `${namePrefix}_${contactNo}_${randomCrypticId}.pdf`;
     const outputPath = path.join("uploads", "resumes", pdfFilename);
 
     // Dynamic Robust Fitting Loop
