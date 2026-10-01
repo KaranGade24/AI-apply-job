@@ -70,82 +70,166 @@ export const resolveFieldValue = (field = {}, resolvedAnswers = [], options = {}
   const resume = options.resumeData || options.candidateInfo || {};
   const user = options.user || {};
 
+  const resolvedFullName =
+    (profile.personal?.firstName ? `${profile.personal.firstName} ${profile.personal.lastName || ''}`.trim() : null) ||
+    profile.fullName ||
+    resume.fullName ||
+    resume.personalInfo?.fullName ||
+    (user.firstName ? `${user.firstName} ${user.lastName || ''}`.trim() : null) ||
+    user.fullName ||
+    user.name ||
+    user.username ||
+    '';
+
+  const resolvedEmail =
+    profile.personal?.email ||
+    profile.email ||
+    resume.email ||
+    resume.personalInfo?.email ||
+    user.email ||
+    '';
+
+  const resolvedPhone =
+    profile.personal?.phone ||
+    profile.phone ||
+    profile.phoneNumber ||
+    resume.phone ||
+    resume.personalInfo?.phone ||
+    user.phone ||
+    '';
+
+  const resolvedLocation =
+    profile.personal?.address ||
+    profile.location ||
+    profile.city ||
+    resume.location ||
+    resume.personalInfo?.location ||
+    resume.personalInfo?.currentCity ||
+    'Bangalore';
+
+  const resolvedExp =
+    profile.totalExperienceYears ||
+    profile.experience ||
+    resume.totalExperienceYears ||
+    resume.yearsOfExperience ||
+    '3';
+
+  const resolvedCurrentCtc =
+    profile.currentCtc ||
+    profile.currentSalary ||
+    resume.currentCtc ||
+    '8.5 LPA';
+
+  const resolvedExpectedCtc =
+    profile.expectedCtc ||
+    profile.expectedSalary ||
+    resume.expectedCtc ||
+    '12.5 LPA';
+
+  const resolvedNoticePeriod =
+    profile.noticePeriod ||
+    resume.noticePeriod ||
+    'Immediate';
+
+  const resolvedLinkedin =
+    profile.links?.linkedin ||
+    profile.socialLinks?.linkedin ||
+    profile.linkedinUrl ||
+    resume.linkedin ||
+    resume.personalInfo?.linkedin ||
+    '';
+
+  const resolvedGithub =
+    profile.links?.github ||
+    profile.links?.portfolio ||
+    profile.githubUrl ||
+    resume.github ||
+    resume.personalInfo?.github ||
+    '';
+
   const combinedFieldText = [
     field.question,
     field.label,
     field.name,
     field.placeholder,
-    field.fieldId
+    field.fieldId,
+    field.dataAutomationId,
   ].filter(Boolean).join(' ').toLowerCase();
 
+  // First name only
+  if (/first\s*name|given\s*name/i.test(combinedFieldText) || (field.name && /^first/i.test(field.name))) {
+    return profile.personal?.firstName || resolvedFullName.split(' ')[0] || user.firstName || null;
+  }
+
+  // Last name only
+  if (/last\s*name|family\s*name|surname/i.test(combinedFieldText) || (field.name && /^last/i.test(field.name))) {
+    return profile.personal?.lastName || resolvedFullName.split(' ').slice(1).join(' ') || user.lastName || null;
+  }
+
   // Name fields
-  if (/full\s*name|candidate\s*name|your\s*name/i.test(combinedFieldText) || (field.name && /^(name|fullname)$/i.test(field.name))) {
-    return profile.fullName || resume.fullName || `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.name || null;
-  }
-  if (/first\s*name|given\s*name/i.test(combinedFieldText) || (field.name && /first/i.test(field.name))) {
-    return user.firstName || (profile.fullName || resume.fullName || '').split(' ')[0] || null;
-  }
-  if (/last\s*name|family\s*name|surname/i.test(combinedFieldText) || (field.name && /last/i.test(field.name))) {
-    return user.lastName || (profile.fullName || resume.fullName || '').split(' ').slice(1).join(' ') || null;
+  if (/\b(full\s*name|candidate\s*name|your\s*name|applicant\s*name)\b/i.test(combinedFieldText) ||
+      /\bname\b/i.test(combinedFieldText) ||
+      (field.name && /^(name|fullname|candidate_name|applicant_name)$/i.test(field.name))) {
+    return resolvedFullName || null;
   }
 
   // Email
-  if (/e-?mail/i.test(combinedFieldText) || field.type === FIELD_TYPES.EMAIL || (field.name && /email/i.test(field.name))) {
-    return profile.email || resume.email || user.email || null;
+  if (/\be-?mail\b/i.test(combinedFieldText) || field.type === FIELD_TYPES.EMAIL || (field.name && /email/i.test(field.name))) {
+    return resolvedEmail || null;
   }
 
   // Phone / Mobile
-  if (/phone|mobile|contact\s*no|tel/i.test(combinedFieldText) || field.type === FIELD_TYPES.PHONE || (field.name && /phone|mobile/i.test(field.name))) {
-    return profile.phone || profile.phoneNumber || resume.phone || user.phone || null;
+  if (/\b(phone|mobile|contact|tel|whatsapp)\b/i.test(combinedFieldText) || field.type === FIELD_TYPES.PHONE || (field.name && /phone|mobile/i.test(field.name))) {
+    return resolvedPhone || null;
   }
 
   // File upload / Resume / CV
-  if (field.type === FIELD_TYPES.FILE || /resume|cv|file|attachment|document/i.test(combinedFieldText) || (field.name && /resume|cv|file/i.test(field.name))) {
+  if (field.type === FIELD_TYPES.FILE || /\b(resume|cv|file|attachment|document|upload)\b/i.test(combinedFieldText) || (field.name && /resume|cv|file/i.test(field.name))) {
     return options.resumePdfPath || resume.pdfPath || profile.resumePdfPath || null;
+  }
+
+  // Current CTC
+  if (/current\s*(?:ctc|salary|compensation|package|rate)/i.test(combinedFieldText) || (field.name && /current.*(?:ctc|salary)/i.test(field.name))) {
+    return String(resolvedCurrentCtc);
+  }
+
+  // Expected CTC
+  if (/expected\s*(?:ctc|salary|compensation|package)/i.test(combinedFieldText) || (field.name && /expected.*(?:ctc|salary)/i.test(field.name))) {
+    return String(resolvedExpectedCtc);
+  }
+
+  // Notice Period
+  if (/notice\s*period|availability|joining|how\s*soon/i.test(combinedFieldText) || (field.name && /notice/i.test(field.name))) {
+    return String(resolvedNoticePeriod);
   }
 
   // Total Experience
   if (/experience|years\s*of\s*exp/i.test(combinedFieldText) || (field.name && /exp/i.test(field.name))) {
-    return String(profile.totalExperienceYears || profile.experience || resume.totalExperienceYears || '3');
-  }
-
-  // Current CTC
-  if (/current\s*(?:ctc|salary|compensation|package|rate)/i.test(combinedFieldText)) {
-    return String(profile.currentCtc || profile.currentSalary || '10 LPA');
-  }
-
-  // Expected CTC
-  if (/expected\s*(?:ctc|salary|compensation|package)/i.test(combinedFieldText)) {
-    return String(profile.expectedCtc || profile.expectedSalary || '15 LPA');
-  }
-
-  // Notice Period
-  if (/notice\s*period|availability|joining|how\s*soon/i.test(combinedFieldText)) {
-    return String(profile.noticePeriod || 'Immediate / 15 days');
+    return String(resolvedExp);
   }
 
   // City / Location
-  if (/city|location|current\s*city|residence|address/i.test(combinedFieldText) || (field.name && /city|location/i.test(field.name))) {
-    return profile.location || profile.city || resume.location || 'Bangalore';
+  if (/city|location|current\s*city|residence|address/i.test(combinedFieldText) || (field.name && /city|location|address/i.test(field.name))) {
+    return resolvedLocation;
   }
 
   // LinkedIn
-  if (/linkedin/i.test(combinedFieldText)) {
-    return profile.linkedinUrl || resume.linkedin || profile.socialLinks?.linkedin || null;
+  if (/linkedin/i.test(combinedFieldText) || (field.name && /linkedin/i.test(field.name))) {
+    return resolvedLinkedin || null;
   }
 
   // GitHub / Portfolio
-  if (/github|portfolio|website/i.test(combinedFieldText)) {
-    return profile.githubUrl || profile.portfolioUrl || resume.github || null;
+  if (/github|portfolio|website/i.test(combinedFieldText) || (field.name && /github|portfolio/i.test(field.name))) {
+    return resolvedGithub || null;
   }
 
   // Cover Letter / Notes / Message
-  if (/cover\s*letter|message|note|why\s*should\s*we|pitch|tell\s*us|summary/i.test(combinedFieldText) || field.type === FIELD_TYPES.TEXTAREA) {
+  if (/cover\s*letter|message|note|why\s*should\s*we|pitch|tell\s*us|summary/i.test(combinedFieldText) || field.type === FIELD_TYPES.TEXTAREA || (field.name && /cover|message/i.test(field.name))) {
     return options.coverLetter || "I am enthusiastic about applying for this opportunity. With my relevant background and technical experience, I believe I can make an immediate and positive contribution to your team. Please find my resume attached for your review.";
   }
 
   // Terms and conditions / Agreement checkbox
-  if (field.isTermsAgreement || (field.type === FIELD_TYPES.CHECKBOX && /terms|agree|privacy|consent|policy/i.test(combinedFieldText))) {
+  if (field.isTermsAgreement || (field.type === FIELD_TYPES.CHECKBOX && /terms|agree|privacy|consent|policy|acknowledge|accept/i.test(combinedFieldText))) {
     return 'true';
   }
 

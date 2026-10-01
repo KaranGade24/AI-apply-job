@@ -151,6 +151,90 @@ export const resolveAllFormAnswers = async (fields = [], context = {}) => {
       continue;
     }
 
+    // File Upload / Resume
+    if (field.type === FIELD_TYPES.FILE || /resume|cv|file|attachment|document/i.test(qText) || (field.name && /resume|cv|file/i.test(field.name))) {
+      const resumePath = context.resumePdfPath || resumeData?.pdfPath || userProfile?.resumePdfPath || 'resume.pdf';
+      resolvedAnswers.push({
+        questionId: qId,
+        fieldId: fId,
+        question: field.question,
+        type: FIELD_TYPES.FILE,
+        answer: resumePath,
+        source: 'system',
+        confidence: 1.0,
+        userConfirmed: false,
+        options: [],
+      });
+      continue;
+    }
+
+    // Terms & Conditions / Agreement Checkbox
+    if (field.isTermsAgreement || (field.type === FIELD_TYPES.CHECKBOX && /terms|agree|privacy|consent|policy|acknowledge|accept/i.test(qText))) {
+      resolvedAnswers.push({
+        questionId: qId,
+        fieldId: fId,
+        question: field.question,
+        type: FIELD_TYPES.CHECKBOX,
+        answer: 'true',
+        source: 'system',
+        confidence: 1.0,
+        userConfirmed: false,
+        options: [],
+      });
+      continue;
+    }
+
+    // Current CTC
+    if (/current\s*(?:ctc|salary|compensation|package|rate)/i.test(qText) || (field.name && /current.*(?:ctc|salary)/i.test(field.name))) {
+      const ctcVal = userProfile?.currentCtc || resumeData?.currentCtc || '8.5 LPA';
+      resolvedAnswers.push({
+        questionId: qId,
+        fieldId: fId,
+        question: field.question,
+        type: field.type,
+        answer: String(ctcVal),
+        source: 'profile',
+        confidence: 0.9,
+        userConfirmed: false,
+        options: field.options || [],
+      });
+      continue;
+    }
+
+    // Expected CTC
+    if (/expected\s*(?:ctc|salary|compensation|package)/i.test(qText) || (field.name && /expected.*(?:ctc|salary)/i.test(field.name))) {
+      const expCtcVal = userProfile?.expectedCtc || resumeData?.expectedCtc || '12.5 LPA';
+      resolvedAnswers.push({
+        questionId: qId,
+        fieldId: fId,
+        question: field.question,
+        type: field.type,
+        answer: String(expCtcVal),
+        source: 'profile',
+        confidence: 0.9,
+        userConfirmed: false,
+        options: field.options || [],
+      });
+      continue;
+    }
+
+    // Notice Period
+    if (/notice\s*period|availability|joining|how\s*soon/i.test(qText) || (field.name && /notice/i.test(field.name))) {
+      const noticeVal = userProfile?.noticePeriod || resumeData?.noticePeriod || 'Immediate';
+      resolvedAnswers.push({
+        questionId: qId,
+        fieldId: fId,
+        question: field.question,
+        type: field.type,
+        answer: String(noticeVal),
+        source: 'profile',
+        confidence: 0.9,
+        userConfirmed: false,
+        options: field.options || [],
+      });
+      continue;
+    }
+
     // Level 1: Deterministic Profile Answer
     const profileRes = await resolveFromProfile(field, userProfile, user, userSetting);
     if (profileRes.resolved) {

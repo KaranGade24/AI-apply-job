@@ -17,7 +17,7 @@ import { generateResumePdf } from "../pdf/resumePdfService.js";
 import { sendApplicationEmail } from "../integrations/email/emailService.js";
 import { formatAndCleanEmailBody } from "../agent/prompt/applicationEmail.js";
 import { getActiveResumeByUserId, findOriginalResumeByUserId } from "../repositories/resume.repository.js";
-import { findUserProfileByUserId } from "../repositories/user.repository.js";
+import { findUserProfileByUserId, findUserById } from "../repositories/user.repository.js";
 import { getGeminiModel } from "../agent/config/modelConfig.js";
 import { runNaukriApplication } from "../integrations/applicationPlatforms/naukri/naukriApplication.js";
 import { runGoogleFormApplication } from "../application/methods/googleFormApplicationMethod.js";
@@ -613,13 +613,39 @@ export const submitFinalUnknownApplicationService = async (applicationId, userId
     ];
 
     const userProfile = await findUserProfileByUserId(userId).catch(() => null);
+    const user = await findUserById(userId).catch(() => null);
     const resumeData = await findOriginalResumeByUserId(userId).catch(() => null);
+    const activeResume = await getActiveResumeByUserId(userId).catch(() => null);
+
+    // Ensure valid PDF path exists
+    let effectivePdfPath = application.resume?.pdfPath || activeResume?.pdfPath || null;
+    if (!effectivePdfPath && (activeResume || resumeData)) {
+      try {
+        const tailoredOrActive = application.resume?.tailoredResumeData || activeResume?.parsedData || resumeData?.parsedData || resumeData;
+        effectivePdfPath = await generateResumePdf({
+          resumeData: tailoredOrActive,
+          targetPages: RESUME_PAGE_COUNT.SINGLE_PAGE,
+          template: RESUME_TEMPLATES.MODERN,
+          userId,
+        });
+        if (effectivePdfPath) {
+          await updateApplicationResume(applicationId, { pdfPath: effectivePdfPath });
+        }
+      } catch (pdfErr) {
+        await logError('submitFinalUnknownApplicationService.pdfGen', pdfErr.message);
+      }
+    }
+
+    const combinedResume = application.resume?.tailoredResumeData || activeResume?.parsedData || resumeData?.parsedData || resumeData || {};
 
     if (currentFields.length > 0) {
       await fillFormFields(page, currentFields, allAnswers, {
-        resumePdfPath: application.resume?.pdfPath,
+        resumePdfPath: effectivePdfPath,
         userProfile,
-        resumeData,
+        user,
+        resumeData: combinedResume,
+        candidateInfo: combinedResume,
+        job: application.jobId || {},
       });
       await verifyFilledFields(page, allAnswers, currentFields);
     }

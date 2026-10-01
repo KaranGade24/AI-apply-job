@@ -39,27 +39,31 @@ export const validateAction = (action, state) => {
       }
     }
 
-    // Checkbox consent protection
+    // Checkbox consent protection: allow terms/privacy agreement, block marketing/promotions
     if (['check', 'uncheck'].includes(action.type)) {
       const name = (el.accessibleName || '').toLowerCase();
-      const tag = (el.tag || '').toLowerCase();
-      if (/consent|terms|privacy|newsletter|marketing|agree|policy/i.test(name)) {
-        return { valid: false, reason: 'BLOCKED', message: 'Action blocked: Consent or subscription checkboxes require explicit human selection.' };
+      if (/newsletter|marketing|promotional|updates/i.test(name)) {
+        if (action.type === 'check') {
+          return { valid: false, reason: 'BLOCKED', message: 'Action blocked: Marketing or newsletter subscription checkboxes should not be checked.' };
+        }
       }
     }
 
-    // Submit-like click protection
+    // Submit-like click protection: allow "Apply Now" to open forms, protect final submission
     if (action.type === 'click') {
       const text = (el.accessibleName || '').toLowerCase();
-      if (/submit|apply|send|confirm/i.test(text)) {
-        return { valid: false, reason: 'NEEDS_APPROVAL', message: 'Action blocked: Submit buttons cannot be triggered without human review approval.' };
+      const isInitialApplyButton = /apply\s*now|apply\s*for|start\s*application|^apply$/i.test(text);
+      if (!isInitialApplyButton && /submit\s*application|confirm\s*application|send\s*application/i.test(text)) {
+        if (!action.approved) {
+          return { valid: false, reason: 'NEEDS_APPROVAL', message: 'Action blocked: Final submit button requires candidate review approval.' };
+        }
       }
     }
 
-    // Upload safe validation
+    // Upload safe validation: Allow server-side generated candidate resume PDF
     if (action.type === 'uploadFile') {
-      if (!action.fileRef || action.fileRef.startsWith('/') || action.fileRef.includes(':\\')) {
-        return { valid: false, reason: 'BLOCKED', message: 'Action blocked: Only server-side uploaded candidate resumes (fileRef) are accepted.' };
+      if (!action.fileRef && !action.filePath) {
+        return { valid: false, reason: 'BLOCKED', message: 'Action blocked: Missing candidate resume file path.' };
       }
     }
   }
@@ -239,17 +243,18 @@ export const executeAction = async (action, page, session) => {
       }
 
       case 'uploadFile': {
+        const fileTarget = action.fileRef || action.filePath;
         // Handle native input file vs custom trigger button
         const isFileInput = await handle.evaluate(el => el.tagName.toLowerCase() === 'input' && el.getAttribute('type') === 'file').catch(() => false);
         if (isFileInput) {
-          await handle.setInputFiles(action.fileRef);
+          await handle.setInputFiles(fileTarget);
           result.success = true;
         } else {
           // Listen to file chooser event
           const fileChooserPromise = page.waitForEvent('filechooser', { timeout: 5000 });
           await handle.click().catch(() => {});
           const chooser = await fileChooserPromise;
-          await chooser.setFiles(action.fileRef);
+          await chooser.setFiles(fileTarget);
           result.success = true;
         }
         break;

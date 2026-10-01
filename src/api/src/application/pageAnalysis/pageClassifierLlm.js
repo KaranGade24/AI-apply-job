@@ -24,12 +24,14 @@ export const PAGE_STATES = {
  *
  * @param {object} normalizedState
  * @param {string} [userId]
+ * @param {string} [screenshotBase64]
  * @returns {Promise<{ state: string, confidence: number, hasStepper: boolean, currentStep: number, totalSteps: number, activeStepName: string, isFormClosed: boolean, reason: string }>}
  */
-export const classifyPageStateLlm = async (normalizedState, userId = null) => {
+export const classifyPageStateLlm = async (normalizedState, userId = null, screenshotBase64 = null) => {
   try {
     const prompt = `You are a Stage 1 Semantic Browser State Classifier.
 Analyze the following normalized browser state and determine which EXPLICIT PAGE STATE best matches this page.
+${screenshotBase64 ? 'Inspect the attached visual screenshot of the page to verify layout, headings, buttons, and state indicators with high precision.' : ''}
 
 EXPLICIT PAGE STATES:
 - "JOB_PAGE": A job posting, job description, or list of jobs.
@@ -75,7 +77,14 @@ RETURN STRICT JSON ONLY MATCHING THE FOLLOWING SCHEMA. Do NOT include markdown b
 }`;
 
     const model = await getGeminiModel(userId);
-    const response = await model.invoke(prompt);
+    const userContent = screenshotBase64
+      ? [
+          { type: 'text', text: prompt },
+          { type: 'image_url', image_url: `data:image/png;base64,${screenshotBase64}` },
+        ]
+      : prompt;
+
+    const response = await model.invoke(userContent);
     const content = (response.content || '').trim();
 
     const cleaned = content.replace(/^```json/i, '').replace(/^```/, '').replace(/```$/, '').trim();
@@ -122,9 +131,10 @@ RETURN STRICT JSON ONLY MATCHING THE FOLLOWING SCHEMA. Do NOT include markdown b
  * @param {object} extractedPageContent - Output from pageContentExtractor
  * @param {object} job - Target Job details
  * @param {string} [userId]
+ * @param {string} [screenshotBase64] - Viewport screenshot for visual classification
  * @returns {Promise<object>} Legacy formatted classification details
  */
-export const classifyPageWithLlm = async (extractedPageContent, job = {}, userId = null) => {
+export const classifyPageWithLlm = async (extractedPageContent, job = {}, userId = null, screenshotBase64 = null) => {
   const normalized = {
     url: extractedPageContent.url || '',
     title: extractedPageContent.title || '',
@@ -150,7 +160,7 @@ export const classifyPageWithLlm = async (extractedPageContent, job = {}, userId
     textSnippet: extractedPageContent.textSnippet || ''
   };
 
-  const pageStateResult = await classifyPageStateLlm(normalized, userId);
+  const pageStateResult = await classifyPageStateLlm(normalized, userId, screenshotBase64);
 
   // Map explicit states back to raw legacy strings
   let legacyPageType = 'external_ats';

@@ -14,8 +14,12 @@ import { normalizeQuestionText } from '../form/formNormalizer.js';
 export const resolveFromProfile = (field, userProfile = {}, user = {}, userSetting = {}) => {
   const q = normalizeQuestionText(field.question || field.placeholder || field.name || '');
 
-  // 1. Full Name (Precedence safe implementation)
-  if (/full\s*name|candidate\s*name|your\s*name|first\s*name/i.test(q)) {
+  // 1. Full Name / Name / First / Last (Precedence safe implementation)
+  const isNameField = /^(name|fullname)$/i.test(q) ||
+    /full\s*name|candidate\s*name|your\s*name|applicant\s*name|contact\s*name/i.test(q) ||
+    (field.name && /^(name|fullname|candidate_name|applicant_name)$/i.test(field.name));
+
+  if (isNameField) {
     let name = userSetting?.fullName || '';
     let path = 'userSetting.fullName';
 
@@ -45,8 +49,36 @@ export const resolveFromProfile = (field, userProfile = {}, user = {}, userSetti
     }
   }
 
+  // First name only
+  if (/first\s*name|given\s*name/i.test(q) || (field.name && /^first/i.test(field.name))) {
+    const fName = userProfile?.personal?.firstName || (userProfile?.fullName || user?.fullName || user?.name || '').split(' ')[0];
+    if (fName) {
+      return {
+        resolved: true,
+        value: fName,
+        source: 'profile',
+        sourcePath: 'userProfile.personal.firstName',
+        confidence: 1.0
+      };
+    }
+  }
+
+  // Last name only
+  if (/last\s*name|family\s*name|surname/i.test(q) || (field.name && /^last/i.test(field.name))) {
+    const lName = userProfile?.personal?.lastName || (userProfile?.fullName || user?.fullName || user?.name || '').split(' ').slice(1).join(' ');
+    if (lName) {
+      return {
+        resolved: true,
+        value: lName,
+        source: 'profile',
+        sourcePath: 'userProfile.personal.lastName',
+        confidence: 1.0
+      };
+    }
+  }
+
   // 2. Email
-  if (/e-?mail/i.test(q)) {
+  if (/e-?mail/i.test(q) || field.type === 'email' || (field.name && /email/i.test(field.name))) {
     let email = userSetting?.email;
     let path = 'userSetting.email';
 
@@ -75,7 +107,7 @@ export const resolveFromProfile = (field, userProfile = {}, user = {}, userSetti
   }
 
   // 3. Phone
-  if (/phone|mobile|contact\s*no/i.test(q)) {
+  if (/phone|mobile|contact\s*no|tel|whatsapp/i.test(q) || field.type === 'phone' || (field.name && /phone|mobile/i.test(field.name))) {
     let phone = userSetting?.phone;
     let path = 'userSetting.phone';
 

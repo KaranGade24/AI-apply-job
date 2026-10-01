@@ -8,6 +8,8 @@ import {
   AGENT_LOOP_LIMITS,
 } from '../../constant/application.constant.js';
 import { BrowserManager } from '../../browser/browserManager.js';
+import { takeScreenshot } from '../../browser/screenshot/screenshotService.js';
+import { shouldUseVision } from '../../browser/screenshot/visionPolicy.js';
 import { extractPageContent } from '../pageAnalysis/pageContentExtractor.js';
 import { normalizePage } from '../pageAnalysis/pageNormalizer.js';
 import { classifyPageWithLlm } from '../pageAnalysis/pageClassifierLlm.js';
@@ -43,6 +45,7 @@ import {
 } from '../../services/googleSession.service.js';
 import { JobApplication } from '../../model/JobApplication.js';
 import { BrowserSessionRepository } from '../../repositories/browserSession.repository.js';
+import { findUserProfileByUserId, findUserById } from '../../repositories/user.repository.js';
 
 /**
  * Checks whether the current page classification should trigger a method handoff.
@@ -175,26 +178,33 @@ const executeFormMode = async (page, state, job, candidateInfo, userId, applicat
   const MAX_STEP_ITERATIONS = 15; // Safety: prevent infinite stepper loops
   let stepIteration = 0;
 
+  const dbProfile = userId ? await findUserProfileByUserId(userId).catch(() => null) : null;
+  const dbUser = userId ? await findUserById(userId).catch(() => null) : null;
+
   // Shared answer resolution context — built once, reused across steps
   const resolverContext = {
+    resumePdfPath,
     userProfile: {
-      fullName: candidateInfo?.personalInfo?.fullName || candidateInfo?.fullName || candidateInfo?.name || '',
-      email: candidateInfo?.personalInfo?.email || candidateInfo?.email || '',
-      phone: candidateInfo?.personalInfo?.phone || candidateInfo?.phone || candidateInfo?.phoneNumber || '',
-      location: candidateInfo?.personalInfo?.location || candidateInfo?.location || candidateInfo?.city || '',
-      totalExperienceYears: candidateInfo?.totalExperienceYears || candidateInfo?.experience || '3',
-      currentCtc: candidateInfo?.currentCtc || '10 LPA',
-      expectedCtc: candidateInfo?.expectedCtc || '15 LPA',
-      noticePeriod: candidateInfo?.noticePeriod || 'Immediate',
-      linkedinUrl: candidateInfo?.personalInfo?.linkedin || candidateInfo?.linkedinUrl || candidateInfo?.linkedin || '',
-      githubUrl: candidateInfo?.personalInfo?.github || candidateInfo?.githubUrl || candidateInfo?.github || '',
+      fullName: candidateInfo?.personalInfo?.fullName || candidateInfo?.fullName || candidateInfo?.name || dbProfile?.fullName || '',
+      email: candidateInfo?.personalInfo?.email || candidateInfo?.email || dbUser?.email || '',
+      phone: candidateInfo?.personalInfo?.phone || candidateInfo?.phone || candidateInfo?.phoneNumber || dbProfile?.personal?.phone || '',
+      location: candidateInfo?.personalInfo?.location || candidateInfo?.location || candidateInfo?.city || dbProfile?.personal?.address || '',
+      totalExperienceYears: candidateInfo?.totalExperienceYears || candidateInfo?.experience || dbProfile?.totalExperienceYears || '3',
+      currentCtc: candidateInfo?.currentCtc || dbProfile?.currentCtc || '8.5 LPA',
+      expectedCtc: candidateInfo?.expectedCtc || dbProfile?.expectedCtc || '12.5 LPA',
+      noticePeriod: candidateInfo?.noticePeriod || dbProfile?.noticePeriod || 'Immediate',
+      linkedinUrl: candidateInfo?.personalInfo?.linkedin || candidateInfo?.linkedinUrl || dbProfile?.links?.linkedin || '',
+      githubUrl: candidateInfo?.personalInfo?.github || candidateInfo?.githubUrl || dbProfile?.links?.github || '',
+      ...(dbProfile?.toObject ? dbProfile.toObject() : (dbProfile || {})),
       ...(candidateInfo?.personalInfo || {}),
       ...(candidateInfo || {}),
     },
     user: {
-      username: candidateInfo?.personalInfo?.fullName || candidateInfo?.fullName || candidateInfo?.name || 'Candidate',
-      email: candidateInfo?.personalInfo?.email || candidateInfo?.email || '',
-      phone: candidateInfo?.personalInfo?.phone || candidateInfo?.phone || '',
+      username: candidateInfo?.personalInfo?.fullName || candidateInfo?.fullName || candidateInfo?.name || dbUser?.username || 'Candidate',
+      email: candidateInfo?.personalInfo?.email || candidateInfo?.email || dbUser?.email || '',
+      phone: candidateInfo?.personalInfo?.phone || candidateInfo?.phone || dbUser?.phone || '',
+      firstName: dbUser?.firstName || dbProfile?.personal?.firstName || '',
+      lastName: dbUser?.lastName || dbProfile?.personal?.lastName || '',
     },
     userSetting: {},
     resumeData: candidateInfo || {},
@@ -653,24 +663,52 @@ export const executeAgentLoop = async ({
         // Form mode found no fields — continue with the normal loop
       }
 
-      // === DECIDE NEXT ACTION (Stage 2) ===
-      const decision = await decideNextAction(normalizedState, state, job, pageClassification, userId);
+      // Evaluate vision and take highlighted screenshot if helpful
+      let screenshotBase64 = null;
+      try {
+        const visionDecision = shouldUseVision(normalizedState, {
+          consecutiveFailures: state.counters?.consecutiveFailures || 0,
+          agentRequested: (state.counters?.totalDecisions || 0) === 0,
+        });
+        if (visionDecision.useVision) {
+          screenshotBase64 = await takeScreenshot(page, { highlight: true }).catch(() => null);
+        }
+      } catch {
+        screenshotBase64 = null;
+      }
+
+      // === DECIDE NEXT ACTION (Stage 2) with multimodal vision ===
+      const decisionResult = await decideNextAction(
+        normalizedState,
+        state,
+        job,
+        pageClassification,
+        userId,
+        null,
+        screenshotBase64
+      );
       state.counters.totalDecisions += 1;
 
+      // Normalize decision
+      const decisionType = typeof decisionResult.decision === 'string'
+        ? decisionResult.decision
+        : (decisionResult.decision?.type || 'ACT');
+
       // === HANDLE CONTROL DECISIONS ===
-      if (decision.decision.type === CONTROL_DECISIONS.HUMAN_REQUIRED) {
+      if (decisionType === 'ASK_HUMAN' || decisionType === CONTROL_DECISIONS.HUMAN_REQUIRED) {
+        const reason = decisionResult.reason || decisionResult.decision?.reason || 'Human action required';
         const storageState = await BrowserManager.captureStorageState(context).catch(() => null);
         state.pendingHumanAction = {
-          reason: decision.decision.reason || 'Human action required',
+          reason,
           savedUrl: page.url(),
           savedStorageState: storageState,
         };
         await persistState(applicationId, state);
-        await addWorkflowLog(applicationId, 'HUMAN_REQUIRED', decision.decision.reason || 'Human action required');
+        await addWorkflowLog(applicationId, 'HUMAN_REQUIRED', reason);
 
         if (applicationId) {
           await updateApplicationStatus(applicationId, APPLICATION_STATUS.HUMAN_REQUIRED, {
-            logMessage: decision.decision.reason || 'Human intervention required.',
+            logMessage: reason,
           });
         }
 
@@ -680,11 +718,11 @@ export const executeAgentLoop = async ({
           agentState: state,
           pageUrl: page.url(),
           pageClassification,
-          message: decision.decision.reason || 'Human action required.',
+          message: reason,
         };
       }
 
-      if (decision.decision.type === CONTROL_DECISIONS.FINISH) {
+      if (decisionType === 'FINISH' || decisionType === CONTROL_DECISIONS.FINISH) {
         await logJobEvent('agentLoop', 'FINISH', 'Agent detected application submission success');
         await addWorkflowLog(applicationId, 'FINISH', 'Application submitted successfully');
         await persistState(applicationId, state);
@@ -698,33 +736,59 @@ export const executeAgentLoop = async ({
         };
       }
 
-      if (decision.decision.type === CONTROL_DECISIONS.HANDOFF) {
-        state.discoveredMethod = decision.decision.method;
+      if (decisionType === 'HANDOFF' || decisionType === CONTROL_DECISIONS.HANDOFF) {
+        const method = decisionResult.method || decisionResult.decision?.method || 'unknown';
+        state.discoveredMethod = method;
         await persistState(applicationId, state);
 
         return {
           status: APPLICATION_STATUS.AI_RUNNING,
           terminalState: null,
           handoff: {
-            method: decision.decision.method,
+            method,
             url: page.url(),
             pageClassification,
           },
           agentState: state,
           pageUrl: page.url(),
-          message: `Handoff to ${decision.decision.method} engine.`,
+          message: `Handoff to ${method} engine.`,
+        };
+      }
+
+      // If decision is ACT, build concrete browser action
+      let browserAction = null;
+      if (decisionResult.decision && typeof decisionResult.decision === 'object' && decisionResult.decision.type) {
+        browserAction = decisionResult.decision;
+      } else {
+        const targetId = decisionResult.targetElementId;
+        const targetEl = (normalizedState.interactiveElements || normalizedState.buttons || []).find(
+          el => el.elementId === targetId || el.id === targetId
+        );
+
+        let actionType = BROWSER_ACTIONS.CLICK;
+        if (/fill|input|type|enter/i.test(decisionResult.intent)) {
+          actionType = BROWSER_ACTIONS.FILL;
+        } else if (/scroll/i.test(decisionResult.intent)) {
+          actionType = BROWSER_ACTIONS.SCROLL;
+        }
+
+        browserAction = {
+          type: actionType,
+          target: targetEl || { selector: targetId, text: decisionResult.intent },
+          value: decisionResult.value || '',
+          intent: decisionResult.intent,
         };
       }
 
       // === VALIDATE BROWSER ACTION ===
-      if (!Object.values(BROWSER_ACTIONS).includes(decision.decision.type)) {
-        await logJobEvent('agentLoop', 'INVALID_ACTION', `Non-browser action in execution path: ${decision.decision.type}`);
+      if (!browserAction || !Object.values(BROWSER_ACTIONS).includes(browserAction.type)) {
+        await logJobEvent('agentLoop', 'INVALID_ACTION', `Non-browser action in execution path: ${browserAction?.type || decisionType}`);
         continue;
       }
 
       // === URL VALIDATION (for navigate actions) ===
-      if (decision.decision.type === BROWSER_ACTIONS.NAVIGATE) {
-        const targetUrl = decision.decision.target?.url || '';
+      if (browserAction.type === BROWSER_ACTIONS.NAVIGATE) {
+        const targetUrl = browserAction.target?.url || '';
         const urlCheck = isUrlSafe(targetUrl, state, normalizedState);
         if (!urlCheck.safe) {
           await logJobEvent('agentLoop', 'URL_REJECTED', `Unsafe URL rejected: ${targetUrl} — ${urlCheck.reason}`);
@@ -736,7 +800,7 @@ export const executeAgentLoop = async ({
       // === EXECUTE BROWSER ACTION ===
       previousNormalized = normalizedState;
 
-      const actionResult = await executeSingleBrowserAction(page, decision.decision, {
+      const actionResult = await executeSingleBrowserAction(page, browserAction, {
         resumePdfPath,
         context,
       });
