@@ -57,6 +57,23 @@ const isApplicationLocked = (status) => {
 };
 
 /**
+ * Checks if an application is associated with a Naukri job listing or platform
+ */
+const isNaukriApplication = (application) => {
+  if (!application) return false;
+  return Boolean(
+    application.naukriDetails?.jobId ||
+    application.job?.source === 'naukri' ||
+    application.jobId?.source === 'naukri' ||
+    application.applicationMethod === 'naukri' ||
+    application.applicationMethod === 'naukri_direct' ||
+    (typeof application.jobId?.applicationUrl === 'string' && application.jobId.applicationUrl.includes('naukri.com')) ||
+    (typeof application.jobId?.sourceUrl === 'string' && application.jobId.sourceUrl.includes('naukri.com')) ||
+    (typeof application.workflow?.agentState?.pendingHumanAction?.savedUrl === 'string' && application.workflow.agentState.pendingHumanAction.savedUrl.includes('naukri.com'))
+  );
+};
+
+/**
  * Safely verifies if an application belongs to the requesting user
  */
 const isUserAuthorized = (docUserId, reqUserId) => {
@@ -237,11 +254,7 @@ export const approveAndSendApplication = async (applicationId, userId) => {
     }
 
     // Check if application is for a Naukri job
-    const isNaukriJob =
-      application.jobId?.source === 'naukri' ||
-      application.applicationMethod === 'naukri_direct' ||
-      application.applicationMethod === 'naukri' ||
-      application.applicationMethod === 'company_site';
+    const isNaukriJob = isNaukriApplication(application);
 
     if (isNaukriJob) {
       await logJobEvent(
@@ -352,7 +365,7 @@ export const submitMissingAnswersService = async (applicationId, userId, answers
       `Received ${answers.length} user answers for application ${applicationId}`
     );
 
-    const isNaukri = Boolean(application.naukriDetails?.jobId || application.job?.source === 'naukri');
+    const isNaukri = isNaukriApplication(application);
     if (isNaukri) {
       await runNaukriApplication({
         applicationId,
@@ -507,7 +520,7 @@ export const confirmFinalApplicationService = async (applicationId, userId, payl
       return await submitFinalUnknownApplicationService(applicationId, userId, payload);
     }
 
-    const isNaukri = Boolean(application.naukriDetails?.jobId || application.job?.source === 'naukri');
+    const isNaukri = isNaukriApplication(application);
     if (isNaukri) {
       await runNaukriApplication({
         applicationId,
@@ -1059,7 +1072,7 @@ export const refillApplicationFormService = async (applicationId, userId, answer
       `Refilling form in browser for application ${applicationId} with ${answers.length} updated answers...`
     );
 
-    const isNaukri = Boolean(application.naukriDetails?.jobId || application.job?.source === 'naukri');
+    const isNaukri = isNaukriApplication(application);
     if (isNaukri) {
       await runNaukriApplication({
         applicationId,
