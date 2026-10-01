@@ -6,9 +6,10 @@ import { sendApplicationEmail } from '../../integrations/email/emailService.js';
 import { getGeminiModel } from '../../agent/config/modelConfig.js';
 import { updateApplicationStatus, updateApplicationEmail } from '../../repositories/application.repository.js';
 import { APPLICATION_STATUS } from '../../constant/application.constant.js';
-import { resolveGoogleFormAnswers } from '../googleForm/googleFormFiller.js';
 import { inspectForm } from '../form/formInspector.js';
 import { formatAndCleanEmailBody } from '../../agent/prompt/applicationEmail.js';
+import { maskValue } from '../../utils/redact.js';
+import { runUnknownAgentLoop } from '../unknown/unknownAgent.js';
 
 /**
  * Runs the full Unknown application method workflow.
@@ -67,6 +68,7 @@ export const runUnknownApplicationMethod = async ({
       job: jobDetails,
       userId,
       sessionState,
+      applicationId,
     });
 
     const { detectedMethod } = pageResult;
@@ -140,34 +142,24 @@ ${candidateName}`;
         }
       }
 
-      const sendResult = await sendApplicationEmail({
-        recipient: recipientEmail,
-        subject,
-        body,
-        pdfPath: effectiveEmailPdfPath,
-      });
-
       if (applicationId) {
         await updateApplicationEmail(applicationId, {
           recipient: recipientEmail,
           subject,
           body,
-          approved: true,
-          approvedAt: new Date(),
-          sentAt: new Date(),
+          approved: false,
         });
-        await updateApplicationStatus(applicationId, APPLICATION_STATUS.SENT, {
-          logMessage: `Auto-sent application email to ${recipientEmail} (detected from unknown page). MessageId: ${sendResult?.messageId || 'OK'}`,
+        await updateApplicationStatus(applicationId, APPLICATION_STATUS.WAITING_FOR_REVIEW, {
+          logMessage: `Created draft application email to ${recipientEmail} (awaiting human approval).`,
         });
       }
 
       return {
         detectedMethod,
-        actionTaken: 'email_sent',
+        actionTaken: 'email_draft_created',
         recipientEmail,
         subject,
-        messageId: sendResult?.messageId,
-        message: `Application email sent to ${recipientEmail}`,
+        message: `Draft email created for ${recipientEmail}, pending approval.`,
         pageResult,
       };
     }
@@ -215,65 +207,33 @@ ${candidateName}`;
       };
     }
 
-    // --- CUSTOM FORM ---
-    if (detectedMethod === 'custom_form') {
-      const formFields = pageResult.formFields || [];
-      const hasResumeField = formFields.some(
-        (f) => f.type === 'file' || /resume|cv|upload.*(?:resume|cv)/i.test(f.label || f.name || f.question || '')
+    // --- CUSTOM FORM / ATS PORTAL ---
+    if (detectedMethod === 'custom_form' || detectedMethod === 'career_portal') {
+      await logJobEvent(
+        'unknownApplicationMethod',
+        'TRIGGER_AGENT_LOOP',
+        `Custom Form or Career Portal detected. Spawning multi-step secure agent loop...`
       );
-      let effectiveResumePdf = hasResumeField ? (resumePdfPath || null) : null;
 
-      if (hasResumeField && !effectiveResumePdf && candidateInfo) {
-        await logJobEvent(
-          'unknownApplicationMethod',
-          'TAILOR_ON_DEMAND',
-          `Custom form contains a resume upload field. Tailoring resume to job description...`
-        );
-        try {
-          const { tailorResumeForJobDescription } = await import('../../services/resumeTailoring.service.js');
-          const tailoredRes = await tailorResumeForJobDescription({
-            candidateResume: candidateInfo,
-            jobDetails,
-            userId,
-            applicationId,
-          });
-          effectiveResumePdf = tailoredRes.pdfPath;
-        } catch (tailorErr) {
-          await logError('unknownApplicationMethod.customFormTailor', tailorErr.message);
-        }
-      }
-
-      // Resolve answers via LLM
-      const model = await getGeminiModel(userId);
-      const answers = await resolveGoogleFormAnswers(formFields, candidateInfo, jobDetails, model);
-
-      const formResult = await fillCustomFormOnPage({
-        url: pageResult.pageUrl || pageUrl,
-        formFields,
-        answers,
-        resumePdfPath: effectiveResumePdf,
-        sessionState,
+      const loopResult = await runUnknownAgentLoop({
+        applicationId,
+        userId,
+        candidateInfo,
+        jobDetails
       });
 
       if (applicationId) {
-        await updateApplicationStatus(
-          applicationId,
-          formResult.submitted ? APPLICATION_STATUS.APPLIED : APPLICATION_STATUS.WAITING_FOR_REVIEW,
-          {
-            logMessage: formResult.submitted
-              ? `Custom form submitted. Filled ${formResult.filledCount} fields.`
-              : `Custom form filled (${formResult.filledCount} fields). Manual submission may be needed.`,
-          }
-        );
+        await updateApplicationStatus(applicationId, loopResult.status, {
+          logMessage: `Agent loop finished with status "${loopResult.status}". Summary: ${loopResult.summary}`,
+        });
       }
 
       return {
         detectedMethod,
-        actionTaken: formResult.submitted ? 'custom_form_submitted' : 'custom_form_filled',
-        filledCount: formResult.filledCount,
-        submitted: formResult.submitted,
-        hasResumeField,
-        message: formResult.message,
+        actionTaken: loopResult.status === APPLICATION_STATUS.APPLIED ? 'custom_form_submitted' : 'custom_form_filled',
+        filledCount: 0,
+        submitted: loopResult.status === APPLICATION_STATUS.APPLIED,
+        message: loopResult.summary,
         pageResult,
       };
     }

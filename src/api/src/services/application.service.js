@@ -333,6 +333,11 @@ export const confirmFinalApplicationService = async (applicationId, userId, payl
       `User confirmed final application ${applicationId}. Submitting...`
     );
 
+    if (application.applicationMethod === 'unknown' || application.applicationMethod === 'google_form') {
+      const { confirmFinalUnknownApplicationService } = await import('../application/unknown/confirmHandler.js');
+      return await confirmFinalUnknownApplicationService(applicationId, userId, payload);
+    }
+
     // Run Naukri application with confirmSubmission = true
     const res = await runNaukriApplication({
       applicationId,

@@ -13,7 +13,6 @@ export const BROWSER_VIEWPORT = Object.freeze({
 });
 
 export const BROWSER_LAUNCH_ARGS = Object.freeze([
-  "--disable-blink-features=AutomationControlled",
   "--no-sandbox",
   "--disable-setuid-sandbox",
   "--disable-dev-shm-usage",

@@ -904,8 +904,7 @@ const unknownApplicationNode = async (state) => {
     let finalStatus = APPLICATION_STATUS.WAITING_FOR_REVIEW;
     if (
       unknownResult.actionTaken === "email_sent" ||
-      unknownResult.actionTaken === "google_form_submitted" ||
-      unknownResult.actionTaken === "custom_form_submitted"
+      unknownResult.actionTaken === "verified_submission"
     ) {
       finalStatus = APPLICATION_STATUS.APPLIED;
     }

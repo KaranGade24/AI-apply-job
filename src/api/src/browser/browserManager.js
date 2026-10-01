@@ -41,9 +41,6 @@ export class BrowserManager {
         timezoneId: 'Asia/Kolkata',
         extraHTTPHeaders: {
           'Accept-Language': 'en-US,en;q=0.9',
-          'Sec-Ch-Ua': '"Chromium";v="128", "Not;A=Brand";v="24", "Google Chrome";v="128"',
-          'Sec-Ch-Ua-Mobile': '?0',
-          'Sec-Ch-Ua-Platform': '"Windows"',
         }
       };
 
@@ -53,35 +50,17 @@ export class BrowserManager {
 
       const context = await browser.newContext(contextOptions);
 
-      // Add stealth evasion script to bypass Cloudflare/Akamai bot detection
-      await context.addInitScript(() => {
-        try {
-          Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-          Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
-          Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
-          window.chrome = {
-            runtime: {},
-            app: {},
-            csi: () => {},
-            loadTimes: () => {}
-          };
-        } catch {
-          // ignore
-        }
-      });
-
       context.setDefaultTimeout(options.timeout || 15000);
       context.setDefaultNavigationTimeout(options.navigationTimeout || 20000);
 
-      // Block unnecessary heavy advertising, analytics, and video media to speed up automation
+      // Block heavy media and known ad domains to improve performance
       if (options.blockHeavyResources !== false) {
         await context.route('**/*', (route) => {
           const type = route.request().resourceType();
           const url = route.request().url();
           if (
             type === 'media' ||
-            type === 'font' ||
-            /(?:googleads|adsbygoogle|doubleclick|googletagservices|googlesyndication|ezoic|adnxs|amazon-adsystem|analytics|tracker|facebook\.net|taboola|outbrain|criteo|pubmatic)/i.test(url)
+            /(?:googleads|adsbygoogle|doubleclick|googletagservices|googlesyndication|ezoic|adnxs|amazon-adsystem|facebook\.net|taboola|outbrain|criteo|pubmatic)/i.test(url)
           ) {
             return route.abort().catch(() => {});
           }

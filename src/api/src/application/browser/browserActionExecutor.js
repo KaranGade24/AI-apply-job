@@ -1,8 +1,13 @@
 import { FORM_ACTIONS } from '../../constant/application.constant.js';
 import { logJobEvent, logError } from '../../utils/logger.js';
+import { REGISTRY_INIT_SCRIPT } from '../../browser/dom/elementRegistry.js';
+import { executeAction } from '../../browser/actions/actionsRegistry.js';
 
 /**
- * Executes a sequence of structured browser actions deterministically on a Playwright page
+ * Executes a sequence of structured browser actions on a Playwright page.
+ * Refactored to delegate directly to the new safe ACTIONS registry.
+ * Keeps public API identical for existing callers.
+ *
  * @param {import('playwright').Page} page
  * @param {Array<object>} actions - List of { fieldId, action, value }
  * @param {object} [options]
@@ -13,81 +18,70 @@ export const executeBrowserActions = async (page, actions = [], options = {}) =>
   const errors = [];
   let executedCount = 0;
 
+  // Initialize in-page element registry if not present
+  await page.evaluate(REGISTRY_INIT_SCRIPT).catch(() => {});
+
   for (const item of actions) {
     const { fieldId, action, value } = item;
 
     try {
+      // Find and register element to get the monotonic registry ID
+      const index = await page.evaluate((sel) => {
+        if (!window.__aijRegistry) return null;
+        try {
+          const el = document.querySelector(sel);
+          return el ? window.__aijRegistry.getOrRegister(el).id : null;
+        } catch {
+          return null;
+        }
+      }, fieldId).catch(() => null);
+
+      if (!index && action !== FORM_ACTIONS.WAIT) {
+        throw new Error(`Element with selector "${fieldId}" could not be located or registered`);
+      }
+
+      // Map legacy FORM_ACTIONS to formal unified Actions
+      let formalAction = null;
+      switch (action) {
+        case FORM_ACTIONS.FILL:
+          formalAction = { type: 'input', index, text: String(value ?? '') };
+          break;
+        case FORM_ACTIONS.SELECT:
+          formalAction = { type: 'selectOption', index, option: String(value ?? '') };
+          break;
+        case FORM_ACTIONS.CHECK:
+          formalAction = { type: 'check', index };
+          break;
+        case FORM_ACTIONS.UNCHECK:
+          formalAction = { type: 'uncheck', index };
+          break;
+        case FORM_ACTIONS.UPLOAD:
+          formalAction = { type: 'uploadFile', index, fileRef: value || options.resumePdfPath };
+          break;
+        case FORM_ACTIONS.CLICK:
+          formalAction = { type: 'click', index };
+          break;
+        case FORM_ACTIONS.WAIT:
+          formalAction = { type: 'wait', seconds: Math.max(1, Math.min(10, Math.floor((typeof value === 'number' ? value : 1000) / 1000))) };
+          break;
+        default:
+          throw new Error(`Unsupported legacy action: ${action}`);
+      }
+
       await logJobEvent(
         'browserActionExecutor',
-        'EXECUTE',
-        `Executing action: ${action} on ${fieldId} with value: "${String(value || '').slice(0, 30)}"`
+        'EXECUTE_DELEGATED',
+        `Delegating legacy action "${action}" on "${fieldId}" to index ${index}`
       );
 
-      const locator = page.locator(fieldId).first();
-
-      switch (action) {
-        case FORM_ACTIONS.FILL: {
-          const strVal = String(value ?? '');
-          await locator.waitFor({ state: 'visible', timeout: 5000 }).catch(() => {});
-          await locator.fill(strVal);
-          executedCount++;
-          break;
-        }
-
-        case FORM_ACTIONS.SELECT: {
-          const strVal = String(value ?? '');
-          await locator.waitFor({ state: 'attached', timeout: 5000 }).catch(() => {});
-          await locator.selectOption({ label: strVal }).catch(async () => {
-            await locator.selectOption({ value: strVal }).catch(async () => {
-              await locator.selectOption(strVal);
-            });
-          });
-          executedCount++;
-          break;
-        }
-
-        case FORM_ACTIONS.CHECK: {
-          await locator.waitFor({ state: 'visible', timeout: 5000 }).catch(() => {});
-          await locator.check().catch(async () => {
-            await locator.click();
-          });
-          executedCount++;
-          break;
-        }
-
-        case FORM_ACTIONS.UNCHECK: {
-          await locator.waitFor({ state: 'visible', timeout: 5000 }).catch(() => {});
-          await locator.uncheck().catch(() => {});
-          executedCount++;
-          break;
-        }
-
-        case FORM_ACTIONS.UPLOAD: {
-          const filePath = value || options.resumePdfPath;
-          if (filePath) {
-            await locator.setInputFiles(filePath);
-            executedCount++;
-          }
-          break;
-        }
-
-        case FORM_ACTIONS.CLICK: {
-          await locator.waitFor({ state: 'visible', timeout: 5000 }).catch(() => {});
-          await locator.click();
-          executedCount++;
-          break;
-        }
-
-        case FORM_ACTIONS.WAIT: {
-          const ms = typeof value === 'number' ? value : 1000;
-          await page.waitForTimeout(ms);
-          executedCount++;
-          break;
-        }
-
-        default:
-          await logError('browserActionExecutor', `Unknown action: ${action}`);
+      // Execute formally via the actions registry
+      const execResult = await executeAction(formalAction, page, { tabs: [], dialogs: [] });
+      if (execResult.success) {
+        executedCount++;
+      } else {
+        throw new Error(execResult.error || 'Action execution failed');
       }
+
     } catch (err) {
       const errMsg = `Failed to execute ${action} on ${fieldId}: ${err.message}`;
       await logError('browserActionExecutor.item', errMsg);
@@ -98,6 +92,10 @@ export const executeBrowserActions = async (page, actions = [], options = {}) =>
   return {
     success: errors.length === 0,
     executedCount,
-    errors,
+    errors
   };
+};
+
+export default {
+  executeBrowserActions
 };

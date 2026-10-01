@@ -1,4 +1,5 @@
 import { logJobEvent, logError } from '../../utils/logger.js';
+import { waitForSettled } from '../../browser/session/sessionRegistry.js';
 
 /**
  * Executes navigation and interaction on the employer careers portal based on the AI LLM analysis
@@ -53,7 +54,7 @@ export const navigatePortalWithAiDecision = async (page, analysis, context = nul
       if (targetElement) {
         await logJobEvent('pageNavigator', 'CLICK_ROLE', `Expanding role card: "${roleTitle}"`);
         await targetElement.click().catch(() => {});
-        await page.waitForTimeout(1200);
+        await waitForSettled(page);
       }
 
       // Step B: Locate the inner "Apply Now" or "Apply" button
@@ -107,7 +108,7 @@ export const navigatePortalWithAiDecision = async (page, analysis, context = nul
             }
           }
 
-          await activePage.waitForTimeout(2500);
+          await waitForSettled(activePage);
           break;
         }
       }
@@ -138,7 +139,7 @@ export const navigatePortalWithAiDecision = async (page, analysis, context = nul
       if (visible) {
         await logJobEvent('pageNavigator', 'CLICK_JD_APPLY', 'Clicking JD Apply button');
         await applyBtn.click().catch(() => {});
-        await page.waitForTimeout(2500);
+        await waitForSettled(page);
         return { success: true, navigated: true, message: 'Clicked Apply on Job Description page.' };
       }
     }

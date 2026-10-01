@@ -1,41 +1,43 @@
 import { logJobEvent, logError } from '../../utils/logger.js';
-import { BrowserManager } from '../../browser/browserManager.js';
 import { extractPageContent } from '../pageAnalysis/pageContentExtractor.js';
 import { classifyPageWithLlm } from '../pageAnalysis/pageClassifierLlm.js';
 import { inspectForm } from '../form/formInspector.js';
 import { isGoogleFormUrl } from '../googleForm/googleFormFiller.js';
 import { APPLICATION_STATUS } from '../../constant/application.constant.js';
+import { maskValue } from '../../utils/redact.js';
+import {
+  getSession,
+  createSession,
+  closeSession,
+  getActivePage,
+  isSafeUrl,
+  waitForSettled
+} from '../../browser/session/sessionRegistry.js';
 
 /**
  * UnknownPageHandler — Full browser-based AI agent for unknown application URLs.
- *
- * Strategy:
- * 1. Open the URL in a headless browser.
- * 2. Extract all DOM content (text, buttons, emails, forms, openings, reference IDs).
- * 3. Send to LLM for semantic page classification.
- * 4. Based on LLM decision, determine best application action:
- *    - email          → extract email, return for email workflow
- *    - phone          → extract phone, return for phone workflow
- *    - google_form    → redirect to Google Form handler
- *    - custom_form    → extract & fill custom form fields
- *    - fill_form      → inspect & fill visible form
- *    - unknown        → return human_review
+ * Refactored to leverage the persistent session registry layer.
  *
  * @param {object} params
  * @param {string} params.url - The unknown URL to analyze
  * @param {object} params.job - Job document
  * @param {string} params.userId - User ID
  * @param {object} [params.sessionState] - Optional saved browser session state
+ * @param {string} [params.applicationId] - Application ID
  * @returns {Promise<object>} Analysis result with detected method and extracted data
  */
-export const analyzeUnknownPage = async ({ url, job, userId, sessionState = null }) => {
-  let browser = null;
-  let context = null;
-  let page = null;
+export const analyzeUnknownPage = async ({ url, job, userId, sessionState = null, applicationId = null }) => {
+  const appId = applicationId || 'temp_' + Math.random().toString(36).substring(2, 11);
+  const isTemp = !applicationId;
+  let session = null;
 
   try {
     if (!url) {
       throw new Error('No URL provided for unknown page analysis');
+    }
+
+    if (!isSafeUrl(url)) {
+      throw new Error(`Unsafe URL blocked: ${url}`);
     }
 
     await logJobEvent(
@@ -44,28 +46,24 @@ export const analyzeUnknownPage = async ({ url, job, userId, sessionState = null
       `Analyzing unknown page: ${url}`
     );
 
-    browser = await BrowserManager.launch();
-    context = await BrowserManager.createContext(
-      browser,
-      sessionState ? { storageState: sessionState } : {}
-    );
-    page = await context.newPage();
+    session = getSession(appId);
+    if (!session) {
+      session = await createSession(appId, userId, { storageState: sessionState });
+    }
+
+    let page = getActivePage(session);
+    if (!page) {
+      page = await session.context.newPage();
+    }
 
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(async () => {
       await page.evaluate(() => window.stop()).catch(() => {});
     });
-    await page.waitForTimeout(2500);
+    
+    await waitForSettled(page);
 
-    // Handle possible redirects to new tabs (career portals often open in _blank)
-    let activePage = page;
-    const newPagePromise = context.waitForEvent('page', { timeout: 4000 }).catch(() => null);
-    const popup = await newPagePromise;
-    if (popup) {
-      await popup.waitForLoadState('domcontentloaded').catch(() => {});
-      activePage = popup;
-      await activePage.waitForTimeout(2000);
-    }
-
+    // Get active page (handles blank target popups through registry trackers)
+    const activePage = getActivePage(session) || page;
     const currentUrl = activePage.url();
 
     // Quick check: if redirected to a Google Form, signal for Google Form handler
@@ -200,13 +198,15 @@ export const analyzeUnknownPage = async ({ url, job, userId, sessionState = null
       message: `Error analyzing page: ${error.message}`,
     };
   } finally {
-    await BrowserManager.closeSafely({ page, context, browser });
+    if (isTemp) {
+      await closeSession(appId).catch(() => {});
+    }
   }
 };
 
 /**
  * Fills a custom application form on an employer's career site.
- * Uses Playwright to identify, fill, and submit form fields.
+ * Reuses the existing active session if available.
  *
  * @param {object} params
  * @param {string} params.url - URL of the career page with a custom form
@@ -214,7 +214,9 @@ export const analyzeUnknownPage = async ({ url, job, userId, sessionState = null
  * @param {Array<object>} params.answers - LLM-resolved answers
  * @param {string} [params.resumePdfPath] - Path to resume PDF for file upload fields
  * @param {object} [params.sessionState] - Optional browser session state
- * @returns {Promise<{ submitted: boolean, filledCount: number, message: string }>}
+ * @param {string} [params.applicationId] - Application ID
+ * @param {string} [params.userId] - User ID
+ * @returns {Promise<{ filled: boolean, needsReview: boolean, filledCount: number, message: string }>}
  */
 export const fillCustomFormOnPage = async ({
   url,
@@ -222,23 +224,33 @@ export const fillCustomFormOnPage = async ({
   answers = [],
   resumePdfPath = null,
   sessionState = null,
+  applicationId = null,
+  userId = null,
 }) => {
-  let browser = null;
-  let context = null;
-  let page = null;
+  const appId = applicationId || 'temp_' + Math.random().toString(36).substring(2, 11);
+  const isTemp = !applicationId;
+  let session = null;
 
   try {
-    browser = await BrowserManager.launch();
-    context = await BrowserManager.createContext(
-      browser,
-      sessionState ? { storageState: sessionState } : {}
-    );
-    page = await context.newPage();
+    if (!isSafeUrl(url)) {
+      throw new Error(`Unsafe URL blocked: ${url}`);
+    }
+
+    session = getSession(appId);
+    if (!session) {
+      session = await createSession(appId, userId, { storageState: sessionState });
+    }
+
+    let page = getActivePage(session);
+    if (!page) {
+      page = await session.context.newPage();
+    }
 
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(async () => {
       await page.evaluate(() => window.stop()).catch(() => {});
     });
-    await page.waitForTimeout(2000);
+    
+    await waitForSettled(page);
 
     let filledCount = 0;
     const errors = [];
@@ -247,6 +259,22 @@ export const fillCustomFormOnPage = async ({
       const answerObj = answers.find((a) => a.fieldIndex === field.fieldIndex);
       const answer = answerObj?.answer || '';
       if (!answer) continue;
+
+      const isSensitiveField = 
+        field.type === 'password' || 
+        /password|passcode|otp|one-time|verification.*code|two-factor|mfa|2fa|cookie|token/i.test(field.name || '') ||
+        /password|passcode|otp|one-time|verification.*code|two-factor|mfa|2fa|cookie|token/i.test(field.fieldId || '') ||
+        /password|passcode|otp|one-time|verification.*code|two-factor|mfa|2fa|cookie|token/i.test(field.question || '');
+
+      if (isSensitiveField) {
+        await logJobEvent(
+          'unknownPageHandler',
+          'SENSITIVE_FIELD_SKIPPED',
+          `Skipping sensitive field: ${field.question || field.name || field.fieldId}`
+        );
+        errors.push(`Field "${field.question || field.name}": skipped because it is sensitive and cannot be automatically filled.`);
+        continue;
+      }
 
       try {
         if (field.type === 'file' && resumePdfPath) {
@@ -266,7 +294,6 @@ export const fillCustomFormOnPage = async ({
           if (field.type === 'select') {
             await el.selectOption({ label: answer }).catch(() => {});
           } else if (field.type === 'radio' || field.type === 'checkbox') {
-            // Find option by text
             const optEl = page.locator(`label:has-text("${answer}"), [aria-label="${answer}"]`).first();
             await optEl.click().catch(() => {});
           } else {
@@ -281,37 +308,24 @@ export const fillCustomFormOnPage = async ({
       await page.waitForTimeout(200).catch(() => {});
     }
 
-    // Attempt form submission
-    let submitted = false;
-    const submitLocators = [
-      page.locator('button[type="submit"], input[type="submit"]').first(),
-      page.locator('button:has-text("Submit"), button:has-text("Apply"), button:has-text("Send")').first(),
-    ];
-    for (const loc of submitLocators) {
-      const visible = await loc.isVisible().catch(() => false);
-      if (visible) {
-        await loc.click().catch(() => {});
-        await page.waitForTimeout(3000);
-        submitted = true;
-        break;
-      }
-    }
-
     await logJobEvent(
       'unknownPageHandler',
-      submitted ? 'FORM_SUBMITTED' : 'FORM_FILLED_AWAITING',
-      `Filled ${filledCount} fields. Submitted: ${submitted}`
+      'FORM_FILLED_AWAITING',
+      `Filled ${filledCount} fields. Pending human review.`
     );
 
     return {
-      submitted,
+      filled: true,
+      needsReview: true,
       filledCount,
-      message: submitted ? `Form submitted with ${filledCount} fields filled` : `Form filled (${filledCount} fields) but submit pending`,
+      message: `Form filled (${filledCount} fields) and is awaiting human review`,
     };
   } catch (error) {
     await logError('unknownPageHandler.fillCustomFormOnPage', error.message);
-    return { submitted: false, filledCount: 0, message: error.message };
+    return { filled: false, needsReview: true, filledCount: 0, message: error.message };
   } finally {
-    await BrowserManager.closeSafely({ page, context, browser });
+    if (isTemp) {
+      await closeSession(appId).catch(() => {});
+    }
   }
 };
