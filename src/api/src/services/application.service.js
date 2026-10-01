@@ -367,16 +367,40 @@ export const submitMissingAnswersService = async (applicationId, userId, answers
 
     const isNaukri = isNaukriApplication(application);
     if (isNaukri) {
-      await runNaukriApplication({
-        applicationId,
-        userId,
-        userAnswers: answers,
-      });
+      try {
+        await runNaukriApplication({
+          applicationId,
+          userId,
+          userAnswers: answers,
+        });
+      } catch (naukriErr) {
+        await logError('applicationService.submitMissingAnswersService.naukriRun', naukriErr.message);
+        // Persist answers even if browser/page closes
+        if (Array.isArray(answers) && answers.length > 0) {
+          await JobApplication.findByIdAndUpdate(applicationId, {
+            $set: {
+              "form.answers": answers,
+            },
+          });
+        }
+      }
       return await findApplicationById(applicationId);
     }
 
     // Generic UNKNOWN career portal application flow
-    return await resumeUnknownApplicationWithAnswersService(applicationId, userId, answers);
+    try {
+      return await resumeUnknownApplicationWithAnswersService(applicationId, userId, answers);
+    } catch (unknownErr) {
+      await logError('applicationService.submitMissingAnswersService.unknownRun', unknownErr.message);
+      if (Array.isArray(answers) && answers.length > 0) {
+        await JobApplication.findByIdAndUpdate(applicationId, {
+          $set: {
+            "form.answers": answers,
+          },
+        });
+      }
+      return await findApplicationById(applicationId);
+    }
   } catch (error) {
     await logError('applicationService.submitMissingAnswersService', error.message);
     throw error;

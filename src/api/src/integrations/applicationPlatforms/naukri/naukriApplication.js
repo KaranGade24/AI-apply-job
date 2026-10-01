@@ -577,7 +577,7 @@ export const runNaukriApplication = async ({
       if (!directClicked) {
         await applyLocator.click({ force: true, timeout: 3000 }).then(() => { directClicked = true; }).catch(() => {});
       }
-      if (!directClicked) {
+      if (!directClicked && !page.isClosed()) {
         await page.evaluate((sel) => {
           const el = (sel ? document.querySelector(sel) : null) ||
             document.querySelector('#apply-button, .apply-button, button.apply-button') ||
@@ -585,10 +585,24 @@ export const runNaukriApplication = async ({
           if (el) el.click();
         }, applyAction.selector).catch(() => {});
       }
-      await page.waitForTimeout(3000);
+
+      // Check if a new popup page or tab was opened
+      const openPages = context?.pages?.()?.filter((p) => !p.isClosed()) || [];
+      if (openPages.length > 0) {
+        activePage = openPages[openPages.length - 1];
+        page = activePage;
+      }
+
+      if (activePage && !activePage.isClosed()) {
+        await activePage.waitForTimeout(2500).catch(() => {});
+      }
 
       // Check if application was completed directly without questionnaire
-      const immediateSuccess = await detectSubmissionSuccess(page);
+      let immediateSuccess = { isSubmitted: false };
+      if (activePage && !activePage.isClosed()) {
+        immediateSuccess = await detectSubmissionSuccess(activePage).catch(() => ({ isSubmitted: false }));
+      }
+
       if (immediateSuccess.isSubmitted) {
         await updateApplicationStatus(
           applicationId,
@@ -608,29 +622,37 @@ export const runNaukriApplication = async ({
       }
 
       // Also analyze the page rendered after clicking direct Apply!
-      const postApplyExtracted = await extractPageContent(page);
-      const postApplyOpenings =
-        postApplyExtracted.openings || postApplyExtracted.openingsList || [];
-      if (
-        postApplyOpenings.length > 0 &&
-        postApplyExtracted.formFieldsCount === 0
-      ) {
-        const postAnalysis = await classifyPageWithLlm(
-          postApplyExtracted,
-          job,
-          userId,
-        );
-        await JobApplication.findByIdAndUpdate(applicationId, {
-          pageAnalysis: {
-            ...postAnalysis,
-            pageTitle: postApplyExtracted.title,
-            currentUrl: page.url(),
-            analyzedAt: new Date(),
-          },
-        });
-        if (postAnalysis.pageType === "job_listings_accordion") {
-          await navigatePortalWithAiDecision(page, postAnalysis, context);
-          await page.waitForTimeout(2000);
+      if (activePage && !activePage.isClosed()) {
+        const postApplyExtracted = await extractPageContent(activePage).catch(() => null);
+        if (postApplyExtracted) {
+          const postApplyOpenings =
+            postApplyExtracted.openings || postApplyExtracted.openingsList || [];
+          if (
+            postApplyOpenings.length > 0 &&
+            postApplyExtracted.formFieldsCount === 0
+          ) {
+            const postAnalysis = await classifyPageWithLlm(
+              postApplyExtracted,
+              job,
+              userId,
+            ).catch(() => null);
+            if (postAnalysis) {
+              await JobApplication.findByIdAndUpdate(applicationId, {
+                pageAnalysis: {
+                  ...postAnalysis,
+                  pageTitle: postApplyExtracted.title,
+                  currentUrl: activePage.url(),
+                  analyzedAt: new Date(),
+                },
+              });
+              if (postAnalysis.pageType === "job_listings_accordion") {
+                await navigatePortalWithAiDecision(activePage, postAnalysis, context).catch(() => {});
+                if (!activePage.isClosed()) {
+                  await activePage.waitForTimeout(2000).catch(() => {});
+                }
+              }
+            }
+          }
         }
       }
     }

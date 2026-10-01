@@ -221,7 +221,7 @@ export const startApplicationWorkflow = async (
  */
 export const getWorkflowStatus = async (applicationId, userId) => {
   const appIdStr = String(applicationId);
-  await assertOwnership(appIdStr, userId);
+  const jobApp = await assertOwnership(appIdStr, userId);
 
   const threadConfig = getThreadConfig(appIdStr);
 
