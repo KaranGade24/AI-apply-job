@@ -198,8 +198,17 @@ export const JobSearchPage = () => {
     await executeJobSearch();
   };
 
-  const handleApply = (job) => {
-    setReviewingJob(job);
+  const handleApply = (job, selectedPosition = null) => {
+    if (selectedPosition) {
+      setReviewingJob({ ...job, selectedPosition });
+    } else {
+      setReviewingJob(job);
+    }
+  };
+
+  const handleSelectPosition = (job, pos) => {
+    // When user chooses a specific position from the multi-role list
+    setReviewingJob({ ...job, selectedPosition: pos, title: pos.title || job.title });
   };
 
   const toggleLocation = (loc) => {
@@ -569,6 +578,7 @@ export const JobSearchPage = () => {
               job={job}
               onApply={handleApply}
               onReview={handleApply}
+              onSelectPosition={handleSelectPosition}
               onDelete={handleDeleteJob}
               applyingId={applyingId}
             />

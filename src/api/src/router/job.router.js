@@ -3,6 +3,7 @@ import {
   deleteJobController,
   discoverJobsController,
   getSavedJobsController,
+  getJobAvailabilityController,
 } from "../controller/job.controller.js";
 import { authMiddleware } from "../middlewares/auth.middleware.js";
 
@@ -88,6 +89,7 @@ const jobRouter = express.Router();
  */
 jobRouter.post("/discover", authMiddleware, discoverJobsController);
 jobRouter.get("/discovered", authMiddleware, getSavedJobsController);
+jobRouter.get("/:id/availability", authMiddleware, getJobAvailabilityController);
 jobRouter.get("/", authMiddleware, getSavedJobsController);
 
 /**

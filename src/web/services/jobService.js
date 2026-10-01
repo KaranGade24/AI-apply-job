@@ -22,3 +22,8 @@ export const deleteJobApi = async (jobId) => {
     method: 'DELETE',
   });
 };
+
+export const checkJobAvailabilityApi = async (jobId) => {
+  return await fetchWithAuth(`/jobs/${jobId}/availability`);
+};
+

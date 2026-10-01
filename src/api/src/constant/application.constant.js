@@ -2,6 +2,159 @@
  * Application Constant Definitions
  */
 
+/**
+ * Apply Button & Job Availability UI States
+ */
+export const AVAILABILITY_STATE = Object.freeze({
+  AVAILABLE: "AVAILABLE",
+  DISABLED: "DISABLED",
+  LOADING: "LOADING",
+  APPLYING: "APPLYING",
+  COMPLETED: "COMPLETED",
+  USER_ACTION_REQUIRED: "USER_ACTION_REQUIRED",
+  REVIEW_REQUIRED: "REVIEW_REQUIRED",
+});
+
+/**
+ * Controlled Reason Codes for Application Availability
+ */
+export const AVAILABILITY_REASON = Object.freeze({
+  READY: "READY",
+  PROFILE_DATA_MISSING: "PROFILE_DATA_MISSING",
+  RESUME_MISSING: "RESUME_MISSING",
+  ALREADY_APPLIED: "ALREADY_APPLIED",
+  APPLICATION_IN_PROGRESS: "APPLICATION_IN_PROGRESS",
+  APPLICATION_SUBMITTED: "APPLICATION_SUBMITTED",
+  JOB_EXPIRED: "JOB_EXPIRED",
+  JOB_UNAVAILABLE: "JOB_UNAVAILABLE",
+  UNSUPPORTED_APPLICATION_FLOW: "UNSUPPORTED_APPLICATION_FLOW",
+  USER_INPUT_REQUIRED: "USER_INPUT_REQUIRED",
+  HUMAN_REVIEW_REQUIRED: "HUMAN_REVIEW_REQUIRED",
+  AUTHENTICATION_REQUIRED: "AUTHENTICATION_REQUIRED",
+  INVALID_JOB: "INVALID_JOB",
+  APPLICATION_ERROR: "APPLICATION_ERROR",
+  APPLICATION_REVIEW_REQUIRED: "APPLICATION_REVIEW_REQUIRED",
+  UNKNOWN: "UNKNOWN",
+});
+
+/**
+ * User-friendly Messages and Titles for Availability Reasons
+ */
+export const AVAILABILITY_REASON_DETAILS = Object.freeze({
+  [AVAILABILITY_REASON.READY]: {
+    title: "Ready to apply",
+    message: "All required profile details and resume are ready.",
+    severity: "success",
+    canApply: true,
+    status: AVAILABILITY_STATE.AVAILABLE,
+  },
+  [AVAILABILITY_REASON.PROFILE_DATA_MISSING]: {
+    title: "Apply unavailable",
+    message: "Your profile is missing required information for this application.",
+    severity: "warning",
+    canApply: false,
+    status: AVAILABILITY_STATE.DISABLED,
+  },
+  [AVAILABILITY_REASON.RESUME_MISSING]: {
+    title: "Apply unavailable",
+    message: "Please upload or generate a resume before applying.",
+    severity: "warning",
+    canApply: false,
+    status: AVAILABILITY_STATE.DISABLED,
+  },
+  [AVAILABILITY_REASON.ALREADY_APPLIED]: {
+    title: "Apply unavailable",
+    message: "You have already applied to this job.",
+    severity: "info",
+    canApply: false,
+    status: AVAILABILITY_STATE.COMPLETED,
+  },
+  [AVAILABILITY_REASON.APPLICATION_IN_PROGRESS]: {
+    title: "Application in progress",
+    message: "An application is currently running for this job.",
+    severity: "info",
+    canApply: false,
+    status: AVAILABILITY_STATE.APPLYING,
+  },
+  [AVAILABILITY_REASON.APPLICATION_SUBMITTED]: {
+    title: "Already submitted",
+    message: "This application has been successfully submitted.",
+    severity: "success",
+    canApply: false,
+    status: AVAILABILITY_STATE.COMPLETED,
+  },
+  [AVAILABILITY_REASON.JOB_EXPIRED]: {
+    title: "Apply unavailable",
+    message: "This job posting has expired and is no longer accepting applications.",
+    severity: "error",
+    canApply: false,
+    status: AVAILABILITY_STATE.DISABLED,
+  },
+  [AVAILABILITY_REASON.JOB_UNAVAILABLE]: {
+    title: "Apply unavailable",
+    message: "This job posting is currently unavailable.",
+    severity: "error",
+    canApply: false,
+    status: AVAILABILITY_STATE.DISABLED,
+  },
+  [AVAILABILITY_REASON.UNSUPPORTED_APPLICATION_FLOW]: {
+    title: "Apply unavailable",
+    message: "This job is not currently supported by the automatic application agent.",
+    severity: "warning",
+    canApply: false,
+    status: AVAILABILITY_STATE.DISABLED,
+  },
+  [AVAILABILITY_REASON.USER_INPUT_REQUIRED]: {
+    title: "Action required",
+    message: "This application requires additional information before it can continue.",
+    severity: "warning",
+    canApply: true,
+    status: AVAILABILITY_STATE.USER_ACTION_REQUIRED,
+  },
+  [AVAILABILITY_REASON.HUMAN_REVIEW_REQUIRED]: {
+    title: "Manual review required",
+    message: "This application flow requires manual review or verification.",
+    severity: "warning",
+    canApply: true,
+    status: AVAILABILITY_STATE.REVIEW_REQUIRED,
+  },
+  [AVAILABILITY_REASON.AUTHENTICATION_REQUIRED]: {
+    title: "Login required",
+    message: "Portal authentication is required to apply for this job.",
+    severity: "warning",
+    canApply: false,
+    status: AVAILABILITY_STATE.DISABLED,
+  },
+  [AVAILABILITY_REASON.INVALID_JOB]: {
+    title: "Apply unavailable",
+    message: "Job details or application URL are incomplete or invalid.",
+    severity: "error",
+    canApply: false,
+    status: AVAILABILITY_STATE.DISABLED,
+  },
+  [AVAILABILITY_REASON.APPLICATION_ERROR]: {
+    title: "Apply unavailable",
+    message: "We couldn't safely continue with this application. Please review it manually.",
+    severity: "error",
+    canApply: false,
+    status: AVAILABILITY_STATE.REVIEW_REQUIRED,
+  },
+  [AVAILABILITY_REASON.APPLICATION_REVIEW_REQUIRED]: {
+    title: "Review required",
+    message: "Please review the application details before submitting.",
+    severity: "info",
+    canApply: true,
+    status: AVAILABILITY_STATE.REVIEW_REQUIRED,
+  },
+  [AVAILABILITY_REASON.UNKNOWN]: {
+    title: "Apply unavailable",
+    message: "Application status is currently being determined.",
+    severity: "info",
+    canApply: false,
+    status: AVAILABILITY_STATE.DISABLED,
+  },
+});
+
 export const APPLICATION_STATUS = Object.freeze({
   PENDING: "Pending",
   PROCESSING: "processing",

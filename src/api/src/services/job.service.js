@@ -4,6 +4,7 @@ import { JobApplication } from '../model/JobApplication.js';
 import { SkippedApplication } from '../model/SkippedApplication.js';
 import { runJobDiscoveryWorkflow } from '../agent/graph/jobDiscoveryGraph.js';
 import { MatchStatus, WorkMode } from '../model/Job.js';
+import { evaluateJobAvailabilityService } from './applicationAvailability.service.js';
 import { appError } from '../utils/errors.js';
 import { logError, logJobEvent } from '../utils/logger.js';
 
@@ -105,11 +106,27 @@ export const discoverJobsService = async ({
       });
     }
 
+    // Attach deterministic application availability to each discovered job
+    const enrichedJobs = await Promise.all(
+      jobs.map(async (job) => {
+        const jobObj = typeof job.toObject === 'function' ? job.toObject() : { ...job };
+        const availability = await evaluateJobAvailabilityService({
+          userId,
+          jobId: jobObj._id,
+          jobDoc: jobObj,
+        });
+        return {
+          ...jobObj,
+          availability,
+        };
+      })
+    );
+
     return {
       totalDiscovered: workflowResult.totalJobsDiscovered || 0,
-      matchedCount: jobs.length,
+      matchedCount: enrichedJobs.length,
       hasCandidateResume: Boolean(candidateResumeText),
-      jobs: jobs
+      jobs: enrichedJobs,
     };
   } catch (error) {
     if (error.isOperational) {
@@ -152,11 +169,35 @@ export const getSavedJobsService = async (filter = {}, limit = 50, userId = null
     }
 
     let jobs = await getJobs(finalFilter, limit);
-    return jobs;
+
+    // Enrich each job with deterministic availability evaluation
+    const enrichedJobs = await Promise.all(
+      jobs.map(async (job) => {
+        const jobObj = typeof job.toObject === 'function' ? job.toObject() : { ...job };
+        const availability = await evaluateJobAvailabilityService({
+          userId,
+          jobId: jobObj._id,
+          jobDoc: jobObj,
+        });
+        return {
+          ...jobObj,
+          availability,
+        };
+      })
+    );
+
+    return enrichedJobs;
   } catch (error) {
     if (error.isOperational) throw error;
     throw new appError(`Failed to fetch saved jobs: ${error.message}`, 500);
   }
+};
+
+/**
+ * Service to get application availability for a specific job
+ */
+export const getJobAvailabilityService = async (jobId, userId) => {
+  return await evaluateJobAvailabilityService({ userId, jobId });
 };
 
 /**

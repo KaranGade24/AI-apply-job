@@ -2,6 +2,7 @@ import {
   discoverJobsService,
   getSavedJobsService,
   deleteJobService,
+  getJobAvailabilityService,
 } from "../services/job.service.js";
 import { handleError } from "../utils/errors.js";
 
@@ -94,6 +95,24 @@ export const getSavedJobsController = async (req, res) => {
 };
 
 /**
+ * Controller to handle GET /api/jobs/:id/availability
+ */
+export const getJobAvailabilityController = async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+    const { id } = req.params;
+    const availability = await getJobAvailabilityService(id, userId);
+
+    return res.status(200).json({
+      success: true,
+      data: availability,
+    });
+  } catch (error) {
+    return handleError(error, res);
+  }
+};
+
+/**
  * Controller to handle DELETE /api/jobs/:id
  */
 export const deleteJobController = async (req, res) => {
@@ -111,6 +130,7 @@ export const deleteJobController = async (req, res) => {
 
 export default {
   discoverJobsController,
-  getSavedJobsController,
+  getSavedJobsService,
+  getJobAvailabilityController,
   deleteJobController,
 };
