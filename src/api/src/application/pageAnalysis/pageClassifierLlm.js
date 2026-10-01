@@ -171,10 +171,21 @@ export const classifyPageWithLlm = async (extractedPageContent, job = {}, userId
       legacyPageType = 'job_description_page';
       legacyNextRecommendedAction = 'click_opening_apply';
       break;
-    case PAGE_STATES.APPLICATION_ENTRY:
-      legacyPageType = 'external_ats';
-      legacyNextRecommendedAction = 'click_opening_apply';
+    case PAGE_STATES.APPLICATION_ENTRY: {
+      const isAlreadyInApplyFunnel =
+        (normalized.url || '').toLowerCase().includes('/apply') ||
+        (normalized.url || '').toLowerCase().includes('autofill') ||
+        normalized.fileInputsCount > 0 ||
+        normalized.formFieldsCount > 0;
+      if (isAlreadyInApplyFunnel) {
+        legacyPageType = 'application_form';
+        legacyNextRecommendedAction = 'fill_form';
+      } else {
+        legacyPageType = 'external_ats';
+        legacyNextRecommendedAction = 'click_opening_apply';
+      }
       break;
+    }
     case PAGE_STATES.APPLICATION_FORM:
     case PAGE_STATES.FORM_STEP:
       legacyPageType = 'application_form';

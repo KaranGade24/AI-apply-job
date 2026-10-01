@@ -32,6 +32,10 @@ export const extractPageContent = async (page) => {
 
     // Wait briefly for SPAs/dynamic state to settle
     await page.waitForLoadState('domcontentloaded').catch(() => {});
+    const currentUrl = (page.url() || '').toLowerCase();
+    if (currentUrl.includes('workday') || currentUrl.includes('apply') || currentUrl.includes('job')) {
+      await page.waitForSelector('main, [data-automation-id], form, input, button, [role="main"], [role="dialog"]', { timeout: 3500 }).catch(() => {});
+    }
 
     // Collect iframe text safely
     let iframeContent = '';
@@ -202,8 +206,12 @@ export const extractPageContent = async (page) => {
         roleAlertsCount: document.querySelectorAll('[role="alert"]').length
       };
 
-      const formFieldsCount = document.querySelectorAll('input:not([type="hidden"]), textarea, select').length;
-      const fileInputsCount = document.querySelectorAll('input[type="file"]').length;
+      const formFieldsCount = document.querySelectorAll(
+        'input:not([type="hidden"]), textarea, select, [contenteditable="true"], [role="textbox"], [role="combobox"], [data-automation-id*="input" i], [data-automation-id*="select" i]'
+      ).length;
+      const fileInputsCount = document.querySelectorAll(
+        'input[type="file"], [data-automation-id*="drop-zone" i], [data-automation-id*="dropzone" i], [data-automation-id*="file" i], .drop-zone, .file-upload-dropzone'
+      ).length;
 
       return {
         url,

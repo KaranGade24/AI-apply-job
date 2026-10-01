@@ -63,10 +63,14 @@ await activePage.waitForTimeout(2500);
 
     // 1. Action: Click Opening Accordion / Role Card and then click its inner "Apply" / "Autofill"
     if (nextRecommendedAction === 'click_opening_apply' || pageType === 'job_listings_accordion' || (analysis?.openingsList && analysis.openingsList.length > 0)) {
-      const roleTitle = effectiveRole.title || '';
+      const rawTitle = effectiveRole.title || '';
+      const roleTitle = rawTitle
+        .replace(/^back\s+to\s+(?:job\s+posting|search\s+results|all\s+jobs|jobs)?/i, '')
+        .replace(/^job\s+details\s*:\s*/i, '')
+        .trim();
       let activePage = page;
 
-      await logJobEvent('pageNavigator', 'SEARCH_ROLE_CARD', `Locating & clicking opening card for: "${roleTitle}"`);
+      await logJobEvent('pageNavigator', 'SEARCH_ROLE_CARD', `Locating & clicking opening card for: "${roleTitle || rawTitle}"`);
 
       let newPagePromise = null;
       if (context) {
@@ -75,7 +79,11 @@ await activePage.waitForTimeout(2500);
 
       // Execute instantaneous, deeply-scoped DOM traversal to locate the exact card container and click its Apply button
       const domResult = await page.evaluate((targetTitle) => {
-        const normTarget = (targetTitle || '').toLowerCase().trim();
+        const cleanTitle = (targetTitle || '')
+          .replace(/^back\s+to\s+(?:job\s+posting|search\s+results|all\s+jobs|jobs)?/i, '')
+          .toLowerCase()
+          .trim();
+        const normTarget = cleanTitle;
         const allElements = Array.from(document.querySelectorAll('h1, h2, h3, h4, h5, h6, strong, b, span, p, div, a, button'));
         
         // Find elements containing the target role words
@@ -93,10 +101,11 @@ await activePage.waitForTimeout(2500);
         for (const matchEl of matchingElements) {
           let container = matchEl;
           for (let i = 0; i < 7 && container && container !== document.body; i++) {
-            const btn = Array.from(container.querySelectorAll('button, a, [role="button"], input[type="button"], input[type="submit"]')).find((b) => {
+            const btn = Array.from(container.querySelectorAll('button, a, [role="button"], input[type="button"], input[type="submit"], [data-automation-id*="apply" i], [data-automation-id*="autofill" i]')).find((b) => {
               const text = (b.textContent || b.value || b.getAttribute('aria-label') || '').toLowerCase().trim();
               const href = (b.getAttribute('href') || '').toLowerCase();
-              return text === 'apply' || text.includes('apply') || href.includes('mailto:') || href.includes('apply');
+              const autoId = (b.getAttribute('data-automation-id') || '').toLowerCase();
+              return text === 'apply' || text.includes('apply') || href.includes('mailto:') || href.includes('apply') || autoId.includes('apply') || autoId.includes('autofill');
             });
 
             if (btn) {
@@ -116,11 +125,12 @@ await activePage.waitForTimeout(2500);
           }
         }
 
-        // Fallback: Click any visible button or link with text 'Apply'
-        const allApplyButtons = Array.from(document.querySelectorAll('button, a, [role="button"]')).filter((b) => {
+        // Fallback: Click any visible button or link with text 'Apply' or 'Autofill with Resume'
+        const allApplyButtons = Array.from(document.querySelectorAll('button, a, [role="button"], [data-automation-id*="apply" i], [data-automation-id*="autofill" i]')).filter((b) => {
           const text = (b.textContent || b.value || '').toLowerCase().trim();
           const href = (b.getAttribute('href') || '').toLowerCase();
-          return text === 'apply' || text.includes('apply now') || href.includes('mailto:');
+          const autoId = (b.getAttribute('data-automation-id') || '').toLowerCase();
+          return text === 'apply' || text.includes('apply now') || text.includes('autofill with resume') || href.includes('mailto:') || autoId.includes('apply') || autoId.includes('autofill');
         });
 
         if (allApplyButtons.length > 0) {

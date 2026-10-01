@@ -98,10 +98,14 @@ export const getDecryptedGoogleSession = async (userId) => {
       return null;
     }
 
-    const decryptedJson = decryptValue(account.encryptedStorageState);
-    return JSON.parse(decryptedJson);
+    try {
+      const decryptedJson = decryptValue(account.encryptedStorageState);
+      return JSON.parse(decryptedJson);
+    } catch {
+      // In case encryption secret changed or key cannot authenticate legacy ciphertext
+      return null;
+    }
   } catch (error) {
-    await logError('googleSessionService.getDecryptedGoogleSession', error.message);
     return null;
   }
 };
