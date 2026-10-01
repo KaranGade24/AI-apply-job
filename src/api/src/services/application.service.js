@@ -1974,14 +1974,15 @@ export const advanceEmployerPortalActionService = async (applicationId, userId, 
       const formInspection = await inspectForm(activePage);
 
       if (formInspection.fields && formInspection.fields.length > 0) {
-        const userResumeDoc = await Resume.findOne({ userId }).sort({ createdAt: -1 }).catch(() => null);
+        const userResumeDoc = await getActiveResumeByUserId(userId).catch(() => null);
         const candidateResume = application.resume?.tailoredResumeData || userResumeDoc?.parsedData || {};
-        const userProfile = await UserProfile.findOne({ userId }).catch(() => null);
+        const userProfile = await findUserProfileByUserId(userId).catch(() => null);
+        const userDoc = await findUserById(userId).catch(() => null);
 
         const { resolvedAnswers, missingQuestions } = await resolveAllFormAnswers(formInspection.fields, {
           userAnswers: application.form?.answers || [],
           userProfile: userProfile || {},
-          user: { username: userProfile?.fullName, email: userProfile?.email },
+          user: userDoc || { username: userProfile?.fullName, email: userProfile?.email },
           resumeData: candidateResume || {},
           job,
           applicationId,
