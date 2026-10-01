@@ -2,7 +2,14 @@ import { logJobEvent, logError } from '../../utils/logger.js';
 import { executeAutonomousUnknownApplication } from '../unknown/unknownPageHandler.js';
 import { updateApplicationStatus } from '../../repositories/application.repository.js';
 import { APPLICATION_STATUS } from '../../constant/application.constant.js';
+<<<<<<< HEAD
 import { JobApplication } from '../../model/JobApplication.js';
+=======
+import { inspectForm } from '../form/formInspector.js';
+import { formatAndCleanEmailBody } from '../../agent/prompt/applicationEmail.js';
+import { maskValue } from '../../utils/redact.js';
+import { runUnknownAgentLoop } from '../unknown/unknownAgent.js';
+>>>>>>> 1d429e22336b7068910ecf5c700f23abff096a1b
 
 /**
  * Runs the full Autonomous Unknown / Career Portal application method workflow.
@@ -59,22 +66,116 @@ export const runUnknownApplicationMethod = async ({
       resumePdfPath,
       candidateInfo,
       sessionState,
+      applicationId,
     });
 
+<<<<<<< HEAD
     const detectedMethod = pageResult.detectedMethod || pageResult.handoff?.method || 'unknown';
+=======
+    const { detectedMethod } = pageResult;
+
+    await logJobEvent(
+      'unknownApplicationMethod',
+      'METHOD_DETECTED',
+      `Detected method: ${detectedMethod} from page: ${pageUrl}`
+    );
+
+    // Step 2: Dispatch to appropriate handler
+
+    // --- EMAIL ---
+    if (detectedMethod === 'email') {
+      const recipientEmail =
+        pageResult.emails?.[0] ||
+        pageResult.emailInstructions?.email ||
+        jobDetails?.hrEmail ||
+        '';
+
+      if (!recipientEmail) {
+        // No email found — fallback to human review
+        if (applicationId) {
+          await updateApplicationStatus(applicationId, APPLICATION_STATUS.WAITING_FOR_REVIEW, {
+            logMessage: `Email method detected but no recipient found. Human review required.`,
+          });
+        }
+        return {
+          detectedMethod,
+          actionTaken: 'human_review',
+          message: 'Email method detected but no recipient address found on the page.',
+          pageResult,
+        };
+      }
+
+      const candidateName =
+        candidateInfo?.personalInfo?.fullName || candidateInfo?.name || 'Candidate';
+      const jobTitle = jobDetails?.title || 'Software Developer';
+      const company = jobDetails?.company || 'Company';
+      const refId = pageResult.referenceIds?.[0] || pageResult.emailInstructions?.referenceId || '';
+
+      const subject = refId
+        ? `Application for ${jobTitle} - Ref ID: ${refId} - ${candidateName}`
+        : `Application for ${jobTitle} at ${company} - ${candidateName}`;
+
+      const rawBody = `Dear Hiring Team at ${company},
+
+I am writing to express my strong interest in the ${jobTitle} position${refId ? ` (Ref ID: ${refId})` : ''}. ${candidateInfo?.summary || `With expertise in ${(candidateInfo?.skills || []).slice(0, 4).join(', ')}, I am confident in delivering immediate value to your team.`}
+
+My tailored resume is attached for your review. I look forward to the opportunity to discuss my qualifications in an interview.
+
+Sincerely,
+
+${candidateName}`;
+
+      const body = formatAndCleanEmailBody(rawBody, candidateName);
+
+      let effectiveEmailPdfPath = resumePdfPath || null;
+      if (!effectiveEmailPdfPath && candidateInfo) {
+        try {
+          const { tailorResumeForJobDescription } = await import('../../services/resumeTailoring.service.js');
+          const tailoredRes = await tailorResumeForJobDescription({
+            candidateResume: candidateInfo,
+            jobDetails,
+            userId,
+            applicationId,
+          });
+          effectiveEmailPdfPath = tailoredRes.pdfPath;
+        } catch (tailorErr) {
+          await logError('unknownApplicationMethod.emailTailor', tailorErr.message);
+        }
+      }
+
+      if (applicationId) {
+        await updateApplicationEmail(applicationId, {
+          recipient: recipientEmail,
+          subject,
+          body,
+          approved: false,
+        });
+        await updateApplicationStatus(applicationId, APPLICATION_STATUS.WAITING_FOR_REVIEW, {
+          logMessage: `Created draft application email to ${recipientEmail} (awaiting human approval).`,
+        });
+      }
+>>>>>>> 1d429e22336b7068910ecf5c700f23abff096a1b
 
     // If dynamic handoff was executed (e.g. to Google Form, Phone, or Email)
     if (pageResult.handoffExecuted) {
       return {
         detectedMethod,
+<<<<<<< HEAD
         actionTaken: 'handoff_executed',
         handoffResult: pageResult.handoffResult,
         status: pageResult.status,
         message: pageResult.message || `Discovered ${detectedMethod} application method.`,
+=======
+        actionTaken: 'email_draft_created',
+        recipientEmail,
+        subject,
+        message: `Draft email created for ${recipientEmail}, pending approval.`,
+>>>>>>> 1d429e22336b7068910ecf5c700f23abff096a1b
         pageResult,
       };
     }
 
+<<<<<<< HEAD
     // Persist any form fields or state to JobApplication
     if (applicationId && (pageResult.formFields || pageResult.agentState)) {
       const updateData = {};
@@ -90,6 +191,87 @@ export const runUnknownApplicationMethod = async ({
       if (Object.keys(updateData).length > 0) {
         await JobApplication.findByIdAndUpdate(applicationId, updateData);
       }
+=======
+    // --- PHONE ---
+    if (detectedMethod === 'phone') {
+      const phoneNumber = pageResult.phoneNumbers?.[0] || jobDetails?.phone || '';
+      const phoneResult = await runPhoneApplication({
+        applicationId,
+        phoneNumber,
+        candidateInfo,
+        jobDetails,
+        userId,
+      });
+      return {
+        detectedMethod,
+        actionTaken: 'phone_script_generated',
+        phoneNumber,
+        callScript: phoneResult.callScript,
+        talkingPoints: phoneResult.talkingPoints,
+        message: phoneResult.message,
+        pageResult,
+      };
+    }
+
+    // --- GOOGLE FORM ---
+    if (detectedMethod === 'google_form') {
+      const googleFormUrl = pageResult.googleFormUrl;
+      const formResult = await runGoogleFormApplication({
+        applicationId,
+        googleFormUrl,
+        candidateInfo,
+        jobDetails,
+        userId,
+        resumePdfPath,
+      });
+      return {
+        detectedMethod,
+        actionTaken: formResult.submitted ? 'google_form_submitted' : 'google_form_filled',
+        googleFormUrl,
+        filledCount: formResult.filledCount,
+        submitted: formResult.submitted,
+        message: formResult.message,
+        pageResult,
+      };
+    }
+
+    // --- CUSTOM FORM / ATS PORTAL ---
+    if (detectedMethod === 'custom_form' || detectedMethod === 'career_portal') {
+      await logJobEvent(
+        'unknownApplicationMethod',
+        'TRIGGER_AGENT_LOOP',
+        `Custom Form or Career Portal detected. Spawning multi-step secure agent loop...`
+      );
+
+      const loopResult = await runUnknownAgentLoop({
+        applicationId,
+        userId,
+        candidateInfo,
+        jobDetails
+      });
+
+      if (applicationId) {
+        await updateApplicationStatus(applicationId, loopResult.status, {
+          logMessage: `Agent loop finished with status "${loopResult.status}". Summary: ${loopResult.summary}`,
+        });
+      }
+
+      return {
+        detectedMethod,
+        actionTaken: loopResult.status === APPLICATION_STATUS.APPLIED ? 'custom_form_submitted' : 'custom_form_filled',
+        filledCount: 0,
+        submitted: loopResult.status === APPLICATION_STATUS.APPLIED,
+        message: loopResult.summary,
+        pageResult,
+      };
+    }
+
+    // --- CAREER PORTAL / HUMAN REVIEW ---
+    if (applicationId) {
+      await updateApplicationStatus(applicationId, APPLICATION_STATUS.WAITING_FOR_REVIEW, {
+        logMessage: `Unknown page analyzed. Method: ${detectedMethod}. ${pageResult.message}`,
+      });
+>>>>>>> 1d429e22336b7068910ecf5c700f23abff096a1b
     }
 
     return {

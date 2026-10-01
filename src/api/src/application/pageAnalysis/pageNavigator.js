@@ -1,4 +1,5 @@
 import { logJobEvent, logError } from '../../utils/logger.js';
+import { waitForSettled } from '../../browser/session/sessionRegistry.js';
 
 /**
  * Executes navigation and interaction on the employer careers portal based on the AI LLM analysis
@@ -50,7 +51,76 @@ export const navigatePortalWithAiDecision = async (page, analysis, context = nul
             activePage = popupPage;
           }
         }
+<<<<<<< HEAD
         await activePage.waitForTimeout(2500);
+=======
+      }
+
+      // If matched role element found, click it to expand if accordion
+      if (targetElement) {
+        await logJobEvent('pageNavigator', 'CLICK_ROLE', `Expanding role card: "${roleTitle}"`);
+        await targetElement.click().catch(() => {});
+        await waitForSettled(page);
+      }
+
+      // Step B: Locate the inner "Apply Now" or "Apply" button
+      const buttonText = effectiveRole.targetButtonText || 'Apply Now';
+      const applyBtnLocators = [
+        // Inside parent container of matched role
+        targetElement
+          ? targetElement
+              .locator('..')
+              .locator('..')
+              .locator(`button:has-text("${buttonText}"), a:has-text("${buttonText}"), [role="button"]:has-text("${buttonText}")`)
+              .first()
+          : null,
+        targetElement
+          ? targetElement
+              .locator('..')
+              .locator(`button:has-text("${buttonText}"), a:has-text("${buttonText}"), [role="button"]:has-text("${buttonText}")`)
+              .first()
+          : null,
+        page.locator(`button:has-text("${buttonText}")`).first(),
+        page.locator(`a:has-text("${buttonText}")`).first(),
+        page.locator(`[role="button"]:has-text("${buttonText}")`).first(),
+        page.locator(`text="${buttonText}"`).first(),
+        page.locator(`button:has-text("Apply")`).first(),
+        page.locator(`a:has-text("Apply")`).first(),
+      ].filter(Boolean);
+
+      let clicked = false;
+      let activePage = page;
+
+      for (const btnLoc of applyBtnLocators) {
+        const visible = await btnLoc.isVisible().catch(() => false);
+        if (visible) {
+          await logJobEvent('pageNavigator', 'CLICK_APPLY', `Clicking inner button: "${buttonText}" for ${roleTitle}`);
+
+          // Prepare to capture any new page / popup if company site uses target="_blank"
+          let newPagePromise = null;
+          if (context) {
+            newPagePromise = context.waitForEvent('page', { timeout: 6000 }).catch(() => null);
+          }
+
+          await btnLoc.click().catch(() => {});
+          clicked = true;
+
+          if (newPagePromise) {
+            const popupPage = await newPagePromise;
+            if (popupPage) {
+              await popupPage.waitForLoadState('domcontentloaded').catch(() => {});
+              activePage = popupPage;
+              await logJobEvent('pageNavigator', 'POPUP_OPENED', `New portal tab opened: ${popupPage.url()}`);
+            }
+          }
+
+          await waitForSettled(activePage);
+          break;
+        }
+      }
+
+      if (clicked) {
+>>>>>>> 1d429e22336b7068910ecf5c700f23abff096a1b
         return {
           success: true,
           newPage: activePage,
@@ -213,7 +283,7 @@ export const navigatePortalWithAiDecision = async (page, analysis, context = nul
       if (visible) {
         await logJobEvent('pageNavigator', 'CLICK_JD_APPLY', 'Clicking JD Apply button');
         await applyBtn.click().catch(() => {});
-        await page.waitForTimeout(2500);
+        await waitForSettled(page);
         return { success: true, navigated: true, message: 'Clicked Apply on Job Description page.' };
       }
     }

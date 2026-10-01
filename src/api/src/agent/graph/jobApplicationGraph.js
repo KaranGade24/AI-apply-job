@@ -919,10 +919,14 @@ const unknownApplicationNode = async (state) => {
     let finalStatus = unknownResult.status || APPLICATION_STATUS.WAITING_FOR_REVIEW;
     if (
       unknownResult.actionTaken === "email_sent" ||
+<<<<<<< HEAD
       unknownResult.actionTaken === "google_form_submitted" ||
       unknownResult.actionTaken === "custom_form_submitted" ||
       unknownResult.actionTaken === "success" ||
       unknownResult.pageResult?.terminalState === "success"
+=======
+      unknownResult.actionTaken === "verified_submission"
+>>>>>>> 1d429e22336b7068910ecf5c700f23abff096a1b
     ) {
       finalStatus = APPLICATION_STATUS.APPLIED;
     } else if (

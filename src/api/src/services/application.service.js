@@ -469,6 +469,7 @@ export const confirmFinalApplicationService = async (applicationId, userId, payl
       `User confirmed final application ${applicationId}. Submitting...`
     );
 
+<<<<<<< HEAD
     // 1. Direct Email Application (e.g. InnoWise or employer specifies email / mailto)
     if (
       application.applicationMethod === 'email' ||
@@ -479,6 +480,20 @@ export const confirmFinalApplicationService = async (applicationId, userId, payl
         'SEND_EMAIL_APPLICATION',
         `Dispatching direct application email to ${application.email.recipient}...`
       );
+=======
+    if (application.applicationMethod === 'unknown' || application.applicationMethod === 'google_form') {
+      const { confirmFinalUnknownApplicationService } = await import('../application/unknown/confirmHandler.js');
+      return await confirmFinalUnknownApplicationService(applicationId, userId, payload);
+    }
+
+    // Run Naukri application with confirmSubmission = true
+    const res = await runNaukriApplication({
+      applicationId,
+      userId,
+      confirmSubmission: true,
+      finalEditedAnswers: payload.confirmedAnswers || [],
+    });
+>>>>>>> 1d429e22336b7068910ecf5c700f23abff096a1b
 
       return await sendDirectRoleEmailService(applicationId, userId, {
         recipient: payload.emailRecipient || application.email.recipient,
