@@ -1,12 +1,12 @@
-import path from 'path';
-import fs from 'fs';
+import path from "path";
+import fs from "fs";
 import {
   DEFAULT_ACTION_TIMEOUT_MS,
   DEFAULT_PAGE_TIMEOUT_MS,
   ACTION_FAILURE_TYPES,
-} from '../../../constant/agent.constant.js';
-import { validateAction } from './validator.js';
-import { logError, logJobEvent } from '../../../utils/logger.js';
+} from "../../../constant/agent.constant.js";
+import { validateAction } from "./validator.js";
+import { logError, logJobEvent } from "../../../utils/logger.js";
 
 /**
  * Classifies an error into a canonical ACTION_FAILURE_TYPES enum value.
@@ -15,24 +15,41 @@ import { logError, logJobEvent } from '../../../utils/logger.js';
  * @returns {string}
  */
 export const classifyActionError = (error) => {
-  const msg = (typeof error === 'string' ? error : error?.message || '').toLowerCase();
+  const msg = (
+    typeof error === "string" ? error : error?.message || ""
+  ).toLowerCase();
 
-  if (msg.includes('stale_snapshot') || msg.includes('stale snapshot')) {
+  if (msg.includes("stale_snapshot") || msg.includes("stale snapshot")) {
     return ACTION_FAILURE_TYPES.STALE_SNAPSHOT;
   }
-  if (msg.includes('element_gone') || msg.includes('not found') || msg.includes('no element found') || msg.includes('count is 0')) {
+  if (
+    msg.includes("element_gone") ||
+    msg.includes("not found") ||
+    msg.includes("no element found") ||
+    msg.includes("count is 0")
+  ) {
     return ACTION_FAILURE_TYPES.ELEMENT_GONE;
   }
-  if (msg.includes('disabled') || msg.includes('element_disabled')) {
+  if (msg.includes("disabled") || msg.includes("element_disabled")) {
     return ACTION_FAILURE_TYPES.DISABLED;
   }
-  if (msg.includes('timeout') || msg.includes('timed out')) {
+  if (msg.includes("timeout") || msg.includes("timed out")) {
     return ACTION_FAILURE_TYPES.TIMEOUT;
   }
-  if (msg.includes('navigation') || msg.includes('net::') || msg.includes('err_') || msg.includes('cannot navigate')) {
+  if (
+    msg.includes("navigation") ||
+    msg.includes("net::") ||
+    msg.includes("err_") ||
+    msg.includes("cannot navigate")
+  ) {
     return ACTION_FAILURE_TYPES.NAVIGATION_FAILED;
   }
-  if (msg.includes('blocked') || msg.includes('captcha') || msg.includes('turnstile') || msg.includes('cloudflare')) {
+  if (
+    msg.includes("blocked") ||
+    msg.includes("captcha") ||
+    msg.includes("turnstile") ||
+    msg.includes("cloudflare")
+  ) {
     return ACTION_FAILURE_TYPES.BLOCKED;
   }
 
@@ -54,10 +71,12 @@ export const resolveLocator = async (page, action, observation) => {
   const stampRef = `${targetSnapshotId}-${action.index}`;
   const selector = `[data-aij-ref="${stampRef}"]`;
 
-  const elMeta = (observation.elements || []).find((e) => e.index === action.index);
+  const elMeta = (observation.elements || []).find(
+    (e) => e.index === action.index,
+  );
 
   // If frameUrl is provided, look in the specific child frame first
-  if (elMeta?.frameUrl && typeof page.frames === 'function') {
+  if (elMeta?.frameUrl && typeof page.frames === "function") {
     const frame = page.frames().find((f) => {
       try {
         return f.url() === elMeta.frameUrl;
@@ -68,7 +87,7 @@ export const resolveLocator = async (page, action, observation) => {
 
     if (frame) {
       const locator = frame.locator(selector);
-      if (typeof locator.count === 'function') {
+      if (typeof locator.count === "function") {
         const count = await locator.count().catch(() => 0);
         if (count > 0) return locator.first();
       } else {
@@ -79,7 +98,7 @@ export const resolveLocator = async (page, action, observation) => {
 
   // Look in main page / top frame
   const mainLocator = page.locator(selector);
-  if (typeof mainLocator.count === 'function') {
+  if (typeof mainLocator.count === "function") {
     const mainCount = await mainLocator.count().catch(() => 0);
     if (mainCount > 0) return mainLocator.first();
   } else {
@@ -87,7 +106,7 @@ export const resolveLocator = async (page, action, observation) => {
   }
 
   // Scan all frames as fallback
-  if (typeof page.frames === 'function') {
+  if (typeof page.frames === "function") {
     for (const frame of page.frames()) {
       try {
         const frameLoc = frame.locator(selector);
@@ -109,15 +128,15 @@ export const waitForPageSettle = async (page) => {
   if (!page) return;
 
   try {
-    if (typeof page.waitForLoadState === 'function') {
+    if (typeof page.waitForLoadState === "function") {
       await Promise.race([
-        page.waitForLoadState('domcontentloaded').catch(() => {}),
+        page.waitForLoadState("domcontentloaded").catch(() => {}),
         new Promise((resolve) => setTimeout(resolve, 3000)),
       ]);
     }
 
     // Brief DOM stabilization pause
-    if (typeof page.waitForTimeout === 'function') {
+    if (typeof page.waitForTimeout === "function") {
       await page.waitForTimeout(300).catch(() => {});
     }
   } catch {
@@ -134,8 +153,8 @@ export const waitForPageSettle = async (page) => {
  * @returns {string} Safe absolute file path
  */
 export const validateUploadPath = (fileRef, options = {}) => {
-  if (!fileRef || typeof fileRef !== 'string') {
-    throw new Error('uploadFile requires a valid fileRef path string.');
+  if (!fileRef || typeof fileRef !== "string") {
+    throw new Error("uploadFile requires a valid fileRef path string.");
   }
 
   // Check explicit allowed path from options (e.g. verified user resume)
@@ -145,11 +164,17 @@ export const validateUploadPath = (fileRef, options = {}) => {
 
   // Prevent path traversal
   const normalized = path.normalize(fileRef);
-  if (normalized.includes('..') || normalized.startsWith('/etc') || normalized.startsWith('/var') || normalized.startsWith('/root')) {
-    throw new Error('Access to requested file path is forbidden.');
+  const securityPath = normalized.replaceAll("\\", "/");
+  if (
+    securityPath.includes("..") ||
+    securityPath.startsWith("/etc") ||
+    securityPath.startsWith("/var") ||
+    securityPath.startsWith("/root")
+  ) {
+    throw new Error("Access to requested file path is forbidden.");
   }
 
-  return normalized;
+  return securityPath;
 };
 
 /**
@@ -168,13 +193,18 @@ export const validateUploadPath = (fileRef, options = {}) => {
  *   message?: string
  * }>}
  */
-export const executeAction = async (page, action, observation = {}, options = {}) => {
+export const executeAction = async (
+  page,
+  action,
+  observation = {},
+  options = {},
+) => {
   if (!page) {
     return {
       success: false,
       action,
       errorType: ACTION_FAILURE_TYPES.UNKNOWN,
-      message: 'Active Playwright page is unavailable or closed.',
+      message: "Active Playwright page is unavailable or closed.",
     };
   }
 
@@ -195,17 +225,17 @@ export const executeAction = async (page, action, observation = {}, options = {}
 
   try {
     switch (type) {
-      case 'navigate': {
+      case "navigate": {
         const navTimeout = options.navigationTimeout || DEFAULT_PAGE_TIMEOUT_MS;
         await page.goto(action.url, {
-          waitUntil: 'domcontentloaded',
+          waitUntil: "domcontentloaded",
           timeout: navTimeout,
         });
         await waitForPageSettle(page);
         return { success: true, action, message: `Navigated to ${action.url}` };
       }
 
-      case 'click': {
+      case "click": {
         const locator = await resolveLocator(page, action, observation);
         if (!locator) {
           return {
@@ -218,10 +248,14 @@ export const executeAction = async (page, action, observation = {}, options = {}
 
         await locator.click({ timeout });
         await waitForPageSettle(page);
-        return { success: true, action, message: `Clicked element [${action.index}]` };
+        return {
+          success: true,
+          action,
+          message: `Clicked element [${action.index}]`,
+        };
       }
 
-      case 'fill': {
+      case "fill": {
         const locator = await resolveLocator(page, action, observation);
         if (!locator) {
           return {
@@ -232,11 +266,15 @@ export const executeAction = async (page, action, observation = {}, options = {}
           };
         }
 
-        await locator.fill(String(action.value || ''), { timeout });
-        return { success: true, action, message: `Filled element [${action.index}]` };
+        await locator.fill(String(action.value || ""), { timeout });
+        return {
+          success: true,
+          action,
+          message: `Filled element [${action.index}]`,
+        };
       }
 
-      case 'select': {
+      case "select": {
         const locator = await resolveLocator(page, action, observation);
         if (!locator) {
           return {
@@ -248,10 +286,14 @@ export const executeAction = async (page, action, observation = {}, options = {}
         }
 
         await locator.selectOption(action.option, { timeout });
-        return { success: true, action, message: `Selected option "${action.option}" on element [${action.index}]` };
+        return {
+          success: true,
+          action,
+          message: `Selected option "${action.option}" on element [${action.index}]`,
+        };
       }
 
-      case 'check': {
+      case "check": {
         const locator = await resolveLocator(page, action, observation);
         if (!locator) {
           return {
@@ -263,10 +305,14 @@ export const executeAction = async (page, action, observation = {}, options = {}
         }
 
         await locator.check({ timeout });
-        return { success: true, action, message: `Checked element [${action.index}]` };
+        return {
+          success: true,
+          action,
+          message: `Checked element [${action.index}]`,
+        };
       }
 
-      case 'uncheck': {
+      case "uncheck": {
         const locator = await resolveLocator(page, action, observation);
         if (!locator) {
           return {
@@ -278,10 +324,14 @@ export const executeAction = async (page, action, observation = {}, options = {}
         }
 
         await locator.uncheck({ timeout });
-        return { success: true, action, message: `Unchecked element [${action.index}]` };
+        return {
+          success: true,
+          action,
+          message: `Unchecked element [${action.index}]`,
+        };
       }
 
-      case 'uploadFile': {
+      case "uploadFile": {
         const locator = await resolveLocator(page, action, observation);
         if (!locator) {
           return {
@@ -294,34 +344,54 @@ export const executeAction = async (page, action, observation = {}, options = {}
 
         const safePath = validateUploadPath(action.fileRef, options);
         await locator.setInputFiles(safePath, { timeout });
-        return { success: true, action, message: `Uploaded file to input [${action.index}]` };
+        return {
+          success: true,
+          action,
+          message: `Uploaded file to input [${action.index}]`,
+        };
       }
 
-      case 'scroll': {
+      case "scroll": {
         const amount = action.amount || 500;
-        const deltaY = action.direction === 'up' ? -amount : amount;
-        const deltaX = action.direction === 'left' ? -amount : action.direction === 'right' ? amount : 0;
+        const deltaY = action.direction === "up" ? -amount : amount;
+        const deltaX =
+          action.direction === "left"
+            ? -amount
+            : action.direction === "right"
+              ? amount
+              : 0;
 
-        if (page.mouse && typeof page.mouse.wheel === 'function') {
+        if (page.mouse && typeof page.mouse.wheel === "function") {
           await page.mouse.wheel(deltaX, deltaY);
-        } else if (typeof page.evaluate === 'function') {
-          await page.evaluate(({ dx, dy }) => window.scrollBy(dx, dy), { dx: deltaX, dy: deltaY });
+        } else if (typeof page.evaluate === "function") {
+          await page.evaluate(({ dx, dy }) => window.scrollBy(dx, dy), {
+            dx: deltaX,
+            dy: deltaY,
+          });
         }
         await waitForPageSettle(page);
-        return { success: true, action, message: `Scrolled ${action.direction} by ${amount}px` };
+        return {
+          success: true,
+          action,
+          message: `Scrolled ${action.direction} by ${amount}px`,
+        };
       }
 
-      case 'pressKey': {
-        if (page.keyboard && typeof page.keyboard.press === 'function') {
+      case "pressKey": {
+        if (page.keyboard && typeof page.keyboard.press === "function") {
           await page.keyboard.press(action.key);
         }
         await waitForPageSettle(page);
-        return { success: true, action, message: `Pressed key "${action.key}"` };
+        return {
+          success: true,
+          action,
+          message: `Pressed key "${action.key}"`,
+        };
       }
 
-      case 'waitFor': {
+      case "waitFor": {
         const ms = action.ms || 1000;
-        if (typeof page.waitForTimeout === 'function') {
+        if (typeof page.waitForTimeout === "function") {
           await page.waitForTimeout(ms);
         } else {
           await new Promise((resolve) => setTimeout(resolve, ms));
@@ -329,17 +399,25 @@ export const executeAction = async (page, action, observation = {}, options = {}
         return { success: true, action, message: `Waited for ${ms}ms` };
       }
 
-      case 'extract':
-      case 'askHuman':
-      case 'requestReview':
-      case 'finish':
-      case 'fail': {
-        return { success: true, action, message: `Control action ${type} acknowledged` };
+      case "extract":
+      case "askHuman":
+      case "requestReview":
+      case "finish":
+      case "fail": {
+        return {
+          success: true,
+          action,
+          message: `Control action ${type} acknowledged`,
+        };
       }
 
-      case 'submitApplication': {
+      case "submitApplication": {
         await waitForPageSettle(page);
-        return { success: true, action, message: 'Application submission initiated' };
+        return {
+          success: true,
+          action,
+          message: "Application submission initiated",
+        };
       }
 
       default: {

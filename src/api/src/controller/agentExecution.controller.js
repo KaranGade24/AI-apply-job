@@ -60,6 +60,23 @@ export const getQuestions = async (req, res, next) => {
   }
 };
 
+export const getEvents = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user?.userId;
+    if (!userId) throw new appError("Unauthorized", 401);
+
+    const result = await agentRunnerService.getWorkflowEvents(
+      id,
+      userId,
+      Number(req.query.limit) || 50,
+    );
+    res.status(200).json({ status: "success", data: result });
+  } catch (error) {
+    next(error);
+  }
+};
+
 /**
  * POST /api/applications/:id/agent/answers
  * Submits user answers to pending questions and resumes paused LangGraph workflow.
@@ -73,7 +90,7 @@ export const submitAnswers = async (req, res, next) => {
     const parsed = submitAnswersRequestSchema.safeParse(req.body);
     if (!parsed.success) {
       throw new appError(
-        `Invalid answers payload: ${parsed.error.errors.map((e) => e.message).join(", ")}`,
+        `Invalid answers payload: ${parsed.error.issues.map((issue) => issue.message).join(", ")}`,
         400,
       );
     }
@@ -140,7 +157,7 @@ export const confirmReview = async (req, res, next) => {
     const parsed = confirmReviewRequestSchema.safeParse(req.body);
     if (!parsed.success) {
       throw new appError(
-        `Invalid review confirmation payload: ${parsed.error.errors.map((e) => e.message).join(", ")}`,
+        `Invalid review confirmation payload: ${parsed.error.issues.map((issue) => issue.message).join(", ")}`,
         400,
       );
     }
@@ -177,6 +194,7 @@ export default {
   startApplication,
   getStatus,
   getQuestions,
+  getEvents,
   submitAnswers,
   getReview,
   updateReviewEdits,

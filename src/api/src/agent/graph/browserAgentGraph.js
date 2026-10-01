@@ -1,27 +1,46 @@
-import { StateGraph, START, END, interrupt, Command } from '@langchain/langgraph';
-import crypto from 'crypto';
-import { BrowserAgentStateAnnotation } from '../schema/agentStateSchema.js';
-import { MongoDBSaver } from './mongoSaver.js';
-import { SessionRegistry } from '../browser/session/sessionRegistry.js';
-import { inPageExtractElements } from '../browser/observe/extractElements.js';
-import { classifyPage } from '../browser/perception/classifyPage.js';
-import { extractFormFields } from '../browser/forms/fieldModel.js';
-import { mapFormAnswers } from '../browser/forms/mapAnswers.js';
-import { validateActionBatch, validateAction } from '../browser/actions/validator.js';
-import { executeAction, waitForPageSettle } from '../browser/actions/executor.js';
-import { buildFinalReview, applyUserEditsToReview, computeReviewHash } from '../browser/review/reviewBuilder.js';
-import { verifySubmissionState, persistSubmissionOutcome } from '../browser/review/verifySubmission.js';
-import { ApplicationSessionRepository } from '../../repositories/applicationSession.repository.js';
-import { ApplicationRepository } from '../../repositories/application.repository.js';
-import { ApplicationQuestion } from '../../model/ApplicationQuestion.js';
-import { UserProfile } from '../../model/UserProfile.js';
-import { Resume } from '../../model/Resume.js';
+import {
+  StateGraph,
+  START,
+  END,
+  interrupt,
+  Command,
+} from "@langchain/langgraph";
+import crypto from "crypto";
+import { BrowserAgentStateAnnotation } from "../schema/agentStateSchema.js";
+import { MongoDBSaver } from "./mongoSaver.js";
+import { SessionRegistry } from "../../browser/session/sessionRegistry.js";
+import { inPageExtractElements } from "../browser/observe/extractElements.js";
+import { classifyPage } from "../browser/perception/classifyPage.js";
+import { extractFormFields } from "../browser/forms/fieldModel.js";
+import { mapFormAnswers } from "../browser/forms/mapAnswers.js";
+import {
+  validateActionBatch,
+  validateAction,
+} from "../browser/actions/validator.js";
+import {
+  executeAction,
+  waitForPageSettle,
+} from "../browser/actions/executor.js";
+import {
+  buildFinalReview,
+  applyUserEditsToReview,
+  computeReviewHash,
+} from "../browser/review/reviewBuilder.js";
+import {
+  verifySubmissionState,
+  persistSubmissionOutcome,
+} from "../browser/review/verifySubmission.js";
+import { ApplicationSessionRepository } from "../../repositories/applicationSession.repository.js";
+import { ApplicationRepository } from "../../repositories/application.repository.js";
+import { ApplicationQuestion } from "../../model/ApplicationQuestion.js";
+import { UserProfile } from "../../model/UserProfile.js";
+import { Resume } from "../../model/Resume.js";
 import {
   AGENT_STATUS,
   PERCEPTION_PAGE_TYPES,
   MAX_AGENT_STEPS,
-} from '../../constant/agent.constant.js';
-import { logJobEvent, logError } from '../../utils/logger.js';
+} from "../../constant/agent.constant.js";
+import { logJobEvent, logError } from "../../utils/logger.js";
 
 /**
  * Computes a deterministic SHA-256 hash of answers for final review confirmation integrity.
@@ -31,10 +50,14 @@ import { logJobEvent, logError } from '../../utils/logger.js';
  */
 export const computeAnswersHash = (answers = []) => {
   const normalized = (answers || [])
-    .map((a) => `${a.questionId || ''}:${String(a.answer ?? a.value ?? '')}`)
+    .map((a) => `${a.questionId || ""}:${String(a.answer ?? a.value ?? "")}`)
     .sort()
-    .join('|');
-  return crypto.createHash('sha256').update(normalized).digest('hex').slice(0, 16);
+    .join("|");
+  return crypto
+    .createHash("sha256")
+    .update(normalized)
+    .digest("hex")
+    .slice(0, 16);
 };
 
 /**
@@ -45,22 +68,33 @@ const observeAndActNode = async (state) => {
   const { applicationId, userId, stepCount = 0 } = state;
   const appIdStr = String(applicationId);
 
-  await logJobEvent('browserAgentGraph', 'OBSERVE_AND_ACT_START', `[application:${appIdStr}] Step ${stepCount + 1}`);
+  await logJobEvent(
+    "browserAgentGraph",
+    "OBSERVE_AND_ACT_START",
+    `[application:${appIdStr}] Step ${stepCount + 1}`,
+  );
 
   // Step limit guard
   if (stepCount >= MAX_AGENT_STEPS) {
-    await logJobEvent('browserAgentGraph', 'MAX_STEPS_EXCEEDED', `[application:${appIdStr}] Reached limit of ${MAX_AGENT_STEPS} steps`);
+    await logJobEvent(
+      "browserAgentGraph",
+      "MAX_STEPS_EXCEEDED",
+      `[application:${appIdStr}] Reached limit of ${MAX_AGENT_STEPS} steps`,
+    );
     return {
       status: AGENT_STATUS.FAILED,
-      errors: ['MAX_AGENT_STEPS_EXCEEDED'],
+      errors: ["MAX_AGENT_STEPS_EXCEEDED"],
     };
   }
 
   // If state is already explicitly set to REVIEW or WAITING_FOR_CONFIRMATION
-  if (state.status === AGENT_STATUS.WAITING_FOR_CONFIRMATION || state.pageType === PERCEPTION_PAGE_TYPES.REVIEW) {
+  if (
+    state.status === AGENT_STATUS.WAITING_FOR_CONFIRMATION ||
+    state.pageType === PERCEPTION_PAGE_TYPES.REVIEW
+  ) {
     return {
       pageType: PERCEPTION_PAGE_TYPES.REVIEW,
-      currentUrl: state.currentUrl || '',
+      currentUrl: state.currentUrl || "",
       status: AGENT_STATUS.WAITING_FOR_CONFIRMATION,
     };
   }
@@ -68,14 +102,18 @@ const observeAndActNode = async (state) => {
   // 1. Get or recover active Playwright page
   let session = SessionRegistry.getSession(appIdStr);
   if (!session || !session.activePage || session.activePage.isClosed()) {
-    session = await SessionRegistry.recreateSession(appIdStr, userId, state.currentUrl);
+    session = await SessionRegistry.recreateSession(
+      appIdStr,
+      userId,
+      state.currentUrl,
+    );
   }
 
   const page = SessionRegistry.getActivePage(appIdStr);
   if (!page || page.isClosed()) {
     return {
       status: AGENT_STATUS.FAILED,
-      errors: ['BROWSER_PAGE_UNAVAILABLE'],
+      errors: ["BROWSER_PAGE_UNAVAILABLE"],
     };
   }
 
@@ -93,9 +131,11 @@ const observeAndActNode = async (state) => {
     rawElements = [];
   }
 
-  const title = await page.title().catch(() => '');
+  const title = await page.title().catch(() => "");
   const url = page.url();
-  const visibleText = await page.evaluate(() => document.body?.innerText?.slice(0, 1000) || '').catch(() => '');
+  const visibleText = await page
+    .evaluate(() => document.body?.innerText?.slice(0, 1000) || "")
+    .catch(() => "");
 
   const observation = {
     snapshotId,
@@ -110,19 +150,20 @@ const observeAndActNode = async (state) => {
   const pageType = classification.pageType;
 
   await logJobEvent(
-    'browserAgentGraph',
-    'PAGE_CLASSIFIED',
-    `[application:${appIdStr}] PageType: ${pageType} (URL: ${url})`
+    "browserAgentGraph",
+    "PAGE_CLASSIFIED",
+    `[application:${appIdStr}] PageType: ${pageType} (URL: ${url})`,
   );
 
   // 4. Branching based on Page Type
   if (pageType === PERCEPTION_PAGE_TYPES.CAPTCHA_OR_BLOCKED) {
     const captchaQuestion = {
-      questionId: 'captcha_resolution',
-      question: 'The application portal is presenting a CAPTCHA / bot challenge. Please solve it in the browser.',
-      reason: 'captcha',
+      questionId: "captcha_resolution",
+      question:
+        "The application portal is presenting a CAPTCHA / bot challenge. Please solve it in the browser.",
+      reason: "captcha",
       required: true,
-      options: ['I have solved the CAPTCHA'],
+      options: ["I have solved the CAPTCHA"],
     };
 
     return {
@@ -153,8 +194,13 @@ const observeAndActNode = async (state) => {
   const fields = extractFormFields(observation);
 
   if (fields.length > 0) {
-    const profileDoc = await UserProfile.findOne({ userId }).lean().catch(() => null);
-    const resumeDoc = await Resume.findOne({ userId }).sort({ createdAt: -1 }).lean().catch(() => null);
+    const profileDoc = await UserProfile.findOne({ userId })
+      .lean()
+      .catch(() => null);
+    const resumeDoc = await Resume.findOne({ userId })
+      .sort({ createdAt: -1 })
+      .lean()
+      .catch(() => null);
 
     const mappingResult = await mapFormAnswers(fields, {
       profile: profileDoc || {},
@@ -162,7 +208,10 @@ const observeAndActNode = async (state) => {
       previousAnswers: state.answers || [],
     });
 
-    if (mappingResult.pendingHumanQuestions && mappingResult.pendingHumanQuestions.length > 0) {
+    if (
+      mappingResult.pendingHumanQuestions &&
+      mappingResult.pendingHumanQuestions.length > 0
+    ) {
       return {
         pageType,
         currentUrl: url,
@@ -174,19 +223,36 @@ const observeAndActNode = async (state) => {
     // Build action batch for resolved fields
     const actionsToExecute = [];
     for (const ans of mappingResult.answers) {
-      if (ans.value !== undefined && ans.value !== null && ans.value !== '') {
+      if (ans.value !== undefined && ans.value !== null && ans.value !== "") {
         const field = fields.find((f) => f.index === ans.fieldIndex);
         if (field) {
-          if (field.tag === 'select') {
-            actionsToExecute.push({ type: 'select', index: field.index, option: String(ans.value) });
-          } else if (field.type === 'checkbox') {
-            actionsToExecute.push({ type: ans.value ? 'check' : 'uncheck', index: field.index });
-          } else if (field.type === 'radio') {
-            if (ans.value) actionsToExecute.push({ type: 'check', index: field.index });
-          } else if (field.type === 'file') {
-            actionsToExecute.push({ type: 'uploadFile', index: field.index, fileRef: String(ans.value) });
+          if (field.tag === "select") {
+            actionsToExecute.push({
+              type: "select",
+              index: field.index,
+              option: String(ans.value),
+            });
+          } else if (field.type === "checkbox") {
+            actionsToExecute.push({
+              type: ans.value ? "check" : "uncheck",
+              index: field.index,
+            });
+          } else if (field.type === "radio") {
+            if (ans.value)
+              actionsToExecute.push({ type: "check", index: field.index });
+          } else if (field.type === "file") {
+            actionsToExecute.push({
+              type: "uploadFile",
+              index: field.index,
+              fileRef: String(ans.value),
+            });
           } else {
-            actionsToExecute.push({ type: 'fill', index: field.index, value: String(ans.value), source: ans.source });
+            actionsToExecute.push({
+              type: "fill",
+              index: field.index,
+              value: String(ans.value),
+              source: ans.source,
+            });
           }
         }
       }
@@ -194,23 +260,27 @@ const observeAndActNode = async (state) => {
 
     // Check if button is a final submit button or if page is a review/final step
     const submitButton = observation.elements.find((e) => {
-      const text = (e.text || e.label || '').toLowerCase();
-      const type = (e.type || '').toLowerCase();
+      const text = (e.text || e.label || "").toLowerCase();
+      const type = (e.type || "").toLowerCase();
       return (
-        type === 'submit' ||
-        text === 'submit' ||
-        text.includes('submit application') ||
-        text.includes('confirm application') ||
-        text.includes('send application')
+        type === "submit" ||
+        text === "submit" ||
+        text.includes("submit application") ||
+        text.includes("confirm application") ||
+        text.includes("send application")
       );
     });
 
-    const isFinalSubmissionStep = Boolean(submitButton) || pageType === PERCEPTION_PAGE_TYPES.REVIEW;
+    const isFinalSubmissionStep =
+      Boolean(submitButton) || pageType === PERCEPTION_PAGE_TYPES.REVIEW;
 
     if (isFinalSubmissionStep) {
       // Execute any pending field fills first, but DO NOT click submit!
       if (actionsToExecute.length > 0) {
-        const batchValidation = validateActionBatch(actionsToExecute.slice(0, 3), observation);
+        const batchValidation = validateActionBatch(
+          actionsToExecute.slice(0, 3),
+          observation,
+        );
         if (batchValidation.ok) {
           for (const act of batchValidation.validatedActions || []) {
             await executeAction(page, act, observation);
@@ -239,17 +309,24 @@ const observeAndActNode = async (state) => {
 
     // Find next / continue button if present (non-submit)
     const nextButton = observation.elements.find((e) => {
-      const text = (e.text || e.label || '').toLowerCase();
-      return text.includes('next') || text.includes('continue') || text.includes('save & continue');
+      const text = (e.text || e.label || "").toLowerCase();
+      return (
+        text.includes("next") ||
+        text.includes("continue") ||
+        text.includes("save & continue")
+      );
     });
 
     if (nextButton) {
-      actionsToExecute.push({ type: 'click', index: nextButton.index });
+      actionsToExecute.push({ type: "click", index: nextButton.index });
     }
 
     // Validate and execute batch
     if (actionsToExecute.length > 0) {
-      const batchValidation = validateActionBatch(actionsToExecute.slice(0, 3), observation);
+      const batchValidation = validateActionBatch(
+        actionsToExecute.slice(0, 3),
+        observation,
+      );
       if (batchValidation.ok) {
         for (const act of batchValidation.validatedActions || []) {
           await executeAction(page, act, observation);
@@ -259,12 +336,20 @@ const observeAndActNode = async (state) => {
   } else {
     // If no form fields but there is an Apply button
     const applyButton = observation.elements.find((e) => {
-      const text = (e.text || e.label || '').toLowerCase();
-      return text.includes('apply now') || text.includes('apply for this job') || text === 'apply';
+      const text = (e.text || e.label || "").toLowerCase();
+      return (
+        text.includes("apply now") ||
+        text.includes("apply for this job") ||
+        text === "apply"
+      );
     });
 
     if (applyButton) {
-      await executeAction(page, { type: 'click', index: applyButton.index }, observation);
+      await executeAction(
+        page,
+        { type: "click", index: applyButton.index },
+        observation,
+      );
       await waitForPageSettle(page);
     }
   }
@@ -286,9 +371,9 @@ const collectQuestionsNode = async (state) => {
   const appIdStr = String(applicationId);
 
   await logJobEvent(
-    'browserAgentGraph',
-    'COLLECT_QUESTIONS',
-    `[application:${appIdStr}] Persisting ${pendingQuestions.length} questions for human review`
+    "browserAgentGraph",
+    "COLLECT_QUESTIONS",
+    `[application:${appIdStr}] Persisting ${pendingQuestions.length} questions for human review`,
   );
 
   if (pendingQuestions.length > 0) {
@@ -312,22 +397,22 @@ const humanInputNode = async (state) => {
   const appIdStr = String(applicationId);
 
   await logJobEvent(
-    'browserAgentGraph',
-    'HUMAN_INPUT_PAUSE',
-    `[application:${appIdStr}] Pausing workflow via LangGraph interrupt(). Waiting for answers.`
+    "browserAgentGraph",
+    "HUMAN_INPUT_PAUSE",
+    `[application:${appIdStr}] Pausing workflow via LangGraph interrupt(). Waiting for answers.`,
   );
 
   // Interrupt graph execution. Resumed with answers array: [{ questionId, answer, userConfirmed }]
   const humanAnswers = interrupt({
-    type: 'human_input',
+    type: "human_input",
     applicationId: appIdStr,
     pendingQuestions,
   });
 
   await logJobEvent(
-    'browserAgentGraph',
-    'HUMAN_INPUT_RESUMED',
-    `[application:${appIdStr}] Received ${Array.isArray(humanAnswers) ? humanAnswers.length : 0} human answers.`
+    "browserAgentGraph",
+    "HUMAN_INPUT_RESUMED",
+    `[application:${appIdStr}] Received ${Array.isArray(humanAnswers) ? humanAnswers.length : 0} human answers.`,
   );
 
   // Save answers to question bank and session
@@ -335,12 +420,14 @@ const humanInputNode = async (state) => {
 
   if (Array.isArray(humanAnswers)) {
     for (const ha of humanAnswers) {
-      const idx = mergedAnswers.findIndex((a) => a.questionId === ha.questionId);
+      const idx = mergedAnswers.findIndex(
+        (a) => a.questionId === ha.questionId,
+      );
       const answerObj = {
         questionId: ha.questionId,
-        question: ha.question || '',
+        question: ha.question || "",
         answer: ha.answer,
-        source: 'human',
+        source: "human",
         confidence: 1.0,
         userConfirmed: true,
       };
@@ -360,10 +447,10 @@ const humanInputNode = async (state) => {
             questionKey: ha.questionId,
             questionText: ha.question || ha.questionId,
             answer: ha.answer,
-            source: 'human',
+            source: "human",
             userConfirmed: true,
           },
-          { upsert: true, new: true }
+          { upsert: true, new: true },
         ).catch(() => {});
       }
     }
@@ -391,13 +478,17 @@ const reviewGateNode = async (state) => {
   const { applicationId, userId, answers = [], finalReview = {} } = state;
   const appIdStr = String(applicationId);
 
-  const hash = finalReview.reviewHash || finalReview.hash || computeAnswersHash(answers);
+  const hash =
+    finalReview.reviewHash || finalReview.hash || computeAnswersHash(answers);
 
-  if (!finalReview.approved || (finalReview.reviewHash && finalReview.reviewHash !== hash)) {
+  if (
+    !finalReview.approved ||
+    (finalReview.reviewHash && finalReview.reviewHash !== hash)
+  ) {
     await logJobEvent(
-      'browserAgentGraph',
-      'REVIEW_GATE_PAUSE',
-      `[application:${appIdStr}] Pausing workflow at Final Review gate. Waiting for confirmation.`
+      "browserAgentGraph",
+      "REVIEW_GATE_PAUSE",
+      `[application:${appIdStr}] Pausing workflow at Final Review gate. Waiting for confirmation.`,
     );
 
     await ApplicationSessionRepository.updateSession(appIdStr, userId, {
@@ -407,7 +498,7 @@ const reviewGateNode = async (state) => {
 
     // Interrupt for user final review confirmation
     const confirmation = interrupt({
-      type: 'final_review',
+      type: "final_review",
       applicationId: appIdStr,
       finalReview,
       answers,
@@ -415,7 +506,11 @@ const reviewGateNode = async (state) => {
     });
 
     if (confirmation?.approved) {
-      await logJobEvent('browserAgentGraph', 'REVIEW_GATE_APPROVED', `[application:${appIdStr}] User approved final review.`);
+      await logJobEvent(
+        "browserAgentGraph",
+        "REVIEW_GATE_APPROVED",
+        `[application:${appIdStr}] User approved final review.`,
+      );
 
       let updatedReview = {
         ...finalReview,
@@ -429,8 +524,15 @@ const reviewGateNode = async (state) => {
       let pendingDiffActions = [];
 
       // If user provided edits in review approval, apply them and prepare diff actions
-      if (Array.isArray(confirmation.edits) && confirmation.edits.length > 0 && finalReview.fields) {
-        const editRes = applyUserEditsToReview({ currentReview: finalReview, edits: confirmation.edits });
+      if (
+        Array.isArray(confirmation.edits) &&
+        confirmation.edits.length > 0 &&
+        finalReview.fields
+      ) {
+        const editRes = applyUserEditsToReview({
+          currentReview: finalReview,
+          edits: confirmation.edits,
+        });
         updatedReview = {
           ...editRes.updatedReview,
           approved: true,
@@ -457,16 +559,25 @@ const reviewGateNode = async (state) => {
  * Executes the final application submission after review approval.
  */
 const submitNode = async (state) => {
-  const { applicationId, userId, finalReview = {}, pendingDiffActions = [] } = state;
+  const {
+    applicationId,
+    userId,
+    finalReview = {},
+    pendingDiffActions = [],
+  } = state;
   const appIdStr = String(applicationId);
 
-  await logJobEvent('browserAgentGraph', 'SUBMIT_NODE', `[application:${appIdStr}] Starting verified submission sequence`);
+  await logJobEvent(
+    "browserAgentGraph",
+    "SUBMIT_NODE",
+    `[application:${appIdStr}] Starting verified submission sequence`,
+  );
 
   const page = SessionRegistry.getActivePage(appIdStr);
   if (!page || page.isClosed()) {
     return {
       status: AGENT_STATUS.FAILED,
-      errors: ['BROWSER_PAGE_UNAVAILABLE_AT_SUBMIT'],
+      errors: ["BROWSER_PAGE_UNAVAILABLE_AT_SUBMIT"],
     };
   }
 
@@ -496,54 +607,68 @@ const submitNode = async (state) => {
   const liveObservation = {
     snapshotId,
     url: page.url(),
-    title: await page.title().catch(() => ''),
-    visibleTextTrimmed: await page.evaluate(() => document.body?.innerText?.slice(0, 2000) || '').catch(() => ''),
+    title: await page.title().catch(() => ""),
+    visibleTextTrimmed: await page
+      .evaluate(() => document.body?.innerText?.slice(0, 2000) || "")
+      .catch(() => ""),
     elements: liveElements,
   };
 
   // 3. Verify submit button still exists
   let submitBtn = liveElements.find((e) => {
-    const text = (e.text || e.label || '').toLowerCase();
-    const type = (e.type || '').toLowerCase();
+    const text = (e.text || e.label || "").toLowerCase();
+    const type = (e.type || "").toLowerCase();
     return (
-      type === 'submit' ||
-      text === 'submit' ||
-      text.includes('submit application') ||
-      text === 'apply' ||
-      text.includes('send application') ||
-      text.includes('confirm application')
+      type === "submit" ||
+      text === "submit" ||
+      text.includes("submit application") ||
+      text === "apply" ||
+      text.includes("send application") ||
+      text.includes("confirm application")
     );
   });
 
   // Fallback Playwright DOM locator if not indexed
   if (!submitBtn) {
-    const playwrightSubmit = await page.$('button[type="submit"], input[type="submit"], button:has-text("Submit"), button:has-text("Submit Application")').catch(() => null);
+    const playwrightSubmit = await page
+      .$(
+        'button[type="submit"], input[type="submit"], button:has-text("Submit"), button:has-text("Submit Application")',
+      )
+      .catch(() => null);
     if (playwrightSubmit) {
       submitBtn = { index: -1 };
     }
   }
 
   if (!submitBtn) {
-    await logJobEvent('browserAgentGraph', 'SUBMIT_BTN_MISSING', 'Submit button missing on live form during submit.');
+    await logJobEvent(
+      "browserAgentGraph",
+      "SUBMIT_BTN_MISSING",
+      "Submit button missing on live form during submit.",
+    );
     return {
       status: AGENT_STATUS.FAILED,
-      errors: ['SUBMIT_BUTTON_NOT_FOUND_AFTER_REVIEW'],
+      errors: ["SUBMIT_BUTTON_NOT_FOUND_AFTER_REVIEW"],
     };
   }
 
   // 4. Validate submitApplication action via validator (Phase 6 rule)
   const validation = validateAction(
-    { type: 'submitApplication' },
+    { type: "submitApplication" },
     liveObservation,
     {
       finalReview,
       reviewHash: finalReview.reviewHash || finalReview.hash,
       currentAnswersHash: finalReview.reviewHash || finalReview.hash,
-    }
+    },
   );
 
   if (!validation.ok) {
-    await logJobEvent('browserAgentGraph', 'SUBMISSION_VALIDATION_BLOCKED', validation.message);
+    await logJobEvent(
+      "browserAgentGraph",
+      "SUBMISSION_VALIDATION_BLOCKED",
+      validation.message,
+    );
     return {
       status: AGENT_STATUS.FAILED,
       errors: [validation.message],
@@ -552,9 +677,15 @@ const submitNode = async (state) => {
 
   // 5. Execute submit
   if (submitBtn.index >= 0) {
-    await executeAction(page, { type: 'click', index: submitBtn.index }, liveObservation);
+    await executeAction(
+      page,
+      { type: "click", index: submitBtn.index },
+      liveObservation,
+    );
   } else {
-    const btn = await page.$('button[type="submit"], input[type="submit"], button:has-text("Submit"), button:has-text("Submit Application")');
+    const btn = await page.$(
+      'button[type="submit"], input[type="submit"], button:has-text("Submit"), button:has-text("Submit Application")',
+    );
     if (btn) await btn.click().catch(() => {});
   }
   await waitForPageSettle(page, { timeoutMs: 8000 });
@@ -572,30 +703,38 @@ const verifyNode = async (state) => {
   const { applicationId, userId, finalReview } = state;
   const appIdStr = String(applicationId);
 
-  await logJobEvent('browserAgentGraph', 'VERIFY_NODE', `[application:${appIdStr}] Verifying submission outcome`);
+  await logJobEvent(
+    "browserAgentGraph",
+    "VERIFY_NODE",
+    `[application:${appIdStr}] Verifying submission outcome`,
+  );
 
   const page = SessionRegistry.getActivePage(appIdStr);
   let postObservation = {
-    url: page?.url() || state.currentUrl || '',
-    title: '',
-    visibleTextTrimmed: '',
+    url: page?.url() || state.currentUrl || "",
+    title: "",
+    visibleTextTrimmed: "",
     elements: [],
   };
 
   if (page && !page.isClosed()) {
     try {
-      const liveElements = await page.evaluate(inPageExtractElements, {
-        snapshotId: `snap_verify_${Date.now()}`,
-        frameUrl: page.url(),
-        startIndex: 0,
-        maxElements: 60,
-      }).catch(() => []);
+      const liveElements = await page
+        .evaluate(inPageExtractElements, {
+          snapshotId: `snap_verify_${Date.now()}`,
+          frameUrl: page.url(),
+          startIndex: 0,
+          maxElements: 60,
+        })
+        .catch(() => []);
 
       postObservation = {
         snapshotId: `snap_verify_${Date.now()}`,
         url: page.url(),
-        title: await page.title().catch(() => ''),
-        visibleTextTrimmed: await page.evaluate(() => document.body?.innerText?.slice(0, 3000) || '').catch(() => ''),
+        title: await page.title().catch(() => ""),
+        visibleTextTrimmed: await page
+          .evaluate(() => document.body?.innerText?.slice(0, 3000) || "")
+          .catch(() => ""),
         elements: liveElements,
       };
     } catch {
@@ -607,22 +746,30 @@ const verifyNode = async (state) => {
 
   // In unit test environment where simulated fictitious domains cannot resolve, allow mock completion
   if (
-    process.env.NODE_ENV === 'test' &&
-    verification.status === 'UNVERIFIED' &&
-    (!page || page.url().includes('about:blank') || page.url().includes('chromewebdata') || page.url().includes('corp.com'))
+    process.env.NODE_ENV === "test" &&
+    verification.status === "UNVERIFIED" &&
+    (!page ||
+      page.url().includes("about:blank") ||
+      page.url().includes("chromewebdata") ||
+      page.url().includes("corp.com"))
   ) {
-    verification.status = 'SUBMITTED';
-    verification.outcome = 'SUBMITTED';
+    verification.status = "SUBMITTED";
+    verification.outcome = "SUBMITTED";
     verification.confirmationNumber = `REC_TEST_${Date.now()}`;
-    verification.message = 'Simulated test submission verified.';
+    verification.message = "Simulated test submission verified.";
   }
 
-  const persistedResult = await persistSubmissionOutcome(appIdStr, userId, verification, { finalReview });
+  const persistedResult = await persistSubmissionOutcome(
+    appIdStr,
+    userId,
+    verification,
+    { finalReview },
+  );
 
   let nextStatus = AGENT_STATUS.COMPLETED;
-  if (verification.status === 'FAILED') {
+  if (verification.status === "FAILED") {
     nextStatus = AGENT_STATUS.FAILED;
-  } else if (verification.status === 'UNVERIFIED') {
+  } else if (verification.status === "UNVERIFIED") {
     nextStatus = AGENT_STATUS.WAITING_FOR_USER;
   }
 
@@ -641,7 +788,11 @@ const finalizeNode = async (state) => {
   const { applicationId, userId, status, submission } = state;
   const appIdStr = String(applicationId);
 
-  await logJobEvent('browserAgentGraph', 'FINALIZE', `[application:${appIdStr}] Final status: ${status}`);
+  await logJobEvent(
+    "browserAgentGraph",
+    "FINALIZE",
+    `[application:${appIdStr}] Final status: ${status}`,
+  );
 
   await ApplicationSessionRepository.updateSession(appIdStr, userId, {
     status,
@@ -649,7 +800,7 @@ const finalizeNode = async (state) => {
   }).catch(() => {});
 
   if (status === AGENT_STATUS.COMPLETED) {
-    await ApplicationRepository.updateApplicationStatus(appIdStr, 'APPLIED', {
+    await ApplicationRepository.updateApplicationStatus(appIdStr, "APPLIED", {
       result: submission,
     }).catch(() => {});
   }
@@ -665,15 +816,22 @@ const finalizeNode = async (state) => {
  * Conditional routing after observeAndAct
  */
 const routeFromObserveAndAct = (state) => {
-  if (state.status === AGENT_STATUS.FAILED) return 'finalize';
-  if (state.pendingQuestions && state.pendingQuestions.length > 0) return 'collectQuestions';
-  if (state.pageType === PERCEPTION_PAGE_TYPES.REVIEW || state.status === AGENT_STATUS.WAITING_FOR_CONFIRMATION) {
-    return 'reviewGate';
+  if (state.status === AGENT_STATUS.FAILED) return "finalize";
+  if (state.pendingQuestions && state.pendingQuestions.length > 0)
+    return "collectQuestions";
+  if (
+    state.pageType === PERCEPTION_PAGE_TYPES.REVIEW ||
+    state.status === AGENT_STATUS.WAITING_FOR_CONFIRMATION
+  ) {
+    return "reviewGate";
   }
-  if (state.pageType === PERCEPTION_PAGE_TYPES.SUBMISSION_SUCCESS || state.status === AGENT_STATUS.VERIFYING) {
-    return 'verify';
+  if (
+    state.pageType === PERCEPTION_PAGE_TYPES.SUBMISSION_SUCCESS ||
+    state.status === AGENT_STATUS.VERIFYING
+  ) {
+    return "verify";
   }
-  return 'observeAndAct';
+  return "observeAndAct";
 };
 
 /**
@@ -684,22 +842,22 @@ const routeFromObserveAndAct = (state) => {
  */
 export const createBrowserAgentGraph = (checkpointer = new MongoDBSaver()) => {
   const workflow = new StateGraph(BrowserAgentStateAnnotation)
-    .addNode('observeAndAct', observeAndActNode)
-    .addNode('collectQuestions', collectQuestionsNode)
-    .addNode('humanInput', humanInputNode)
-    .addNode('reviewGate', reviewGateNode)
-    .addNode('submit', submitNode)
-    .addNode('verify', verifyNode)
-    .addNode('finalize', finalizeNode)
+    .addNode("observeAndAct", observeAndActNode)
+    .addNode("collectQuestions", collectQuestionsNode)
+    .addNode("humanInput", humanInputNode)
+    .addNode("reviewGate", reviewGateNode)
+    .addNode("submit", submitNode)
+    .addNode("verify", verifyNode)
+    .addNode("finalize", finalizeNode)
 
-    .addEdge(START, 'observeAndAct')
-    .addConditionalEdges('observeAndAct', routeFromObserveAndAct)
-    .addEdge('collectQuestions', 'humanInput')
-    .addEdge('humanInput', 'observeAndAct')
-    .addEdge('reviewGate', 'submit')
-    .addEdge('submit', 'verify')
-    .addEdge('verify', 'finalize')
-    .addEdge('finalize', END);
+    .addEdge(START, "observeAndAct")
+    .addConditionalEdges("observeAndAct", routeFromObserveAndAct)
+    .addEdge("collectQuestions", "humanInput")
+    .addEdge("humanInput", "observeAndAct")
+    .addEdge("reviewGate", "submit")
+    .addEdge("submit", "verify")
+    .addEdge("verify", "finalize")
+    .addEdge("finalize", END);
 
   return workflow.compile({ checkpointer });
 };

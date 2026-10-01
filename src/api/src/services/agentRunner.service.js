@@ -1,13 +1,23 @@
-import { Command } from '@langchain/langgraph';
-import { browserAgentGraph, computeAnswersHash } from '../agent/graph/browserAgentGraph.js';
-import { computeReviewHash, applyUserEditsToReview } from '../agent/browser/review/reviewBuilder.js';
-import { SessionRegistry } from '../agent/browser/session/sessionRegistry.js';
-import { ApplicationSessionRepository } from '../repositories/applicationSession.repository.js';
-import { ApplicationRepository } from '../repositories/application.repository.js';
-import { JobApplication } from '../model/JobApplication.js';
-import { AGENT_STATUS, MAX_AGENT_STEPS } from '../constant/agent.constant.js';
-import { appError } from '../utils/errors.js';
-import { logJobEvent, logError } from '../utils/logger.js';
+import { Command } from "@langchain/langgraph";
+import {
+  browserAgentGraph,
+  computeAnswersHash,
+} from "../agent/graph/browserAgentGraph.js";
+import {
+  computeReviewHash,
+  applyUserEditsToReview,
+} from "../agent/browser/review/reviewBuilder.js";
+import { SessionRegistry } from "../browser/session/sessionRegistry.js";
+import { ApplicationSessionRepository } from "../repositories/applicationSession.repository.js";
+import { ApplicationRepository } from "../repositories/application.repository.js";
+import { JobApplication } from "../model/JobApplication.js";
+import { AGENT_STATUS, MAX_AGENT_STEPS } from "../constant/agent.constant.js";
+import { appError } from "../utils/errors.js";
+import { logJobEvent, logError } from "../utils/logger.js";
+import {
+  normalizeWorkflowStatus,
+  toAgentStatus,
+} from "../agent/statusMapping.js";
 
 // In-memory set of applicationIds currently undergoing active execution (concurrency lock)
 const activeRunners = new Set();
@@ -22,17 +32,19 @@ const activeRunners = new Set();
  */
 const assertOwnership = async (applicationId, userId) => {
   if (!userId) {
-    throw new appError('Unauthorized', 401);
+    throw new appError("Unauthorized", 401);
   }
-  const jobApp = await JobApplication.findById(applicationId).lean().catch((err) => {
-    logError('agentRunner.assertOwnership.findById', err.message);
-    throw new appError('Application not found', 404);
-  });
+  const jobApp = await JobApplication.findById(applicationId)
+    .lean()
+    .catch((err) => {
+      logError("agentRunner.assertOwnership.findById", err.message);
+      throw new appError("Application not found", 404);
+    });
   if (!jobApp) {
-    throw new appError('Application not found', 404);
+    throw new appError("Application not found", 404);
   }
   if (String(jobApp.userId) !== String(userId)) {
-    throw new appError('Access denied', 403);
+    throw new appError("Access denied", 403);
   }
   return jobApp;
 };
@@ -46,9 +58,30 @@ const assertOwnership = async (applicationId, userId) => {
 const getThreadConfig = (applicationId) => ({
   configurable: {
     thread_id: `app_thread_${applicationId}`,
-    checkpoint_ns: 'browser_agent',
+    checkpoint_ns: "browser_agent",
   },
 });
+
+const ensureApplicationSession = async (
+  applicationId,
+  userId,
+  threadId,
+  currentUrl = "",
+) => {
+  const existing =
+    await ApplicationSessionRepository.findSessionByApplicationId(
+      applicationId,
+      userId,
+    );
+  if (existing) return existing;
+  return ApplicationSessionRepository.createSession({
+    applicationId,
+    userId,
+    threadId,
+    currentUrl,
+    status: AGENT_STATUS.STARTING.toLowerCase(),
+  });
+};
 
 /**
  * Starts or advances the browser automation graph for an application.
@@ -58,17 +91,29 @@ const getThreadConfig = (applicationId) => ({
  * @param {object} [options]
  * @returns {Promise<object>} Current workflow status
  */
-export const startApplicationWorkflow = async (applicationId, userId, options = {}) => {
+export const startApplicationWorkflow = async (
+  applicationId,
+  userId,
+  options = {},
+) => {
   const appIdStr = String(applicationId);
   const jobApp = await assertOwnership(appIdStr, userId);
 
   const threadConfig = getThreadConfig(appIdStr);
+  await ensureApplicationSession(
+    appIdStr,
+    userId,
+    threadConfig.configurable.thread_id,
+    jobApp.applyUrl || options.applyUrl || "",
+  );
 
   // Check if thread is already interrupted or running
-  const stateSnapshot = await browserAgentGraph.getState(threadConfig).catch((err) => {
-    logError('agentRunner.getState', err.message);
-    return null;
-  });
+  const stateSnapshot = await browserAgentGraph
+    .getState(threadConfig)
+    .catch((err) => {
+      logError("agentRunner.getState", err.message);
+      return null;
+    });
 
   const isRunning = activeRunners.has(appIdStr);
   const isInterrupted = stateSnapshot?.next?.length > 0;
@@ -79,21 +124,29 @@ export const startApplicationWorkflow = async (applicationId, userId, options = 
 
   // Concurrency lock
   if (activeRunners.has(appIdStr)) {
-    throw new appError(`Application ${appIdStr} is already running an active workflow step.`, 409);
+    throw new appError(
+      `Application ${appIdStr} is already running an active workflow step.`,
+      409,
+    );
   }
 
-  const applyUrl = jobApp.applyUrl || options.applyUrl || '';
+  const applyUrl = jobApp.applyUrl || options.applyUrl || "";
 
   // Ensure SessionRegistry context is initialized and navigate session page to applyUrl before first observation
-  const session = await SessionRegistry.createOrGetSession(appIdStr, userId).catch((err) => {
-    logError('agentRunner.createOrGetSession', err.message);
+  const session = await SessionRegistry.createOrGetSession(
+    appIdStr,
+    userId,
+  ).catch((err) => {
+    logError("agentRunner.createOrGetSession", err.message);
     throw err;
   });
 
   if (session && session.activePage && applyUrl) {
-    await session.activePage.goto(applyUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch((err) => {
-      logError('agentRunner.pageGoto', err.message);
-    });
+    await session.activePage
+      .goto(applyUrl, { waitUntil: "domcontentloaded", timeout: 30000 })
+      .catch((err) => {
+        logError("agentRunner.pageGoto", err.message);
+      });
   }
 
   activeRunners.add(appIdStr);
@@ -101,7 +154,11 @@ export const startApplicationWorkflow = async (applicationId, userId, options = 
   // Run graph asynchronously in background
   (async () => {
     try {
-      await logJobEvent('agentRunner', 'WORKFLOW_INVOKED', `[application:${appIdStr}] Starting graph run`);
+      await logJobEvent(
+        "agentRunner",
+        "WORKFLOW_INVOKED",
+        `[application:${appIdStr}] Starting graph run`,
+      );
 
       const initialState = {
         applicationId: appIdStr,
@@ -116,23 +173,33 @@ export const startApplicationWorkflow = async (applicationId, userId, options = 
 
       await browserAgentGraph.invoke(initialState, {
         ...threadConfig,
-        recursionLimit: MAX_AGENT_STEPS * 3 + 10,
+        recursionLimit: MAX_AGENT_STEPS * 8 + 10,
       });
     } catch (err) {
-      await logError('agentRunner.startWorkflow.invoke', err.message);
-      const isRecursion = err.message?.includes('recursion') || err.name?.includes('GraphRecursionError');
-      const reason = isRecursion ? 'Graph execution exceeded max recursion steps limit (GraphRecursionError)' : err.message;
+      await logError("agentRunner.startWorkflow.invoke", err.message);
+      const isRecursion =
+        err.message?.includes("recursion") ||
+        err.name?.includes("GraphRecursionError");
+      const reason = isRecursion
+        ? "Graph execution exceeded max recursion steps limit (GraphRecursionError)"
+        : err.message;
 
       await ApplicationSessionRepository.updateSession(appIdStr, userId, {
         status: AGENT_STATUS.FAILED,
         notes: reason,
-      }).catch((updateErr) => logError('agentRunner.updateSession.fail', updateErr.message));
+      }).catch((updateErr) =>
+        logError("agentRunner.updateSession.fail", updateErr.message),
+      );
 
-      await ApplicationRepository.updateApplicationStatus(appIdStr, 'failed', {
+      await ApplicationRepository.updateApplicationStatus(appIdStr, "failed", {
         logMessage: `Agent execution failed: ${reason}`,
-      }).catch((updateErr) => logError('agentRunner.updateApp.fail', updateErr.message));
+      }).catch((updateErr) =>
+        logError("agentRunner.updateApp.fail", updateErr.message),
+      );
 
-      await SessionRegistry.closeSession(appIdStr).catch((closeErr) => logError('agentRunner.closeSession.fail', closeErr.message));
+      await SessionRegistry.closeSession(appIdStr).catch((closeErr) =>
+        logError("agentRunner.closeSession.fail", closeErr.message),
+      );
     } finally {
       activeRunners.delete(appIdStr);
     }
@@ -141,7 +208,7 @@ export const startApplicationWorkflow = async (applicationId, userId, options = 
   return {
     applicationId: appIdStr,
     status: AGENT_STATUS.STARTING,
-    message: 'Application automation workflow started.',
+    message: "Application automation workflow started.",
   };
 };
 
@@ -158,30 +225,50 @@ export const getWorkflowStatus = async (applicationId, userId) => {
 
   const threadConfig = getThreadConfig(appIdStr);
 
-  const stateSnapshot = await browserAgentGraph.getState(threadConfig).catch((err) => {
-    logError('agentRunner.getWorkflowStatus.getState', err.message);
-    return null;
-  });
-  const sessionDoc = await ApplicationSessionRepository.findSessionByApplicationId(appIdStr, userId).catch((err) => {
-    logError('agentRunner.getWorkflowStatus.findSession', err.message);
-    return null;
-  });
+  const stateSnapshot = await browserAgentGraph
+    .getState(threadConfig)
+    .catch((err) => {
+      logError("agentRunner.getWorkflowStatus.getState", err.message);
+      return null;
+    });
+  const sessionDoc =
+    await ApplicationSessionRepository.findSessionByApplicationId(
+      appIdStr,
+      userId,
+    ).catch((err) => {
+      logError("agentRunner.getWorkflowStatus.findSession", err.message);
+      return null;
+    });
 
   const values = stateSnapshot?.values || {};
-  const status = values.status || sessionDoc?.status || AGENT_STATUS.IDLE;
+  const status =
+    values.status || toAgentStatus(sessionDoc?.status) || AGENT_STATUS.IDLE;
+  const mappedStatus = normalizeWorkflowStatus({
+    agentStatus: status,
+    applicationStatus: jobApp.status,
+  });
   const isInterrupted = stateSnapshot?.next?.length > 0;
 
   return {
     applicationId: appIdStr,
     status,
-    currentUrl: values.currentUrl || sessionDoc?.currentUrl || '',
-    pageType: values.pageType || 'UNKNOWN',
+    agentStatus: mappedStatus.agentStatus,
+    applicationStatus: mappedStatus.applicationStatus,
+    sessionStatus: mappedStatus.sessionStatus,
+    currentUrl: values.currentUrl || sessionDoc?.currentUrl || "",
+    pageType: values.pageType || "UNKNOWN",
     stepCount: values.stepCount || 0,
     isWaitingForHuman: status === AGENT_STATUS.WAITING_FOR_USER,
     isWaitingForReview: status === AGENT_STATUS.WAITING_FOR_CONFIRMATION,
-    pendingQuestionsCount: (values.pendingQuestions || sessionDoc?.pendingQuestions || []).length,
-    finalReview: values.finalReview || sessionDoc?.finalReview || { approved: false },
-    submission: values.submission || sessionDoc?.submissionResult || { submitted: false },
+    pendingQuestionsCount: (
+      values.pendingQuestions ||
+      sessionDoc?.pendingQuestions ||
+      []
+    ).length,
+    finalReview: values.finalReview ||
+      sessionDoc?.finalReview || { approved: false },
+    submission: values.submission ||
+      sessionDoc?.submissionResult || { submitted: false },
     errors: values.errors || [],
     isInterrupted,
     isRunning: activeRunners.has(appIdStr),
@@ -201,21 +288,44 @@ export const getWorkflowQuestions = async (applicationId, userId) => {
 
   const threadConfig = getThreadConfig(appIdStr);
 
-  const stateSnapshot = await browserAgentGraph.getState(threadConfig).catch((err) => {
-    logError('agentRunner.getWorkflowQuestions.getState', err.message);
-    return null;
-  });
-  const sessionDoc = await ApplicationSessionRepository.findSessionByApplicationId(appIdStr, userId).catch((err) => {
-    logError('agentRunner.getWorkflowQuestions.findSession', err.message);
-    return null;
-  });
+  const stateSnapshot = await browserAgentGraph
+    .getState(threadConfig)
+    .catch((err) => {
+      logError("agentRunner.getWorkflowQuestions.getState", err.message);
+      return null;
+    });
+  const sessionDoc =
+    await ApplicationSessionRepository.findSessionByApplicationId(
+      appIdStr,
+      userId,
+    ).catch((err) => {
+      logError("agentRunner.getWorkflowQuestions.findSession", err.message);
+      return null;
+    });
 
-  const questions = stateSnapshot?.values?.pendingQuestions || sessionDoc?.pendingQuestions || [];
+  const questions =
+    stateSnapshot?.values?.pendingQuestions ||
+    sessionDoc?.pendingQuestions ||
+    [];
 
   return {
     applicationId: appIdStr,
     pendingQuestions: questions,
     isWaitingForHuman: questions.length > 0,
+  };
+};
+
+export const getWorkflowEvents = async (applicationId, userId, limit = 50) => {
+  const appIdStr = String(applicationId);
+  await assertOwnership(appIdStr, userId);
+  const events = await ApplicationSessionRepository.getHistory(
+    appIdStr,
+    userId,
+    limit,
+  );
+  return {
+    applicationId: appIdStr,
+    events,
   };
 };
 
@@ -227,25 +337,41 @@ export const getWorkflowQuestions = async (applicationId, userId) => {
  * @param {Array<{ questionId: string, answer: any, userConfirmed?: boolean }>} answers
  * @returns {Promise<object>}
  */
-export const submitWorkflowAnswers = async (applicationId, userId, answers = []) => {
+export const submitWorkflowAnswers = async (
+  applicationId,
+  userId,
+  answers = [],
+) => {
   const appIdStr = String(applicationId);
   await assertOwnership(appIdStr, userId);
 
   const threadConfig = getThreadConfig(appIdStr);
 
   // 1. Check if graph is currently interrupted / waiting for answers
-  const stateSnapshot = await browserAgentGraph.getState(threadConfig).catch((err) => {
-    logError('agentRunner.submitAnswers.getState', err.message);
-    return null;
-  });
+  const stateSnapshot = await browserAgentGraph
+    .getState(threadConfig)
+    .catch((err) => {
+      logError("agentRunner.submitAnswers.getState", err.message);
+      return null;
+    });
 
-  if (!stateSnapshot || !stateSnapshot.next || stateSnapshot.next.length === 0) {
-    throw new appError(`Workflow is not currently paused waiting for human input.`, 400);
+  if (
+    !stateSnapshot ||
+    !stateSnapshot.next ||
+    stateSnapshot.next.length === 0
+  ) {
+    throw new appError(
+      `Workflow is not currently paused waiting for human input.`,
+      400,
+    );
   }
 
   // 2. Concurrency lock
   if (activeRunners.has(appIdStr)) {
-    throw new appError(`Application ${appIdStr} is currently processing an action.`, 409);
+    throw new appError(
+      `Application ${appIdStr} is currently processing an action.`,
+      409,
+    );
   }
 
   activeRunners.add(appIdStr);
@@ -254,15 +380,17 @@ export const submitWorkflowAnswers = async (applicationId, userId, answers = [])
   (async () => {
     try {
       await logJobEvent(
-        'agentRunner',
-        'RESUME_WITH_ANSWERS',
-        `[application:${appIdStr}] Resuming workflow with ${answers.length} answers`
+        "agentRunner",
+        "RESUME_WITH_ANSWERS",
+        `[application:${appIdStr}] Resuming workflow with ${answers.length} answers`,
       );
 
       // Recreate session if server restarted while paused
-      await SessionRegistry.createOrGetSession(appIdStr, userId).catch((err) => {
-        logError('agentRunner.resumeAnswers.session', err.message);
-      });
+      await SessionRegistry.createOrGetSession(appIdStr, userId).catch(
+        (err) => {
+          logError("agentRunner.resumeAnswers.session", err.message);
+        },
+      );
 
       await browserAgentGraph.invoke(
         new Command({
@@ -270,24 +398,34 @@ export const submitWorkflowAnswers = async (applicationId, userId, answers = [])
         }),
         {
           ...threadConfig,
-          recursionLimit: MAX_AGENT_STEPS * 3 + 10,
-        }
+          recursionLimit: MAX_AGENT_STEPS * 8 + 10,
+        },
       );
     } catch (err) {
-      await logError('agentRunner.resumeAnswers.invoke', err.message);
-      const isRecursion = err.message?.includes('recursion') || err.name?.includes('GraphRecursionError');
-      const reason = isRecursion ? 'Graph execution exceeded max recursion steps limit (GraphRecursionError)' : err.message;
+      await logError("agentRunner.resumeAnswers.invoke", err.message);
+      const isRecursion =
+        err.message?.includes("recursion") ||
+        err.name?.includes("GraphRecursionError");
+      const reason = isRecursion
+        ? "Graph execution exceeded max recursion steps limit (GraphRecursionError)"
+        : err.message;
 
       await ApplicationSessionRepository.updateSession(appIdStr, userId, {
         status: AGENT_STATUS.FAILED,
         notes: reason,
-      }).catch((updateErr) => logError('agentRunner.updateSession.fail', updateErr.message));
+      }).catch((updateErr) =>
+        logError("agentRunner.updateSession.fail", updateErr.message),
+      );
 
-      await ApplicationRepository.updateApplicationStatus(appIdStr, 'failed', {
+      await ApplicationRepository.updateApplicationStatus(appIdStr, "failed", {
         logMessage: `Agent execution failed during answers resume: ${reason}`,
-      }).catch((updateErr) => logError('agentRunner.updateApp.fail', updateErr.message));
+      }).catch((updateErr) =>
+        logError("agentRunner.updateApp.fail", updateErr.message),
+      );
 
-      await SessionRegistry.closeSession(appIdStr).catch((closeErr) => logError('agentRunner.closeSession.fail', closeErr.message));
+      await SessionRegistry.closeSession(appIdStr).catch((closeErr) =>
+        logError("agentRunner.closeSession.fail", closeErr.message),
+      );
     } finally {
       activeRunners.delete(appIdStr);
     }
@@ -296,7 +434,7 @@ export const submitWorkflowAnswers = async (applicationId, userId, answers = [])
   return {
     applicationId: appIdStr,
     status: AGENT_STATUS.FILLING,
-    message: 'Answers received. Workflow resumed.',
+    message: "Answers received. Workflow resumed.",
   };
 };
 
@@ -313,18 +451,26 @@ export const getWorkflowReview = async (applicationId, userId) => {
 
   const threadConfig = getThreadConfig(appIdStr);
 
-  const stateSnapshot = await browserAgentGraph.getState(threadConfig).catch((err) => {
-    logError('agentRunner.getWorkflowReview.getState', err.message);
-    return null;
-  });
-  const sessionDoc = await ApplicationSessionRepository.findSessionByApplicationId(appIdStr, userId).catch((err) => {
-    logError('agentRunner.getWorkflowReview.findSession', err.message);
-    return null;
-  });
+  const stateSnapshot = await browserAgentGraph
+    .getState(threadConfig)
+    .catch((err) => {
+      logError("agentRunner.getWorkflowReview.getState", err.message);
+      return null;
+    });
+  const sessionDoc =
+    await ApplicationSessionRepository.findSessionByApplicationId(
+      appIdStr,
+      userId,
+    ).catch((err) => {
+      logError("agentRunner.getWorkflowReview.findSession", err.message);
+      return null;
+    });
 
-  const finalReview = stateSnapshot?.values?.finalReview || sessionDoc?.finalReview || null;
+  const finalReview =
+    stateSnapshot?.values?.finalReview || sessionDoc?.finalReview || null;
   const answers = stateSnapshot?.values?.answers || sessionDoc?.answers || [];
-  const hash = finalReview?.reviewHash || finalReview?.hash || computeAnswersHash(answers);
+  const hash =
+    finalReview?.reviewHash || finalReview?.hash || computeAnswersHash(answers);
 
   return {
     applicationId: appIdStr,
@@ -344,23 +490,37 @@ export const getWorkflowReview = async (applicationId, userId) => {
  * @param {Array<object>} edits
  * @returns {Promise<object>}
  */
-export const updateWorkflowReviewEdits = async (applicationId, userId, edits = []) => {
+export const updateWorkflowReviewEdits = async (
+  applicationId,
+  userId,
+  edits = [],
+) => {
   const appIdStr = String(applicationId);
   await assertOwnership(appIdStr, userId);
 
   const threadConfig = getThreadConfig(appIdStr);
-  const stateSnapshot = await browserAgentGraph.getState(threadConfig).catch((err) => {
-    logError('agentRunner.updateReviewEdits.getState', err.message);
-    return null;
-  });
-  const sessionDoc = await ApplicationSessionRepository.findSessionByApplicationId(appIdStr, userId).catch((err) => {
-    logError('agentRunner.updateReviewEdits.findSession', err.message);
-    return null;
-  });
+  const stateSnapshot = await browserAgentGraph
+    .getState(threadConfig)
+    .catch((err) => {
+      logError("agentRunner.updateReviewEdits.getState", err.message);
+      return null;
+    });
+  const sessionDoc =
+    await ApplicationSessionRepository.findSessionByApplicationId(
+      appIdStr,
+      userId,
+    ).catch((err) => {
+      logError("agentRunner.updateReviewEdits.findSession", err.message);
+      return null;
+    });
 
-  const currentReview = stateSnapshot?.values?.finalReview || sessionDoc?.finalReview;
+  const currentReview =
+    stateSnapshot?.values?.finalReview || sessionDoc?.finalReview;
   if (!currentReview) {
-    throw new appError('No active final review found for this application.', 404);
+    throw new appError(
+      "No active final review found for this application.",
+      404,
+    );
   }
 
   const { updatedReview, changedFields, diffActions } = applyUserEditsToReview({
@@ -371,7 +531,7 @@ export const updateWorkflowReviewEdits = async (applicationId, userId, edits = [
   await ApplicationSessionRepository.updateSession(appIdStr, userId, {
     finalReview: updatedReview,
   }).catch((err) => {
-    logError('agentRunner.updateReviewEdits.session', err.message);
+    logError("agentRunner.updateReviewEdits.session", err.message);
   });
 
   return {
@@ -391,22 +551,32 @@ export const updateWorkflowReviewEdits = async (applicationId, userId, edits = [
  * @param {{ approved: boolean, hash: string, edits?: Array<object> }} confirmation
  * @returns {Promise<object>}
  */
-export const confirmWorkflowReview = async (applicationId, userId, { approved, hash, edits } = {}) => {
+export const confirmWorkflowReview = async (
+  applicationId,
+  userId,
+  { approved, hash, edits } = {},
+) => {
   const appIdStr = String(applicationId);
   await assertOwnership(appIdStr, userId);
 
   if (!approved) {
-    throw new appError('Confirmation approval must be explicitly true.', 400);
+    throw new appError("Confirmation approval must be explicitly true.", 400);
   }
   if (edits !== undefined && edits !== null) {
-    throw new appError('Edits are not accepted in confirm. Use PATCH /api/applications/:id/agent/review to update review edits before confirming.', 400);
+    throw new appError(
+      "Edits are not accepted in confirm. Use PATCH /api/applications/:id/agent/review to update review edits before confirming.",
+      400,
+    );
   }
 
   const reviewData = await getWorkflowReview(appIdStr, userId);
   const expectedHash = reviewData.reviewHash || reviewData.answersHash;
 
   if (expectedHash !== hash) {
-    throw new appError('Answers were modified since review was loaded. Please review again.', 400);
+    throw new appError(
+      "Answers were modified since review was loaded. Please review again.",
+      400,
+    );
   }
 
   const approvedAt = new Date().toISOString();
@@ -416,11 +586,14 @@ export const confirmWorkflowReview = async (applicationId, userId, { approved, h
     approvedAt,
     status: AGENT_STATUS.SUBMITTING,
   }).catch((err) => {
-    logError('agentRunner.confirmReview.session', err.message);
+    logError("agentRunner.confirmReview.session", err.message);
   });
 
   if (activeRunners.has(appIdStr)) {
-    throw new appError(`Application ${appIdStr} is currently processing an action.`, 409);
+    throw new appError(
+      `Application ${appIdStr} is currently processing an action.`,
+      409,
+    );
   }
 
   activeRunners.add(appIdStr);
@@ -428,14 +601,16 @@ export const confirmWorkflowReview = async (applicationId, userId, { approved, h
   (async () => {
     try {
       await logJobEvent(
-        'agentRunner',
-        'RESUME_REVIEW_CONFIRMED',
-        `[application:${appIdStr}] User approved final submission with hash ${hash} at ${approvedAt}`
+        "agentRunner",
+        "RESUME_REVIEW_CONFIRMED",
+        `[application:${appIdStr}] User approved final submission with hash ${hash} at ${approvedAt}`,
       );
 
-      await SessionRegistry.createOrGetSession(appIdStr, userId).catch((err) => {
-        logError('agentRunner.confirmReview.sessionCreate', err.message);
-      });
+      await SessionRegistry.createOrGetSession(appIdStr, userId).catch(
+        (err) => {
+          logError("agentRunner.confirmReview.sessionCreate", err.message);
+        },
+      );
 
       await browserAgentGraph.invoke(
         new Command({
@@ -443,24 +618,34 @@ export const confirmWorkflowReview = async (applicationId, userId, { approved, h
         }),
         {
           ...threadConfig,
-          recursionLimit: MAX_AGENT_STEPS * 3 + 10,
-        }
+          recursionLimit: MAX_AGENT_STEPS * 8 + 10,
+        },
       );
     } catch (err) {
-      await logError('agentRunner.confirmReview.invoke', err.message);
-      const isRecursion = err.message?.includes('recursion') || err.name?.includes('GraphRecursionError');
-      const reason = isRecursion ? 'Graph execution exceeded max recursion steps limit (GraphRecursionError)' : err.message;
+      await logError("agentRunner.confirmReview.invoke", err.message);
+      const isRecursion =
+        err.message?.includes("recursion") ||
+        err.name?.includes("GraphRecursionError");
+      const reason = isRecursion
+        ? "Graph execution exceeded max recursion steps limit (GraphRecursionError)"
+        : err.message;
 
       await ApplicationSessionRepository.updateSession(appIdStr, userId, {
         status: AGENT_STATUS.FAILED,
         notes: reason,
-      }).catch((updateErr) => logError('agentRunner.updateSession.fail', updateErr.message));
+      }).catch((updateErr) =>
+        logError("agentRunner.updateSession.fail", updateErr.message),
+      );
 
-      await ApplicationRepository.updateApplicationStatus(appIdStr, 'failed', {
+      await ApplicationRepository.updateApplicationStatus(appIdStr, "failed", {
         logMessage: `Agent execution failed during confirmation: ${reason}`,
-      }).catch((updateErr) => logError('agentRunner.updateApp.fail', updateErr.message));
+      }).catch((updateErr) =>
+        logError("agentRunner.updateApp.fail", updateErr.message),
+      );
 
-      await SessionRegistry.closeSession(appIdStr).catch((closeErr) => logError('agentRunner.closeSession.fail', closeErr.message));
+      await SessionRegistry.closeSession(appIdStr).catch((closeErr) =>
+        logError("agentRunner.closeSession.fail", closeErr.message),
+      );
     } finally {
       activeRunners.delete(appIdStr);
     }
@@ -471,7 +656,7 @@ export const confirmWorkflowReview = async (applicationId, userId, { approved, h
     status: AGENT_STATUS.SUBMITTING,
     approvedAt,
     reviewHash: hash,
-    message: 'Final review confirmed. Submitting application.',
+    message: "Final review confirmed. Submitting application.",
   };
 };
 
@@ -487,23 +672,27 @@ export const cancelWorkflow = async (applicationId, userId) => {
   await assertOwnership(appIdStr, userId);
 
   await SessionRegistry.closeSession(appIdStr).catch((err) => {
-    logError('agentRunner.cancelWorkflow.closeSession', err.message);
+    logError("agentRunner.cancelWorkflow.closeSession", err.message);
   });
   activeRunners.delete(appIdStr);
 
   await ApplicationSessionRepository.updateSession(appIdStr, userId, {
     status: AGENT_STATUS.FAILED,
-    notes: 'Workflow cancelled by user.',
+    notes: "Workflow cancelled by user.",
   }).catch((err) => {
-    logError('agentRunner.cancelWorkflow.updateSession', err.message);
+    logError("agentRunner.cancelWorkflow.updateSession", err.message);
   });
 
-  await logJobEvent('agentRunner', 'WORKFLOW_CANCELLED', `[application:${appIdStr}] Workflow cancelled by user.`);
+  await logJobEvent(
+    "agentRunner",
+    "WORKFLOW_CANCELLED",
+    `[application:${appIdStr}] Workflow cancelled by user.`,
+  );
 
   return {
     applicationId: appIdStr,
     status: AGENT_STATUS.FAILED,
-    message: 'Application workflow cancelled.',
+    message: "Application workflow cancelled.",
   };
 };
 
@@ -511,6 +700,7 @@ export default {
   startApplicationWorkflow,
   getWorkflowStatus,
   getWorkflowQuestions,
+  getWorkflowEvents,
   submitWorkflowAnswers,
   getWorkflowReview,
   updateWorkflowReviewEdits,

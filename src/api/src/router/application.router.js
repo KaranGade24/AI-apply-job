@@ -1,7 +1,10 @@
 import express from "express";
 import * as applicationController from "../controller/application.controller.js";
 import * as agentExecutionController from "../controller/agentExecution.controller.js";
-import { authMiddleware, optionalAuthMiddleware } from "../middlewares/auth.middleware.js";
+import {
+  authMiddleware,
+  optionalAuthMiddleware,
+} from "../middlewares/auth.middleware.js";
 
 const applicationRouter = express.Router();
 
@@ -25,7 +28,11 @@ const applicationRouter = express.Router();
  *       409:
  *         description: Already running
  */
-applicationRouter.post("/:id/agent/start", authMiddleware, agentExecutionController.startApplication);
+applicationRouter.post(
+  "/:id/agent/start",
+  authMiddleware,
+  agentExecutionController.startApplication,
+);
 
 /**
  * @swagger
@@ -43,7 +50,11 @@ applicationRouter.post("/:id/agent/start", authMiddleware, agentExecutionControl
  *       200:
  *         description: Current automation status
  */
-applicationRouter.get("/:id/agent/status", authMiddleware, agentExecutionController.getStatus);
+applicationRouter.get(
+  "/:id/agent/status",
+  authMiddleware,
+  agentExecutionController.getStatus,
+);
 
 /**
  * @swagger
@@ -61,7 +72,17 @@ applicationRouter.get("/:id/agent/status", authMiddleware, agentExecutionControl
  *       200:
  *         description: List of pending questions
  */
-applicationRouter.get("/:id/agent/questions", authMiddleware, agentExecutionController.getQuestions);
+applicationRouter.get(
+  "/:id/agent/questions",
+  authMiddleware,
+  agentExecutionController.getQuestions,
+);
+
+applicationRouter.get(
+  "/:id/agent/events",
+  authMiddleware,
+  agentExecutionController.getEvents,
+);
 
 /**
  * @swagger
@@ -90,7 +111,11 @@ applicationRouter.get("/:id/agent/questions", authMiddleware, agentExecutionCont
  *       200:
  *         description: Answers accepted and workflow resumed
  */
-applicationRouter.post("/:id/agent/answers", authMiddleware, agentExecutionController.submitAnswers);
+applicationRouter.post(
+  "/:id/agent/answers",
+  authMiddleware,
+  agentExecutionController.submitAnswers,
+);
 
 /**
  * @swagger
@@ -120,8 +145,16 @@ applicationRouter.post("/:id/agent/answers", authMiddleware, agentExecutionContr
  *       200:
  *         description: Review updated with new reviewHash
  */
-applicationRouter.get("/:id/agent/review", authMiddleware, agentExecutionController.getReview);
-applicationRouter.patch("/:id/agent/review", authMiddleware, agentExecutionController.updateReviewEdits);
+applicationRouter.get(
+  "/:id/agent/review",
+  authMiddleware,
+  agentExecutionController.getReview,
+);
+applicationRouter.patch(
+  "/:id/agent/review",
+  authMiddleware,
+  agentExecutionController.updateReviewEdits,
+);
 
 /**
  * @swagger
@@ -139,7 +172,11 @@ applicationRouter.patch("/:id/agent/review", authMiddleware, agentExecutionContr
  *       200:
  *         description: Final submission triggered
  */
-applicationRouter.post("/:id/agent/confirm", authMiddleware, agentExecutionController.confirmReview);
+applicationRouter.post(
+  "/:id/agent/confirm",
+  authMiddleware,
+  agentExecutionController.confirmReview,
+);
 
 /**
  * @swagger
@@ -157,8 +194,11 @@ applicationRouter.post("/:id/agent/confirm", authMiddleware, agentExecutionContr
  *       200:
  *         description: Workflow cancelled
  */
-applicationRouter.post("/:id/agent/cancel", authMiddleware, agentExecutionController.cancelApplication);
-
+applicationRouter.post(
+  "/:id/agent/cancel",
+  authMiddleware,
+  agentExecutionController.cancelApplication,
+);
 
 /* ==================== FIXED PATHS ==================== */
 
@@ -174,11 +214,27 @@ applicationRouter.post("/:id/agent/cancel", authMiddleware, agentExecutionContro
  *       401:
  *         description: Unauthorized
  */
-applicationRouter.post("/process-next", authMiddleware, applicationController.processNext);
+applicationRouter.post(
+  "/process-next",
+  authMiddleware,
+  applicationController.processNext,
+);
 
-applicationRouter.post("/", authMiddleware, applicationController.createApplicationDirect);
-applicationRouter.post("/preview-draft", authMiddleware, applicationController.previewDraft);
-applicationRouter.get("/job/:jobId", authMiddleware, applicationController.getApplicationByJob);
+applicationRouter.post(
+  "/",
+  authMiddleware,
+  applicationController.createApplicationDirect,
+);
+applicationRouter.post(
+  "/preview-draft",
+  authMiddleware,
+  applicationController.previewDraft,
+);
+applicationRouter.get(
+  "/job/:jobId",
+  authMiddleware,
+  applicationController.getApplicationByJob,
+);
 
 /**
  * @swagger
@@ -196,7 +252,11 @@ applicationRouter.get("/job/:jobId", authMiddleware, applicationController.getAp
  *       201:
  *         description: Application created successfully
  */
-applicationRouter.post("/create-from-job/:jobId", authMiddleware, applicationController.createFromJob);
+applicationRouter.post(
+  "/create-from-job/:jobId",
+  authMiddleware,
+  applicationController.createFromJob,
+);
 
 /**
  * @swagger
@@ -208,8 +268,11 @@ applicationRouter.post("/create-from-job/:jobId", authMiddleware, applicationCon
  *       200:
  *         description: List of applications
  */
-applicationRouter.get("/", authMiddleware, applicationController.getApplications);
-
+applicationRouter.get(
+  "/",
+  authMiddleware,
+  applicationController.getApplications,
+);
 
 /* ==================== PARAMETER ROUTES (/:id) ==================== */
 
@@ -229,7 +292,11 @@ applicationRouter.get("/", authMiddleware, applicationController.getApplications
  *       200:
  *         description: Application details
  */
-applicationRouter.get("/:id", authMiddleware, applicationController.getApplication);
+applicationRouter.get(
+  "/:id",
+  authMiddleware,
+  applicationController.getApplication,
+);
 
 /**
  * @swagger
@@ -253,20 +320,72 @@ applicationRouter.get("/:id", authMiddleware, applicationController.getApplicati
  *       404:
  *         description: Application not found
  */
-applicationRouter.delete("/:id", authMiddleware, applicationController.deleteApplication);
+applicationRouter.delete(
+  "/:id",
+  authMiddleware,
+  applicationController.deleteApplication,
+);
 
-applicationRouter.patch("/:id/status", authMiddleware, applicationController.updateStatusDirect);
-applicationRouter.post("/:id/tailor", authMiddleware, applicationController.tailorApplication);
-applicationRouter.post("/:id/answers", authMiddleware, applicationController.submitAnswers);
-applicationRouter.put("/:id/answers", authMiddleware, applicationController.saveAnswers);
-applicationRouter.post("/:id/refill-form", authMiddleware, applicationController.refillApplicationForm);
-applicationRouter.post("/:id/confirm", authMiddleware, applicationController.confirmFinal);
-applicationRouter.post("/:id/analyze-portal", authMiddleware, applicationController.analyzePortal);
-applicationRouter.post("/:id/advance-portal", authMiddleware, applicationController.advancePortalAction);
-applicationRouter.post("/:id/tailor-role", authMiddleware, applicationController.tailorRoleOutreach);
-applicationRouter.post("/:id/send-email-direct", authMiddleware, applicationController.sendDirectRoleEmail);
-applicationRouter.post("/:id/apply-roles-batch", authMiddleware, applicationController.applySelectedRolesBatch);
-applicationRouter.post("/:id/retry-google-form", authMiddleware, applicationController.retryGoogleForm);
+applicationRouter.patch(
+  "/:id/status",
+  authMiddleware,
+  applicationController.updateStatusDirect,
+);
+applicationRouter.post(
+  "/:id/tailor",
+  authMiddleware,
+  applicationController.tailorApplication,
+);
+applicationRouter.post(
+  "/:id/answers",
+  authMiddleware,
+  applicationController.submitAnswers,
+);
+applicationRouter.put(
+  "/:id/answers",
+  authMiddleware,
+  applicationController.saveAnswers,
+);
+applicationRouter.post(
+  "/:id/refill-form",
+  authMiddleware,
+  applicationController.refillApplicationForm,
+);
+applicationRouter.post(
+  "/:id/confirm",
+  authMiddleware,
+  applicationController.confirmFinal,
+);
+applicationRouter.post(
+  "/:id/analyze-portal",
+  authMiddleware,
+  applicationController.analyzePortal,
+);
+applicationRouter.post(
+  "/:id/advance-portal",
+  authMiddleware,
+  applicationController.advancePortalAction,
+);
+applicationRouter.post(
+  "/:id/tailor-role",
+  authMiddleware,
+  applicationController.tailorRoleOutreach,
+);
+applicationRouter.post(
+  "/:id/send-email-direct",
+  authMiddleware,
+  applicationController.sendDirectRoleEmail,
+);
+applicationRouter.post(
+  "/:id/apply-roles-batch",
+  authMiddleware,
+  applicationController.applySelectedRolesBatch,
+);
+applicationRouter.post(
+  "/:id/retry-google-form",
+  authMiddleware,
+  applicationController.retryGoogleForm,
+);
 
 /**
  * @swagger
@@ -290,7 +409,11 @@ applicationRouter.post("/:id/retry-google-form", authMiddleware, applicationCont
  *       404:
  *         description: Application not found
  */
-applicationRouter.post("/:id/approve", authMiddleware, applicationController.approve);
+applicationRouter.post(
+  "/:id/approve",
+  authMiddleware,
+  applicationController.approve,
+);
 
 /**
  * @swagger
@@ -322,7 +445,11 @@ applicationRouter.post("/:id/approve", authMiddleware, applicationController.app
  *       404:
  *         description: Application not found
  */
-applicationRouter.post("/:id/reject", authMiddleware, applicationController.reject);
+applicationRouter.post(
+  "/:id/reject",
+  authMiddleware,
+  applicationController.reject,
+);
 
 /**
  * @swagger
@@ -359,7 +486,11 @@ applicationRouter.post("/:id/reject", authMiddleware, applicationController.reje
  *       404:
  *         description: Application not found
  */
-applicationRouter.put("/:id/review", authMiddleware, applicationController.editEmail);
+applicationRouter.put(
+  "/:id/review",
+  authMiddleware,
+  applicationController.editEmail,
+);
 
 /**
  * @swagger
@@ -392,7 +523,11 @@ applicationRouter.put("/:id/review", authMiddleware, applicationController.editE
  *       404:
  *         description: Application not found
  */
-applicationRouter.put("/:id/resume", authMiddleware, applicationController.updateResume);
+applicationRouter.put(
+  "/:id/resume",
+  authMiddleware,
+  applicationController.updateResume,
+);
 
 /**
  * @swagger
@@ -416,6 +551,10 @@ applicationRouter.put("/:id/resume", authMiddleware, applicationController.updat
  *       404:
  *         description: Application or PDF not found
  */
-applicationRouter.get("/:id/pdf", authMiddleware, applicationController.downloadPdf);
+applicationRouter.get(
+  "/:id/pdf",
+  authMiddleware,
+  applicationController.downloadPdf,
+);
 
 export default applicationRouter;

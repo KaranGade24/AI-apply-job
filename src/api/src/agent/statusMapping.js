@@ -1,0 +1,68 @@
+import { AGENT_STATUS } from "../constant/agent.constant.js";
+import { APPLICATION_STATUS } from "../constant/application.constant.js";
+
+const agentToApplication = Object.freeze({
+  [AGENT_STATUS.STARTING]: APPLICATION_STATUS.PROCESSING,
+  [AGENT_STATUS.OPENING_SITE]: APPLICATION_STATUS.PROCESSING,
+  [AGENT_STATUS.ANALYZING_PAGE]: APPLICATION_STATUS.PROCESSING,
+  [AGENT_STATUS.NAVIGATING]: APPLICATION_STATUS.PROCESSING,
+  [AGENT_STATUS.DETECTING_FORM]: APPLICATION_STATUS.PROCESSING,
+  [AGENT_STATUS.FILLING]: APPLICATION_STATUS.PROCESSING,
+  [AGENT_STATUS.WAITING_FOR_USER]: APPLICATION_STATUS.WAITING_FOR_USER,
+  [AGENT_STATUS.WAITING_FOR_CONFIRMATION]:
+    APPLICATION_STATUS.WAITING_FOR_FINAL_REVIEW,
+  [AGENT_STATUS.SUBMITTING]: APPLICATION_STATUS.SUBMITTING,
+  [AGENT_STATUS.VERIFYING]: APPLICATION_STATUS.SUBMITTING,
+  [AGENT_STATUS.COMPLETED]: APPLICATION_STATUS.APPLIED,
+  [AGENT_STATUS.BLOCKED]: APPLICATION_STATUS.APPLICATION_BLOCKED,
+  [AGENT_STATUS.FAILED]: APPLICATION_STATUS.FAILED,
+});
+
+const applicationToAgent = Object.freeze({
+  [APPLICATION_STATUS.PENDING]: AGENT_STATUS.IDLE,
+  [APPLICATION_STATUS.PROCESSING]: AGENT_STATUS.ANALYZING_PAGE,
+  [APPLICATION_STATUS.WAITING_FOR_USER]: AGENT_STATUS.WAITING_FOR_USER,
+  [APPLICATION_STATUS.HUMAN_REQUIRED]: AGENT_STATUS.WAITING_FOR_USER,
+  [APPLICATION_STATUS.WAITING_FOR_FINAL_REVIEW]:
+    AGENT_STATUS.WAITING_FOR_CONFIRMATION,
+  [APPLICATION_STATUS.SUBMITTING]: AGENT_STATUS.SUBMITTING,
+  [APPLICATION_STATUS.APPLIED]: AGENT_STATUS.COMPLETED,
+  [APPLICATION_STATUS.FAILED]: AGENT_STATUS.FAILED,
+  [APPLICATION_STATUS.APPLICATION_BLOCKED]: AGENT_STATUS.BLOCKED,
+});
+
+export const toApplicationStatus = (agentStatus) =>
+  agentToApplication[agentStatus] || APPLICATION_STATUS.PROCESSING;
+
+export const toAgentStatus = (applicationStatus) =>
+  applicationToAgent[applicationStatus] ||
+  {
+    starting: AGENT_STATUS.STARTING,
+    processing: AGENT_STATUS.ANALYZING_PAGE,
+    waiting_for_user: AGENT_STATUS.WAITING_FOR_USER,
+    waiting_for_final_review: AGENT_STATUS.WAITING_FOR_CONFIRMATION,
+    submitting: AGENT_STATUS.SUBMITTING,
+    applied: AGENT_STATUS.COMPLETED,
+    failed: AGENT_STATUS.FAILED,
+    blocked: AGENT_STATUS.BLOCKED,
+    cancelled: AGENT_STATUS.FAILED,
+  }[String(applicationStatus || "").toLowerCase()] ||
+  AGENT_STATUS.IDLE;
+
+export const normalizeWorkflowStatus = ({
+  agentStatus,
+  applicationStatus,
+} = {}) => {
+  const resolvedAgentStatus = agentStatus || toAgentStatus(applicationStatus);
+  return {
+    agentStatus: resolvedAgentStatus,
+    applicationStatus: toApplicationStatus(resolvedAgentStatus),
+    sessionStatus: toApplicationStatus(resolvedAgentStatus).toLowerCase(),
+  };
+};
+
+export default {
+  toApplicationStatus,
+  toAgentStatus,
+  normalizeWorkflowStatus,
+};

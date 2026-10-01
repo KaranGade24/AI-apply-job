@@ -1,8 +1,8 @@
-import { fetchWithAuth } from './api';
+import { fetchWithAuth } from "./api";
 
 export const getApplicationsApi = async (params = {}) => {
   const query = new URLSearchParams(params).toString();
-  return await fetchWithAuth(`/applications${query ? `?${query}` : ''}`);
+  return await fetchWithAuth(`/applications${query ? `?${query}` : ""}`);
 };
 
 export const getApplicationDetailsApi = async (id) => {
@@ -14,135 +14,135 @@ export const getApplicationByJobIdApi = async (jobId) => {
 };
 
 export const previewDraftApi = async (payload) => {
-  return await fetchWithAuth('/applications/preview-draft', {
-    method: 'POST',
+  return await fetchWithAuth("/applications/preview-draft", {
+    method: "POST",
     body: JSON.stringify(payload),
   });
 };
 
 export const createApplicationApi = async (appData) => {
-  return await fetchWithAuth('/applications', {
-    method: 'POST',
+  return await fetchWithAuth("/applications", {
+    method: "POST",
     body: JSON.stringify(appData),
   });
 };
 
 export const createApplicationFromJobApi = async (jobId) => {
   return await fetchWithAuth(`/applications/create-from-job/${jobId}`, {
-    method: 'POST',
+    method: "POST",
   });
 };
 
 export const updateApplicationStatusApi = async (id, status, options = {}) => {
   return await fetchWithAuth(`/applications/${id}/status`, {
-    method: 'PATCH',
+    method: "PATCH",
     body: JSON.stringify({ status, ...options }),
   });
 };
 
 export const tailorApplicationApi = async (id) => {
   return await fetchWithAuth(`/applications/${id}/tailor`, {
-    method: 'POST',
+    method: "POST",
   });
 };
 
 export const reviewEmailDraftApi = async (id, emailData) => {
   return await fetchWithAuth(`/applications/${id}/review`, {
-    method: 'PUT',
+    method: "PUT",
     body: JSON.stringify(emailData),
   });
 };
 
 export const approveAndSendApi = async (id) => {
   return await fetchWithAuth(`/applications/${id}/approve`, {
-    method: 'POST',
+    method: "POST",
   });
 };
 
-export const rejectApplicationApi = async (id, reason = '') => {
+export const rejectApplicationApi = async (id, reason = "") => {
   return await fetchWithAuth(`/applications/${id}/reject`, {
-    method: 'POST',
+    method: "POST",
     body: JSON.stringify({ reason }),
   });
 };
 
 export const deleteApplicationApi = async (id) => {
   return await fetchWithAuth(`/applications/${id}`, {
-    method: 'DELETE',
+    method: "DELETE",
   });
 };
 
 export const submitMissingAnswersApi = async (id, answers = []) => {
   return await fetchWithAuth(`/applications/${id}/answers`, {
-    method: 'POST',
+    method: "POST",
     body: JSON.stringify({ answers }),
   });
 };
 
 export const saveEditedAnswersApi = async (id, answers = []) => {
   return await fetchWithAuth(`/applications/${id}/answers`, {
-    method: 'PUT',
+    method: "PUT",
     body: JSON.stringify({ answers }),
   });
 };
 
 export const refillApplicationFormApi = async (id, answers = []) => {
   return await fetchWithAuth(`/applications/${id}/refill-form`, {
-    method: 'POST',
+    method: "POST",
     body: JSON.stringify({ answers }),
   });
 };
 
 export const confirmFinalApplicationApi = async (id, confirmedAnswers = []) => {
   return await fetchWithAuth(`/applications/${id}/confirm`, {
-    method: 'POST',
+    method: "POST",
     body: JSON.stringify({ confirmedAnswers }),
   });
 };
 
 export const analyzePortalApi = async (id) => {
   return await fetchWithAuth(`/applications/${id}/analyze-portal`, {
-    method: 'POST',
+    method: "POST",
   });
 };
 
 export const advancePortalActionApi = async (id, specificRole = null) => {
   return await fetchWithAuth(`/applications/${id}/advance-portal`, {
-    method: 'POST',
+    method: "POST",
     body: JSON.stringify({ specificRole }),
   });
 };
 
 export const tailorRoleOutreachApi = async (id, roleDetails = {}) => {
   return await fetchWithAuth(`/applications/${id}/tailor-role`, {
-    method: 'POST',
+    method: "POST",
     body: JSON.stringify(roleDetails),
   });
 };
 
 export const sendDirectRoleEmailApi = async (id, emailPayload = {}) => {
   return await fetchWithAuth(`/applications/${id}/send-email-direct`, {
-    method: 'POST',
+    method: "POST",
     body: JSON.stringify(emailPayload),
   });
 };
 
 export const applySelectedRolesBatchApi = async (id, selectedRoles = []) => {
   return await fetchWithAuth(`/applications/${id}/apply-roles-batch`, {
-    method: 'POST',
+    method: "POST",
     body: JSON.stringify({ selectedRoles }),
   });
 };
 
 export const retryGoogleFormApi = async (id) => {
   return await fetchWithAuth(`/applications/${id}/retry-google-form`, {
-    method: 'POST',
+    method: "POST",
   });
 };
 
 export const startAgentWorkflowApi = async (id, payload = {}) => {
   return await fetchWithAuth(`/applications/${id}/agent/start`, {
-    method: 'POST',
+    method: "POST",
     body: JSON.stringify(payload),
   });
 };
@@ -155,9 +155,15 @@ export const getAgentQuestionsApi = async (id) => {
   return await fetchWithAuth(`/applications/${id}/agent/questions`);
 };
 
+export const getAgentEventsApi = async (id, limit = 50) => {
+  return await fetchWithAuth(
+    `/applications/${id}/agent/events?limit=${encodeURIComponent(limit)}`,
+  );
+};
+
 export const submitAgentAnswersApi = async (id, answers = []) => {
   return await fetchWithAuth(`/applications/${id}/agent/answers`, {
-    method: 'POST',
+    method: "POST",
     body: JSON.stringify({ answers }),
   });
 };
@@ -168,24 +174,20 @@ export const getAgentReviewApi = async (id) => {
 
 export const patchAgentReviewEditsApi = async (id, edits = []) => {
   return await fetchWithAuth(`/applications/${id}/agent/review`, {
-    method: 'PATCH',
+    method: "PATCH",
     body: JSON.stringify({ edits }),
   });
 };
 
 export const confirmAgentReviewApi = async (id, confirmation = {}) => {
   return await fetchWithAuth(`/applications/${id}/agent/confirm`, {
-    method: 'POST',
+    method: "POST",
     body: JSON.stringify(confirmation),
   });
 };
 
 export const cancelAgentWorkflowApi = async (id) => {
   return await fetchWithAuth(`/applications/${id}/agent/cancel`, {
-    method: 'POST',
+    method: "POST",
   });
 };
-
-
-
-

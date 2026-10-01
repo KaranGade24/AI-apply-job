@@ -1,10 +1,15 @@
-import { chromium } from 'playwright';
-import { observeDOM } from '../browser/observer/domObserver.js';
-import { resolveElement } from '../browser/observer/elementResolver.js';
-import assert from 'assert';
+import { chromium } from "playwright";
+import { observeDOM } from "../browser/observer/domObserver.js";
+import { resolveElement } from "../browser/observer/elementResolver.js";
+import { checkPlaywrightAvailable } from "./helpers/playwrightAvailable.js";
+import assert from "assert";
 
 async function runTests() {
-  console.log('--- STARTING AMBIGUITY-SAFE ELEMENT RESOLUTION TESTS ---');
+  console.log("--- STARTING AMBIGUITY-SAFE ELEMENT RESOLUTION TESTS ---");
+  if (!(await checkPlaywrightAvailable())) {
+    console.log("SKIP: Chromium is unavailable.");
+    return;
+  }
   let browser;
   try {
     browser = await chromium.launch({ headless: true });
@@ -55,68 +60,129 @@ async function runTests() {
     await page.setContent(html);
 
     // Test 1: One strong candidate (Successful Resolution)
-    console.log('Running Test 1: Exactly one strong candidate resolves successfully...');
+    console.log(
+      "Running Test 1: Exactly one strong candidate resolves successfully...",
+    );
     const allObs = await observeDOM(page);
-    const correctFrameBtnObs = allObs.find(el => el.id === 'action-btn-frame');
-    assert.ok(correctFrameBtnObs, 'Should locate frame button during initial observation');
+    const correctFrameBtnObs = allObs.find(
+      (el) => el.id === "action-btn-frame",
+    );
+    assert.ok(
+      correctFrameBtnObs,
+      "Should locate frame button during initial observation",
+    );
 
     const resolvedFrameBtn = await resolveElement(page, correctFrameBtnObs);
-    assert.strictEqual(resolvedFrameBtn.resolved, true, 'Frame button should resolve with true status');
-    assert.strictEqual(resolvedFrameBtn.reason, 'SUCCESS', 'Should return SUCCESS reason');
-    console.log('✅ Test 1 Passed.');
+    assert.strictEqual(
+      resolvedFrameBtn.resolved,
+      true,
+      "Frame button should resolve with true status",
+    );
+    assert.strictEqual(
+      resolvedFrameBtn.reason,
+      "SUCCESS",
+      "Should return SUCCESS reason",
+    );
+    console.log("✅ Test 1 Passed.");
 
     // Test 2: Two identical buttons (Ambiguity Detection)
-    console.log('Running Test 2: Multi-candidate identical elements fail with TARGET_AMBIGUOUS...');
+    console.log(
+      "Running Test 2: Multi-candidate identical elements fail with TARGET_AMBIGUOUS...",
+    );
     // We observe the "Continue" button in Section A. It has identical siblings in Section B.
-    const continueBtnObs = allObs.find(el => el.normalizedText === 'Continue');
-    assert.ok(continueBtnObs, 'Should locate Continue button');
+    const continueBtnObs = allObs.find(
+      (el) => el.normalizedText === "Continue",
+    );
+    assert.ok(continueBtnObs, "Should locate Continue button");
 
     // Attempt to resolve it. Since the two buttons share identical traits, they are ambiguous.
     const resolveAmbBtn = await resolveElement(page, continueBtnObs);
-    assert.strictEqual(resolveAmbBtn.resolved, false, 'Should flag duplicate elements as unresolved');
-    assert.strictEqual(resolveAmbBtn.reason, 'TARGET_AMBIGUOUS', 'Reason should be TARGET_AMBIGUOUS');
-    assert.ok(resolveAmbBtn.candidates.length >= 2, 'Should capture all matching candidates');
-    console.log('✅ Test 2 Passed.');
+    assert.strictEqual(
+      resolveAmbBtn.resolved,
+      false,
+      "Should flag duplicate elements as unresolved",
+    );
+    assert.strictEqual(
+      resolveAmbBtn.reason,
+      "TARGET_AMBIGUOUS",
+      "Reason should be TARGET_AMBIGUOUS",
+    );
+    assert.ok(
+      resolveAmbBtn.candidates.length >= 2,
+      "Should capture all matching candidates",
+    );
+    console.log("✅ Test 2 Passed.");
 
     // Test 3: Hidden Candidate vs Visible Candidate (Prefers Visible)
-    console.log('Running Test 3: Prefers visible element over hidden element with identical attributes...');
-    const dupInputObs = allObs.find(el => el.id === 'input-dup-visible');
-    assert.ok(dupInputObs, 'Should locate the visible duplicate input element');
+    console.log(
+      "Running Test 3: Prefers visible element over hidden element with identical attributes...",
+    );
+    const dupInputObs = allObs.find((el) => el.id === "input-dup-visible");
+    assert.ok(dupInputObs, "Should locate the visible duplicate input element");
 
     const resolvedInput = await resolveElement(page, dupInputObs);
-    assert.strictEqual(resolvedInput.resolved, true, 'Should resolve candidate because the other is hidden (display: none)');
-    assert.strictEqual(resolvedInput.reason, 'SUCCESS', 'Should return SUCCESS since visible score safely overrides hidden element score');
-    console.log('✅ Test 3 Passed.');
+    assert.strictEqual(
+      resolvedInput.resolved,
+      true,
+      "Should resolve candidate because the other is hidden (display: none)",
+    );
+    assert.strictEqual(
+      resolvedInput.reason,
+      "SUCCESS",
+      "Should return SUCCESS since visible score safely overrides hidden element score",
+    );
+    console.log("✅ Test 3 Passed.");
 
     // Test 4: Removed/Stale Element (TARGET_NOT_FOUND)
-    console.log('Running Test 4: Removed unique element resolves to TARGET_NOT_FOUND...');
+    console.log(
+      "Running Test 4: Removed unique element resolves to TARGET_NOT_FOUND...",
+    );
     // We remove the unique frame button so no matching descriptors remain
-    const frame = page.frames().find(f => f.name() === 'iframe-correct' || f.url().includes('iframe-correct'));
+    const frame = page
+      .frames()
+      .find(
+        (f) =>
+          f.name() === "iframe-correct" || f.url().includes("iframe-correct"),
+      );
     await frame.evaluate(() => {
-      const btn = document.getElementById('action-btn-frame');
+      const btn = document.getElementById("action-btn-frame");
       if (btn) btn.remove();
     });
 
     const resolvedRemoved = await resolveElement(page, correctFrameBtnObs);
-    assert.strictEqual(resolvedRemoved.resolved, false, 'Resolution should fail on missing elements');
-    assert.strictEqual(resolvedRemoved.reason, 'TARGET_NOT_FOUND', 'Should return TARGET_NOT_FOUND error code');
-    console.log('✅ Test 4 Passed.');
+    assert.strictEqual(
+      resolvedRemoved.resolved,
+      false,
+      "Resolution should fail on missing elements",
+    );
+    assert.strictEqual(
+      resolvedRemoved.reason,
+      "TARGET_NOT_FOUND",
+      "Should return TARGET_NOT_FOUND error code",
+    );
+    console.log("✅ Test 4 Passed.");
 
     // Test 5: Wrong Iframe Separation
-    console.log('Running Test 5: Frame isolation prevents leaking element resolution to wrong context...');
+    console.log(
+      "Running Test 5: Frame isolation prevents leaking element resolution to wrong context...",
+    );
     // Alter frameId to map to an invalid/non-existent frame
     const corruptedFrameBtn = {
       ...correctFrameBtnObs,
-      frameId: 'iframe-invalid-wrong'
+      frameId: "iframe-invalid-wrong",
     };
 
     const resolveCorrupted = await resolveElement(page, corruptedFrameBtn);
-    assert.strictEqual(resolveCorrupted.resolved, false, 'Should fail to resolve elements in wrong/missing iframe context');
-    console.log('✅ Test 5 Passed.');
+    assert.strictEqual(
+      resolveCorrupted.resolved,
+      false,
+      "Should fail to resolve elements in wrong/missing iframe context",
+    );
+    console.log("✅ Test 5 Passed.");
 
-    console.log('🎉 ALL AMBIGUITY-SAFE RESOLUTION TESTS PASSED.');
+    console.log("🎉 ALL AMBIGUITY-SAFE RESOLUTION TESTS PASSED.");
   } catch (error) {
-    console.error('❌ Tests Failed:', error);
+    console.error("❌ Tests Failed:", error);
     process.exit(1);
   } finally {
     if (browser) {

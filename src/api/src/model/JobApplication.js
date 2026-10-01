@@ -1,5 +1,8 @@
 import mongoose from "mongoose";
-import { APPLICATION_STATUS, APPLICATION_METHOD } from "../constant/application.constant.js";
+import {
+  APPLICATION_STATUS,
+  APPLICATION_METHOD,
+} from "../constant/application.constant.js";
 
 const jobApplicationSchema = new mongoose.Schema(
   {
@@ -38,6 +41,10 @@ const jobApplicationSchema = new mongoose.Schema(
         "Approved",
         "failed",
         "Failed",
+        "waiting_for_user",
+        "waiting_for_final_review",
+        "cancelled",
+        "blocked",
       ],
       default: APPLICATION_STATUS.PENDING,
       index: true,
@@ -198,7 +205,10 @@ const jobApplicationSchema = new mongoose.Schema(
           subject: { type: String, default: "" },
           body: { type: String, default: "" },
           pdfPath: { type: String, default: "" },
-          tailoredResumeData: { type: mongoose.Schema.Types.Mixed, default: null },
+          tailoredResumeData: {
+            type: mongoose.Schema.Types.Mixed,
+            default: null,
+          },
           status: { type: String, default: "draft" },
           sentAt: { type: Date, default: null },
         },
@@ -293,7 +303,14 @@ const jobApplicationSchema = new mongoose.Schema(
       },
       currentStage: {
         type: String,
-        enum: ["initialized", "analyzing", "navigating", "formMode", "paused", "completed"],
+        enum: [
+          "initialized",
+          "analyzing",
+          "navigating",
+          "formMode",
+          "paused",
+          "completed",
+        ],
         default: "initialized",
       },
       rejectionReason: {
@@ -335,7 +352,10 @@ const jobApplicationSchema = new mongoose.Schema(
         pendingHumanAction: {
           reason: { type: String, default: null },
           savedUrl: { type: String, default: null },
-          savedStorageState: { type: mongoose.Schema.Types.Mixed, default: null },
+          savedStorageState: {
+            type: mongoose.Schema.Types.Mixed,
+            default: null,
+          },
         },
       },
       logs: [
@@ -349,12 +369,15 @@ const jobApplicationSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 // Compound index to prevent creating duplicate applications for the same user and job
 jobApplicationSchema.index({ userId: 1, jobId: 1 }, { unique: true });
 
-export const JobApplication = mongoose.model("JobApplication", jobApplicationSchema);
+export const JobApplication = mongoose.model(
+  "JobApplication",
+  jobApplicationSchema,
+);
 export const Application = JobApplication;
 export default JobApplication;
