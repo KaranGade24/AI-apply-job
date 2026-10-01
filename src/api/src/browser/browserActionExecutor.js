@@ -10,6 +10,32 @@ import { resolveElement } from './observer/elementResolver.js';
  * @returns {Promise<import('playwright').Locator>}
  */
 const resolveTargetLocator = async (page, target) => {
+  // 1. Direct CSS Selector resolution if available
+  const selector = typeof target === 'string' ? target : target?.selector;
+  if (selector && typeof selector === 'string') {
+    try {
+      const loc = page.locator(selector).first();
+      const count = await loc.count().catch(() => 0);
+      if (count > 0) return loc;
+    } catch {
+      // Fall through to semantic resolver if invalid CSS selector
+    }
+  }
+
+  // 2. Direct text query if provided
+  if (target?.text || target?.label) {
+    try {
+      const textQuery = String(target.text || target.label).trim();
+      if (textQuery) {
+        const textLoc = page.getByText(textQuery, { exact: false }).first();
+        if ((await textLoc.count().catch(() => 0)) > 0) return textLoc;
+      }
+    } catch {
+      // Fall through
+    }
+  }
+
+  // 3. Fallback to ambiguity-safe element descriptor resolution
   let elementDescriptor = target;
   if (typeof target === 'string') {
     elementDescriptor = { ancestryPath: target };

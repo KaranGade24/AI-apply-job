@@ -51,25 +51,28 @@ export const resolveFromResume = (field, resumeData = {}, job = {}) => {
   }
 
   // 2. Total Experience / Years of Experience
-  if (/years?\s*of\s*experience|total\s*experience/i.test(q)) {
+  if (/years?\s*of\s*experience|total\s*experience|relevant\s*experience/i.test(q)) {
+    const directYears = resumeData?.totalExperienceYears || resumeData?.yearsOfExperience || resumeData?.experienceYears;
     const experiences = resumeData?.experience || [];
-    if (experiences.length === 0) {
+    if (directYears === undefined && experiences.length === 0) {
       return { resolved: false, source: 'resume', sourcePath: '', confidence: 0.0 };
     }
 
-    let calculatedYears = 0;
+    let calculatedYears = directYears !== undefined ? Number(directYears) : 0;
 
-    // Calculate total verified experience from verified employment entries
-    experiences.forEach((exp) => {
-      if (exp.startDate && exp.endDate) {
-        const start = new Date(exp.startDate);
-        const end = exp.endDate.toLowerCase().includes('present') ? new Date() : new Date(exp.endDate);
-        if (!isNaN(start) && !isNaN(end)) {
-          const diffYears = (end - start) / (1000 * 60 * 60 * 24 * 365.25);
-          if (diffYears > 0) calculatedYears += diffYears;
+    // Calculate total verified experience from verified employment entries if directYears not provided
+    if (directYears === undefined) {
+      experiences.forEach((exp) => {
+        if (exp.startDate && exp.endDate) {
+          const start = new Date(exp.startDate);
+          const end = exp.endDate.toLowerCase().includes('present') ? new Date() : new Date(exp.endDate);
+          if (!isNaN(start) && !isNaN(end)) {
+            const diffYears = (end - start) / (1000 * 60 * 60 * 24 * 365.25);
+            if (diffYears > 0) calculatedYears += diffYears;
+          }
         }
-      }
-    });
+      });
+    }
 
     const roundedYears = Math.round(calculatedYears);
 

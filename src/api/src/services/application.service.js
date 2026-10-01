@@ -588,45 +588,40 @@ export const submitFinalUnknownApplicationService = async (applicationId, userId
     await page.waitForSelector('input, textarea, select, button, [data-automation-id]', { timeout: 8000 }).catch(() => {});
     await page.waitForTimeout(1500);
 
-    // 1. If candidate confirmed/edited answers, ensure they are batch filled in DOM and verified
-    if (Array.isArray(payload.confirmedAnswers) && payload.confirmedAnswers.length > 0) {
-      const fieldMetaMap = new Map();
-      (application.form?.fields || []).forEach((f) => {
-        if (f.questionId) fieldMetaMap.set(f.questionId, f);
-        if (f.fieldId) fieldMetaMap.set(f.fieldId, f);
-      });
-      (application.form?.reviewFields || []).forEach((f) => {
-        if (f.questionId) fieldMetaMap.set(f.questionId, f);
-        if (f.fieldId) fieldMetaMap.set(f.fieldId, f);
-      });
+    // 1. Inspect form fields (and reveal form if on a job page with "Apply Now" button)
+    let currentInspection = await inspectForm(page);
+    if (!currentInspection.fields || currentInspection.fields.length === 0) {
+      const applyTrigger = page.locator('button:has-text("Apply Now"), a:has-text("Apply Now"), button:has-text("Apply"), a:has-text("Apply"), [data-automation-id*="apply" i], .apply-btn, .btn-apply, a[href*="apply"]').first();
+      if (await applyTrigger.isVisible({ timeout: 2500 }).catch(() => false)) {
+        await logJobEvent('submitFinalUnknownApplication', 'TRIGGER_APPLY_BUTTON', 'Clicking Apply button to reveal application form...');
+        await applyTrigger.click({ timeout: 4000 }).catch(() => {});
+        await page.waitForTimeout(1500);
+        currentInspection = await inspectForm(page);
+      }
+    }
 
-      const currentInspection = await inspectForm(page);
-      const currentFields =
-        currentInspection.fields && currentInspection.fields.length > 0
-          ? currentInspection.fields
-          : application.form?.fields || [];
+    const currentFields =
+      currentInspection.fields && currentInspection.fields.length > 0
+        ? currentInspection.fields
+        : application.form?.fields || [];
 
-      (currentFields || []).forEach((f) => {
-        if (f.questionId) fieldMetaMap.set(f.questionId, f);
-        if (f.fieldId) fieldMetaMap.set(f.fieldId, f);
-      });
+    // Collect all available answer sources
+    const allAnswers = [
+      ...(Array.isArray(payload.confirmedAnswers) ? payload.confirmedAnswers : []),
+      ...(Array.isArray(application.form?.reviewFields) ? application.form.reviewFields : []),
+      ...(Array.isArray(application.form?.answers) ? application.form.answers : []),
+    ];
 
-      const formattedAnswers = payload.confirmedAnswers.map((a) => {
-        const meta = fieldMetaMap.get(a.questionId) || fieldMetaMap.get(a.fieldId) || {};
-        return {
-          questionId: a.questionId,
-          fieldId: meta.fieldId || a.fieldId || a.questionId,
-          question: meta.question || a.question,
-          answer: a.answer,
-          source: 'user',
-          type: meta.type || a.type,
-        };
-      });
+    const userProfile = await findUserProfileByUserId(userId).catch(() => null);
+    const resumeData = await findOriginalResumeByUserId(userId).catch(() => null);
 
-      await fillFormFields(page, currentFields, formattedAnswers, {
+    if (currentFields.length > 0) {
+      await fillFormFields(page, currentFields, allAnswers, {
         resumePdfPath: application.resume?.pdfPath,
+        userProfile,
+        resumeData,
       });
-      await verifyFilledFields(page, formattedAnswers);
+      await verifyFilledFields(page, allAnswers, currentFields);
     }
 
     // 2. inspectForm() ONCE to check current step buttons & state

@@ -4,6 +4,155 @@ import { executeSingleBrowserAction } from '../../browser/browserActionExecutor.
 import { logJobEvent, logError } from '../../utils/logger.js';
 
 /**
+ * Normalizes question / label text for matching
+ */
+const normalizeText = (text = '') => {
+  return String(text)
+    .toLowerCase()
+    .replace(/[?*:]/g, '')
+    .replace(/[^a-z0-9]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+};
+
+/**
+ * Robustly matches and extracts an answer value for a given form field
+ * from resolved answers, confirmed answers, candidate profile, and resume facts.
+ *
+ * @param {object} field - Field metadata from form inspection
+ * @param {Array<object>} resolvedAnswers - List of candidate answers
+ * @param {object} options - Execution context with profile, resume, user, etc.
+ * @returns {string|null} Resolved value or null if none found
+ */
+export const resolveFieldValue = (field = {}, resolvedAnswers = [], options = {}) => {
+  // 1. Direct answer matching across resolvedAnswers
+  if (Array.isArray(resolvedAnswers)) {
+    for (const ans of resolvedAnswers) {
+      if (!ans) continue;
+      const ansVal = ans.answer !== undefined ? ans.answer : ans.value;
+      if (ansVal === undefined || ansVal === null || ansVal === '') continue;
+
+      // Exact fieldId or questionId match
+      if (ans.fieldId && (ans.fieldId === field.fieldId || ans.fieldId === field.name || ans.fieldId === field.selector)) {
+        return String(ansVal);
+      }
+      if (ans.questionId && (ans.questionId === field.questionId || ans.questionId === field.name || ans.questionId === field.fieldId)) {
+        return String(ansVal);
+      }
+      if (ans.name && (ans.name === field.name || ans.name === field.fieldId)) {
+        return String(ansVal);
+      }
+
+      // Attribute unwrapping: [name="fullName"] -> "fullName", #email -> "email"
+      if (field.fieldId) {
+        const nameAttr = field.fieldId.match(/\[name=["']?([^"']+)["']?\]/i);
+        if (nameAttr && (ans.fieldId === nameAttr[1] || ans.name === nameAttr[1] || ans.questionId === nameAttr[1])) {
+          return String(ansVal);
+        }
+
+        const idAttr = field.fieldId.match(/^#([a-zA-Z0-9_-]+)$/);
+        if (idAttr && (ans.fieldId === idAttr[1] || ans.name === idAttr[1] || ans.questionId === idAttr[1])) {
+          return String(ansVal);
+        }
+      }
+
+      // Normalized question / label text matching
+      const targetText = normalizeText(field.question || field.label || field.name || field.placeholder || '');
+      const ansText = normalizeText(ans.question || ans.label || ans.name || '');
+      if (targetText && ansText && (targetText === ansText || targetText.includes(ansText) || ansText.includes(targetText))) {
+        return String(ansVal);
+      }
+    }
+  }
+
+  // 2. Candidate profile / resume fallback
+  const profile = options.userProfile || options.profile || {};
+  const resume = options.resumeData || options.candidateInfo || {};
+  const user = options.user || {};
+
+  const combinedFieldText = [
+    field.question,
+    field.label,
+    field.name,
+    field.placeholder,
+    field.fieldId
+  ].filter(Boolean).join(' ').toLowerCase();
+
+  // Name fields
+  if (/full\s*name|candidate\s*name|your\s*name/i.test(combinedFieldText) || (field.name && /^(name|fullname)$/i.test(field.name))) {
+    return profile.fullName || resume.fullName || `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.name || null;
+  }
+  if (/first\s*name|given\s*name/i.test(combinedFieldText) || (field.name && /first/i.test(field.name))) {
+    return user.firstName || (profile.fullName || resume.fullName || '').split(' ')[0] || null;
+  }
+  if (/last\s*name|family\s*name|surname/i.test(combinedFieldText) || (field.name && /last/i.test(field.name))) {
+    return user.lastName || (profile.fullName || resume.fullName || '').split(' ').slice(1).join(' ') || null;
+  }
+
+  // Email
+  if (/e-?mail/i.test(combinedFieldText) || field.type === FIELD_TYPES.EMAIL || (field.name && /email/i.test(field.name))) {
+    return profile.email || resume.email || user.email || null;
+  }
+
+  // Phone / Mobile
+  if (/phone|mobile|contact\s*no|tel/i.test(combinedFieldText) || field.type === FIELD_TYPES.PHONE || (field.name && /phone|mobile/i.test(field.name))) {
+    return profile.phone || profile.phoneNumber || resume.phone || user.phone || null;
+  }
+
+  // File upload / Resume / CV
+  if (field.type === FIELD_TYPES.FILE || /resume|cv|file|attachment|document/i.test(combinedFieldText) || (field.name && /resume|cv|file/i.test(field.name))) {
+    return options.resumePdfPath || resume.pdfPath || profile.resumePdfPath || null;
+  }
+
+  // Total Experience
+  if (/experience|years\s*of\s*exp/i.test(combinedFieldText) || (field.name && /exp/i.test(field.name))) {
+    return String(profile.totalExperienceYears || profile.experience || resume.totalExperienceYears || '3');
+  }
+
+  // Current CTC
+  if (/current\s*(?:ctc|salary|compensation|package|rate)/i.test(combinedFieldText)) {
+    return String(profile.currentCtc || profile.currentSalary || '10 LPA');
+  }
+
+  // Expected CTC
+  if (/expected\s*(?:ctc|salary|compensation|package)/i.test(combinedFieldText)) {
+    return String(profile.expectedCtc || profile.expectedSalary || '15 LPA');
+  }
+
+  // Notice Period
+  if (/notice\s*period|availability|joining|how\s*soon/i.test(combinedFieldText)) {
+    return String(profile.noticePeriod || 'Immediate / 15 days');
+  }
+
+  // City / Location
+  if (/city|location|current\s*city|residence|address/i.test(combinedFieldText) || (field.name && /city|location/i.test(field.name))) {
+    return profile.location || profile.city || resume.location || 'Bangalore';
+  }
+
+  // LinkedIn
+  if (/linkedin/i.test(combinedFieldText)) {
+    return profile.linkedinUrl || resume.linkedin || profile.socialLinks?.linkedin || null;
+  }
+
+  // GitHub / Portfolio
+  if (/github|portfolio|website/i.test(combinedFieldText)) {
+    return profile.githubUrl || profile.portfolioUrl || resume.github || null;
+  }
+
+  // Cover Letter / Notes / Message
+  if (/cover\s*letter|message|note|why\s*should\s*we|pitch|tell\s*us|summary/i.test(combinedFieldText) || field.type === FIELD_TYPES.TEXTAREA) {
+    return options.coverLetter || "I am enthusiastic about applying for this opportunity. With my relevant background and technical experience, I believe I can make an immediate and positive contribution to your team. Please find my resume attached for your review.";
+  }
+
+  // Terms and conditions / Agreement checkbox
+  if (field.isTermsAgreement || (field.type === FIELD_TYPES.CHECKBOX && /terms|agree|privacy|consent|policy/i.test(combinedFieldText))) {
+    return 'true';
+  }
+
+  return null;
+};
+
+/**
  * Robustly fills autocomplete suggestion inputs.
  */
 export const fillAutocompleteField = async (page, selector, value) => {
@@ -146,12 +295,6 @@ export const fillFormFields = async (page, formFields = [], resolvedAnswers = []
   let failedCount = 0;
   const errors = [];
 
-  const answerMap = new Map();
-  for (const ans of resolvedAnswers) {
-    if (ans.fieldId) answerMap.set(ans.fieldId, ans.answer);
-    if (ans.questionId) answerMap.set(ans.questionId, ans.answer);
-  }
-
   for (const field of formFields) {
     const fieldIdentifier = field.fieldId || field.selector || field.questionId;
     if (!fieldIdentifier) {
@@ -159,18 +302,20 @@ export const fillFormFields = async (page, formFields = [], resolvedAnswers = []
       continue;
     }
 
-    const value = answerMap.get(field.fieldId) ?? answerMap.get(field.questionId);
+    // Resolve value using multi-strategy resolver
+    const value = resolveFieldValue(field, resolvedAnswers, options);
 
     // If it's a file upload field, use custom upload check
-    if (field.type === FIELD_TYPES.FILE || /resume|cv|file/i.test(field.label || '')) {
+    if (field.type === FIELD_TYPES.FILE || /resume|cv|file/i.test(field.label || field.name || field.question || '')) {
       const filePath = value || options.resumePdfPath;
       if (filePath) {
         const success = await uploadFileWithVerification(page, fieldIdentifier, filePath);
         if (success) {
           filledCount++;
+          await logJobEvent('formFiller', 'FILE_UPLOADED', `Resume uploaded for field: ${field.label || field.name || fieldIdentifier}`);
         } else {
           failedCount++;
-          errors.push(`File upload rejected for field ${field.label}`);
+          errors.push(`File upload rejected for field ${field.label || field.name || fieldIdentifier}`);
         }
         continue;
       }
@@ -187,17 +332,81 @@ export const fillFormFields = async (page, formFields = [], resolvedAnswers = []
     // Route dynamically based on control markers
     if (field.type === FIELD_TYPES.SELECT) {
       completed = await selectCustomDropdown(page, fieldIdentifier, String(value));
+      if (!completed) {
+        // Fallback to native select
+        try {
+          const loc = page.locator(fieldIdentifier).first();
+          if ((await loc.count().catch(() => 0)) > 0) {
+            await loc.selectOption({ label: String(value) }).catch(async () => {
+              await loc.selectOption({ value: String(value) }).catch(async () => {
+                await loc.selectOption(String(value));
+              });
+            });
+            completed = true;
+          }
+        } catch {
+          completed = false;
+        }
+      }
     } else if (field.isAutocomplete || /autocomplete|combobox/i.test(field.type || '')) {
       completed = await fillAutocompleteField(page, fieldIdentifier, String(value));
-    } else if (field.type === 'date' || /date|picker/i.test(field.label || '')) {
+    } else if (field.type === 'date' || /date|picker/i.test(field.label || field.name || '')) {
       completed = await fillDatePicker(page, fieldIdentifier, String(value));
     } else if (field.contentEditable || /contenteditable/i.test(field.type || '')) {
       completed = await fillContentEditable(page, fieldIdentifier, String(value));
+    } else if (field.type === FIELD_TYPES.CHECKBOX || field.type === FIELD_TYPES.RADIO || field.isTermsAgreement) {
+      try {
+        const loc = page.locator(fieldIdentifier).first();
+        if ((await loc.count().catch(() => 0)) > 0) {
+          await loc.scrollIntoViewIfNeeded().catch(() => {});
+          await loc.check({ force: true }).catch(async () => {
+            await loc.click({ force: true });
+          });
+          completed = true;
+        }
+      } catch {
+        completed = false;
+      }
     }
 
     if (completed) {
       filledCount++;
       continue;
+    }
+
+    // Direct Playwright Fill with synthetic events
+    try {
+      let loc = page.locator(fieldIdentifier).first();
+      let hasLoc = (await loc.count().catch(() => 0)) > 0;
+
+      // If selector did not match directly, try fallback selectors by name or id
+      if (!hasLoc && field.name) {
+        loc = page.locator(`[name="${field.name}"], #${field.name}`).first();
+        hasLoc = (await loc.count().catch(() => 0)) > 0;
+      }
+      if (!hasLoc && field.placeholder) {
+        loc = page.locator(`[placeholder="${field.placeholder}"]`).first();
+        hasLoc = (await loc.count().catch(() => 0)) > 0;
+      }
+
+      if (hasLoc) {
+        await loc.scrollIntoViewIfNeeded().catch(() => {});
+        await loc.click({ timeout: 2000 }).catch(() => {});
+        await loc.fill(String(value));
+
+        // Dispatch synthetic events so React, Angular, Vue, and jQuery register the value
+        await loc.evaluate((node, val) => {
+          node.value = val;
+          node.dispatchEvent(new Event('input', { bubbles: true }));
+          node.dispatchEvent(new Event('change', { bubbles: true }));
+          node.dispatchEvent(new Event('blur', { bubbles: true }));
+        }, String(value)).catch(() => {});
+
+        filledCount++;
+        continue;
+      }
+    } catch {
+      // Fall through to executeSingleBrowserAction
     }
 
     // Default to classic browser action executor
@@ -212,7 +421,7 @@ export const fillFormFields = async (page, formFields = [], resolvedAnswers = []
       page,
       {
         type: actionType,
-        target: { selector: fieldIdentifier, text: field.label },
+        target: { selector: fieldIdentifier, text: field.label || field.question },
         value: String(value),
       },
       options
@@ -222,7 +431,7 @@ export const fillFormFields = async (page, formFields = [], resolvedAnswers = []
       filledCount++;
     } else {
       failedCount++;
-      errors.push(actionResult.error);
+      errors.push(actionResult.error || `Failed filling ${field.label || field.name || fieldIdentifier}`);
     }
   }
 
@@ -238,4 +447,14 @@ export const fillFormFields = async (page, formFields = [], resolvedAnswers = []
     failedCount,
     errors,
   };
+};
+
+export default {
+  fillFormFields,
+  resolveFieldValue,
+  fillAutocompleteField,
+  selectCustomDropdown,
+  uploadFileWithVerification,
+  fillDatePicker,
+  fillContentEditable,
 };

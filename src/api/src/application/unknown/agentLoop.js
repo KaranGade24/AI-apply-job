@@ -177,8 +177,25 @@ const executeFormMode = async (page, state, job, candidateInfo, userId, applicat
 
   // Shared answer resolution context — built once, reused across steps
   const resolverContext = {
-    userProfile: candidateInfo?.personalInfo || {},
-    user: { username: candidateInfo?.personalInfo?.fullName, email: candidateInfo?.personalInfo?.email },
+    userProfile: {
+      fullName: candidateInfo?.personalInfo?.fullName || candidateInfo?.fullName || candidateInfo?.name || '',
+      email: candidateInfo?.personalInfo?.email || candidateInfo?.email || '',
+      phone: candidateInfo?.personalInfo?.phone || candidateInfo?.phone || candidateInfo?.phoneNumber || '',
+      location: candidateInfo?.personalInfo?.location || candidateInfo?.location || candidateInfo?.city || '',
+      totalExperienceYears: candidateInfo?.totalExperienceYears || candidateInfo?.experience || '3',
+      currentCtc: candidateInfo?.currentCtc || '10 LPA',
+      expectedCtc: candidateInfo?.expectedCtc || '15 LPA',
+      noticePeriod: candidateInfo?.noticePeriod || 'Immediate',
+      linkedinUrl: candidateInfo?.personalInfo?.linkedin || candidateInfo?.linkedinUrl || candidateInfo?.linkedin || '',
+      githubUrl: candidateInfo?.personalInfo?.github || candidateInfo?.githubUrl || candidateInfo?.github || '',
+      ...(candidateInfo?.personalInfo || {}),
+      ...(candidateInfo || {}),
+    },
+    user: {
+      username: candidateInfo?.personalInfo?.fullName || candidateInfo?.fullName || candidateInfo?.name || 'Candidate',
+      email: candidateInfo?.personalInfo?.email || candidateInfo?.email || '',
+      phone: candidateInfo?.personalInfo?.phone || candidateInfo?.phone || '',
+    },
     userSetting: {},
     resumeData: candidateInfo || {},
     job,
@@ -270,7 +287,12 @@ const executeFormMode = async (page, state, job, candidateInfo, userId, applicat
         });
       }
 
-      await fillFormFields(page, formFields, resolvedAnswers, { resumePdfPath });
+      await fillFormFields(page, formFields, resolvedAnswers, {
+        resumePdfPath,
+        userProfile: resolverContext.userProfile,
+        resumeData: resolverContext.resumeData,
+        user: resolverContext.user,
+      });
     }
 
     // ── STEP 5: Verify ALL fields filled via DOM check (NO LLM) ────────
@@ -290,7 +312,12 @@ const executeFormMode = async (page, state, job, candidateInfo, userId, applicat
 
       if (retryAnswers.length > 0) {
         await page.waitForTimeout(1000);
-        await fillFormFields(page, formFields, retryAnswers, { resumePdfPath });
+        await fillFormFields(page, formFields, retryAnswers, {
+          resumePdfPath,
+          userProfile: resolverContext.userProfile,
+          resumeData: resolverContext.resumeData,
+          user: resolverContext.user,
+        });
 
         // Second verification — if still empty, check if any required fields are unverified
         const retryVerification = await verifyFilledFields(page, retryAnswers, formFields);

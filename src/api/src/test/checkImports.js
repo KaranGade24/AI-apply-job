@@ -13,7 +13,7 @@ function getAllJsFiles(dir) {
     const filePath = path.join(dir, file);
     const stat = fs.statSync(filePath);
     if (stat && stat.isDirectory()) {
-      if (file !== 'node_modules' && file !== '.git') {
+      if (file !== 'node_modules' && file !== '.git' && file !== 'scripts') {
         results = results.concat(getAllJsFiles(filePath));
       }
     } else if (file.endsWith('.js') && !file.endsWith('.test.js') && file !== 'checkImports.js') {

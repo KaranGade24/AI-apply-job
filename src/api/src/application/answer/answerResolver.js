@@ -53,11 +53,15 @@ export const resolveAllFormAnswers = async (fields = [], context = {}) => {
   const missingQuestions = [];
   const subjectiveFieldsToBatch = [];
 
-  // Map of previously supplied answers by questionId or fieldId
+  // Map of previously supplied answers by questionId, fieldId, name, and normalized question text
   const priorAnswerMap = new Map();
   userAnswers.forEach((ans) => {
+    if (!ans) return;
     if (ans.questionId) priorAnswerMap.set(ans.questionId, ans);
     if (ans.fieldId) priorAnswerMap.set(ans.fieldId, ans);
+    if (ans.name) priorAnswerMap.set(ans.name, ans);
+    const qNorm = normalizeQuestionText(ans.question || ans.label || '');
+    if (qNorm) priorAnswerMap.set(`norm_${qNorm}`, ans);
   });
 
   // Automatically resolve single verified candidate password for both Password & Verify Password
@@ -90,8 +94,19 @@ export const resolveAllFormAnswers = async (fields = [], context = {}) => {
     const isSensitive = SENSITIVE_PATTERNS.some(pattern => pattern.test(qText));
 
     // Check if user already provided/confirmed this answer
-    if (priorAnswerMap.has(qId) || priorAnswerMap.has(fId)) {
-      const prior = priorAnswerMap.get(qId) || priorAnswerMap.get(fId);
+    let prior = priorAnswerMap.get(qId) || priorAnswerMap.get(fId) || (field.name ? priorAnswerMap.get(field.name) : null);
+    if (!prior && fId) {
+      const nameAttr = fId.match(/\[name=["']?([^"']+)["']?\]/i);
+      if (nameAttr) prior = priorAnswerMap.get(nameAttr[1]);
+      const idAttr = fId.match(/^#([a-zA-Z0-9_-]+)$/);
+      if (idAttr) prior = prior || priorAnswerMap.get(idAttr[1]);
+    }
+    if (!prior) {
+      const qNorm = normalizeQuestionText(qText);
+      if (qNorm) prior = priorAnswerMap.get(`norm_${qNorm}`);
+    }
+
+    if (prior) {
       resolvedAnswers.push({
         questionId: qId,
         fieldId: fId,
@@ -115,6 +130,7 @@ export const resolveAllFormAnswers = async (fields = [], context = {}) => {
         required: Boolean(field.required),
         options: field.options || [],
         placeholder: field.placeholder || '',
+        isSensitive: true,
       });
       continue;
     }
@@ -136,7 +152,7 @@ export const resolveAllFormAnswers = async (fields = [], context = {}) => {
     }
 
     // Level 1: Deterministic Profile Answer
-    const profileRes = await resolveFromProfile(field, userProfile, user);
+    const profileRes = await resolveFromProfile(field, userProfile, user, userSetting);
     if (profileRes.resolved) {
       resolvedAnswers.push({
         questionId: qId,

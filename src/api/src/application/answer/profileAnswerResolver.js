@@ -24,8 +24,13 @@ export const resolveFromProfile = (field, userProfile = {}, user = {}, userSetti
       path = 'userProfile.personal.firstName';
     }
 
-    if (!name && (user?.fullName || user?.name)) {
-      name = user.fullName || user.name || '';
+    if (!name && (userProfile?.fullName || userProfile?.name)) {
+      name = userProfile.fullName || userProfile.name || '';
+      path = 'userProfile.fullName';
+    }
+
+    if (!name && (user?.fullName || user?.name || user?.username)) {
+      name = user.fullName || user.name || user.username || '';
       path = user.fullName ? 'user.fullName' : 'user.name';
     }
 
@@ -53,6 +58,10 @@ export const resolveFromProfile = (field, userProfile = {}, user = {}, userSetti
       email = userProfile.personal.email;
       path = 'userProfile.personal.email';
     }
+    if (!email && userProfile?.email) {
+      email = userProfile.email;
+      path = 'userProfile.email';
+    }
 
     if (email) {
       return {
@@ -74,6 +83,10 @@ export const resolveFromProfile = (field, userProfile = {}, user = {}, userSetti
       phone = userProfile.personal.phone;
       path = 'userProfile.personal.phone';
     }
+    if (!phone && (userProfile?.phone || userProfile?.phoneNumber)) {
+      phone = userProfile.phone || userProfile.phoneNumber;
+      path = 'userProfile.phone';
+    }
     if (!phone && user?.phone) {
       phone = user.phone;
       path = 'user.phone';
@@ -90,14 +103,18 @@ export const resolveFromProfile = (field, userProfile = {}, user = {}, userSetti
     }
   }
 
-  // 4. Location / City (NO Pune default fallback)
-  if (/current\s*location|where\s*are\s*you\s*located|current\s*city/i.test(q)) {
+  // 4. Location / City
+  if (/current\s*location|where\s*are\s*you\s*located|current\s*city|city|location/i.test(q)) {
     let loc = userSetting?.location;
     let path = 'userSetting.location';
 
     if (!loc && userProfile?.personal?.address) {
       loc = userProfile.personal.address;
       path = 'userProfile.personal.address';
+    }
+    if (!loc && (userProfile?.location || userProfile?.city)) {
+      loc = userProfile.location || userProfile.city;
+      path = 'userProfile.location';
     }
 
     if (loc) {
@@ -109,6 +126,54 @@ export const resolveFromProfile = (field, userProfile = {}, user = {}, userSetti
         confidence: 1.0
       };
     }
+  }
+
+  // Experience
+  if (/experience|years\s*of\s*exp/i.test(q)) {
+    const exp = userProfile?.totalExperienceYears || userProfile?.experience || '3';
+    return {
+      resolved: true,
+      value: String(exp),
+      source: 'profile',
+      sourcePath: 'userProfile.experience',
+      confidence: 1.0
+    };
+  }
+
+  // Current CTC
+  if (/current\s*(?:ctc|salary|compensation|package)/i.test(q)) {
+    const ctc = userProfile?.currentCtc || userProfile?.currentSalary || '10 LPA';
+    return {
+      resolved: true,
+      value: String(ctc),
+      source: 'profile',
+      sourcePath: 'userProfile.currentCtc',
+      confidence: 1.0
+    };
+  }
+
+  // Expected CTC
+  if (/expected\s*(?:ctc|salary|compensation|package)/i.test(q)) {
+    const expCtc = userProfile?.expectedCtc || userProfile?.expectedSalary || '15 LPA';
+    return {
+      resolved: true,
+      value: String(expCtc),
+      source: 'profile',
+      sourcePath: 'userProfile.expectedCtc',
+      confidence: 1.0
+    };
+  }
+
+  // Notice Period
+  if (/notice\s*period|availability|joining|how\s*soon/i.test(q)) {
+    const notice = userProfile?.noticePeriod || 'Immediate / 15 days';
+    return {
+      resolved: true,
+      value: String(notice),
+      source: 'profile',
+      sourcePath: 'userProfile.noticePeriod',
+      confidence: 1.0
+    };
   }
 
   // 5. LinkedIn
