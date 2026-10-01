@@ -12,6 +12,46 @@ import { normalizeQuestionText } from '../form/formNormalizer.js';
 export const resolveFromResume = (field, resumeData = {}, job = {}) => {
   const q = normalizeQuestionText(field.question || field.placeholder || field.name || '');
 
+  // 0. Personal Contact Information from Resume
+  if (/^(name|fullname)$/i.test(q) || /full\s*name|candidate\s*name|your\s*name|applicant\s*name|contact\s*name/i.test(q) || (field.name && /^(name|fullname|candidate_name)$/i.test(field.name))) {
+    const name = resumeData?.personalInfo?.fullName || resumeData?.personalInfo?.name || resumeData?.fullName || resumeData?.name || '';
+    if (name) {
+      return {
+        resolved: true,
+        value: name,
+        source: 'resume',
+        sourcePath: 'resumeData.personalInfo.fullName',
+        confidence: 1.0,
+      };
+    }
+  }
+
+  if (/e-?mail/i.test(q) || field.type === 'email' || (field.name && /email/i.test(field.name))) {
+    const email = resumeData?.personalInfo?.email || resumeData?.email || '';
+    if (email) {
+      return {
+        resolved: true,
+        value: email,
+        source: 'resume',
+        sourcePath: 'resumeData.personalInfo.email',
+        confidence: 1.0,
+      };
+    }
+  }
+
+  if (/phone|mobile|contact\s*no|tel|whatsapp/i.test(q) || field.type === 'phone' || (field.name && /phone|mobile/i.test(field.name))) {
+    const phone = resumeData?.personalInfo?.phone || resumeData?.personalInfo?.phoneNumber || resumeData?.phone || resumeData?.phoneNumber || '';
+    if (phone) {
+      return {
+        resolved: true,
+        value: phone,
+        source: 'resume',
+        sourcePath: 'resumeData.personalInfo.phone',
+        confidence: 1.0,
+      };
+    }
+  }
+
   // 1. Degree / Highest Education
   if (/degree|qualification|highest\s*education|graduat/i.test(q)) {
     const educationList = resumeData?.education || [];

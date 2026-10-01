@@ -507,9 +507,54 @@ export const ApplicationReviewModal = ({
 
   // Checkpoint 1 & 2 Interactive Form Renderer for all channels (Naukri, Workday, Company Site, Portal)
   const renderFormCheckpoints = () => {
-    const hasMissing =
-      application?.form?.missingQuestions &&
-      application.form.missingQuestions.length > 0;
+    // Filter out missing questions if they already have answers or values from Profile / Resume
+    const missingList = (application?.form?.missingQuestions || []).filter(
+      (q) => {
+        const qNorm = (q.question || q.placeholder || q.questionId || "")
+          .toLowerCase()
+          .replace(/[^a-z0-9]/g, "");
+        const isName = qNorm.includes("fullname") || qNorm.includes("name");
+        const isPhone = qNorm.includes("phone") || qNorm.includes("mobile");
+        const isEmail = qNorm.includes("email");
+
+        const hasAnswerInForm = (application?.form?.answers || []).some(
+          (a) =>
+            (a.questionId === q.questionId || a.fieldId === q.fieldId) &&
+            a.answer,
+        );
+        const hasReviewVal =
+          reviewAnswers[q.questionId] !== undefined &&
+          reviewAnswers[q.questionId] !== "";
+        const hasProfileName =
+          isName &&
+          (candidateInfo?.personal?.fullName ||
+            candidateInfo?.fullName ||
+            candidateInfo?.user?.fullName ||
+            candidateInfo?.resume?.fullName);
+        const hasProfilePhone =
+          isPhone &&
+          (candidateInfo?.personal?.phone ||
+            candidateInfo?.phone ||
+            candidateInfo?.user?.phone ||
+            candidateInfo?.resume?.phone);
+        const hasProfileEmail =
+          isEmail &&
+          (candidateInfo?.personal?.email ||
+            candidateInfo?.email ||
+            candidateInfo?.user?.email ||
+            candidateInfo?.resume?.email);
+
+        return !(
+          hasAnswerInForm ||
+          hasReviewVal ||
+          hasProfileName ||
+          hasProfilePhone ||
+          hasProfileEmail
+        );
+      },
+    );
+
+    const hasMissing = missingList.length > 0;
     const hasReview = effectiveReviewFields && effectiveReviewFields.length > 0;
 
     if (!hasMissing && !hasReview) return null;
@@ -517,7 +562,7 @@ export const ApplicationReviewModal = ({
     return (
       <div className="space-y-4">
         {/* CHECKPOINT 1: Missing Information / Questions Required By Employer */}
-        {hasMissing && (
+        {hasMissing ? (
           <div className="p-5 rounded-xl border border-amber-200 bg-amber-50/40 space-y-4 shadow-xs">
             <div className="flex items-start justify-between gap-3">
               <div>
@@ -536,13 +581,13 @@ export const ApplicationReviewModal = ({
                 </p>
               </div>
               <span className="text-xs font-bold text-amber-800 bg-amber-100 px-2.5 py-1 rounded-full shrink-0">
-                {application.form.missingQuestions.length} Question
-                {application.form.missingQuestions.length > 1 ? "s" : ""}
+                {missingList.length} Question
+                {missingList.length > 1 ? "s" : ""}
               </span>
             </div>
 
             <div className="space-y-3.5 pt-1">
-              {application.form.missingQuestions.map((q) => (
+              {missingList.map((q) => (
                 <div
                   key={q.questionId}
                   className="p-3.5 bg-white rounded-xl border border-slate-200 space-y-2"
@@ -675,10 +720,8 @@ export const ApplicationReviewModal = ({
               </Button>
             </div>
           </div>
-        )}
-
-        {/* CHECKPOINT 2: Final Application Review & Interactive Form Refill */}
-        {hasReview && (
+        ) : hasReview ? (
+          /* CHECKPOINT 2: Final Application Review & Interactive Form Refill (Shown ONLY when no missing questions remain) */
           <div className="p-5 rounded-xl border border-blue-200 bg-blue-50/30 space-y-4 shadow-xs">
             <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
               <div>
@@ -939,7 +982,7 @@ export const ApplicationReviewModal = ({
               </Button>
             </div>
           </div>
-        )}
+        ) : null}
       </div>
     );
   };
