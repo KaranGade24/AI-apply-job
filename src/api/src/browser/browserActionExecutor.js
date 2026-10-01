@@ -148,11 +148,11 @@ export const executeSingleBrowserAction = async (page, action, options = {}) => 
           handled = false;
         }
 
-        // 2. Playwright selectOption fallback
+        // 2. Playwright selectOption fallback with safe bounded timeout
         if (!handled) {
-          await locator.selectOption({ label: strVal }).catch(async () => {
-            await locator.selectOption({ value: strVal }).catch(async () => {
-              await locator.selectOption(strVal);
+          await locator.selectOption({ label: strVal }, { timeout: 3000 }).catch(async () => {
+            await locator.selectOption({ value: strVal }, { timeout: 2000 }).catch(async () => {
+              await locator.selectOption(strVal, { timeout: 2000 }).catch(() => {});
             });
           });
         }
@@ -161,14 +161,33 @@ export const executeSingleBrowserAction = async (page, action, options = {}) => 
 
       case BROWSER_ACTIONS.CHECK: {
         const locator = await resolveTargetLocator(page, target);
-        await locator.waitFor({ state: 'attached', timeout: 7000 }).catch(() => {});
+        await locator.waitFor({ state: 'attached', timeout: 5000 }).catch(() => {});
         await locator.scrollIntoViewIfNeeded().catch(() => {});
-        await locator.check({ force: true }).catch(async () => {
-          await locator.click({ force: true }).catch(async () => {
-            const parent = locator.locator('..');
-            await parent.click({ force: true }).catch(() => {});
+        
+        let checkedInDom = false;
+        try {
+          checkedInDom = await locator.evaluate((el) => {
+            if (!el) return false;
+            if (el.type === 'checkbox' || el.type === 'radio') {
+              el.checked = true;
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              return true;
+            }
+            return false;
+          }).catch(() => false);
+        } catch {
+          checkedInDom = false;
+        }
+
+        if (!checkedInDom) {
+          await locator.check({ force: true, timeout: 3000 }).catch(async () => {
+            await locator.click({ force: true, timeout: 2000 }).catch(async () => {
+              const parent = locator.locator('..');
+              await parent.click({ force: true, timeout: 2000 }).catch(() => {});
+            });
           });
-        });
+        }
         return { success: true, error: null, timestamp };
       }
 

@@ -245,7 +245,7 @@ export const getWorkflowStatus = async (applicationId, userId) => {
     values.status || toAgentStatus(sessionDoc?.status) || AGENT_STATUS.IDLE;
   const mappedStatus = normalizeWorkflowStatus({
     agentStatus: status,
-    applicationStatus: jobApp.status,
+    applicationStatus: jobApp?.status,
   });
   const isInterrupted = stateSnapshot?.next?.length > 0;
 

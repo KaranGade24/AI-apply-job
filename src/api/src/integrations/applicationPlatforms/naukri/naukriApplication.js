@@ -41,6 +41,15 @@ import {
 } from "../../../services/googleSession.service.js";
 import { handleGoogleFormApplication } from "../../../application/methods/googleFormApplicationMethod.js";
 
+const safeWait = async (targetPage, ms = 1000) => {
+  if (!targetPage || (typeof targetPage.isClosed === "function" && targetPage.isClosed())) return;
+  try {
+    await targetPage.waitForTimeout(ms);
+  } catch (err) {
+    // Ignore closed page/target errors safely
+  }
+};
+
 /**
  * Core Browser Application Engine for Naukri Jobs
  * Executes the complete application lifecycle with 2 Human Checkpoints:
@@ -170,7 +179,7 @@ export const runNaukriApplication = async ({
       .catch(async () => {
         await page.evaluate(() => window.stop()).catch(() => {});
       });
-    await page.waitForTimeout(2000);
+    await safeWait(page, 2000);
 
     // 5. Verify Authentication on live page
     const authState = await detectNaukriAuthState(page);
@@ -263,7 +272,7 @@ export const runNaukriApplication = async ({
         await popup.waitForLoadState("domcontentloaded").catch(() => {});
         activePage = popup;
       } else {
-        await page.waitForTimeout(2000);
+        await safeWait(page, 2000);
         const allPages = context.pages();
         if (allPages.length > 1) {
           activePage = allPages[allPages.length - 1];
@@ -283,7 +292,7 @@ export const runNaukriApplication = async ({
         }
       }
 
-      await activePage.waitForTimeout(3000);
+      await safeWait(activePage, 3000);
 
       // Extract rendered portal content and analyze with Gemini AI
       const extracted = await extractPageContent(activePage);
@@ -364,7 +373,7 @@ export const runNaukriApplication = async ({
           currentAnalysis.nextRecommendedAction === "fill_form";
 
         if (isFormReady) {
-          await activePage.waitForTimeout(1000);
+          await safeWait(activePage, 1000);
           const formInspection = await inspectForm(activePage);
           if (formInspection.fields && formInspection.fields.length > 0) {
             const userResumeDoc = await Resume.findOne({ userId })
@@ -494,7 +503,7 @@ export const runNaukriApplication = async ({
         if (navResult.newPage) {
           activePage = navResult.newPage;
         }
-        await activePage.waitForTimeout(2500);
+        await safeWait(activePage, 2500);
 
         // Check if popup/redirect tab opened
         if (context) {
@@ -594,7 +603,7 @@ export const runNaukriApplication = async ({
       }
 
       if (activePage && !activePage.isClosed()) {
-        await activePage.waitForTimeout(2500).catch(() => {});
+        await safeWait(activePage, 2500);
       }
 
       // Check if application was completed directly without questionnaire
@@ -878,7 +887,7 @@ export const runNaukriApplication = async ({
         if (navResult.newPage) {
           activePage = navResult.newPage;
         }
-        await activePage.waitForTimeout(2500);
+        await safeWait(activePage, 2500);
 
         // Check if navigation opened a new tab/popup
         if (context) {
@@ -1156,13 +1165,13 @@ export const runNaukriApplication = async ({
       const canSubmit = await submitBtn.isVisible().catch(() => false);
       if (canSubmit) {
         await submitBtn.click().catch(() => {});
-        await activePage.waitForTimeout(3000);
+        await safeWait(activePage, 3000);
       }
 
       // Check if clicking submit opened an external company site, forwarder, or popup
       if (context) {
         // Give popup/redirect up to 5 seconds to initiate
-        await activePage.waitForTimeout(2000);
+        await safeWait(activePage, 2000);
         const allPages = context.pages();
         if (allPages.length > 1) {
           const externalOrGooglePage = allPages.find((p) => {
@@ -1196,7 +1205,7 @@ export const runNaukriApplication = async ({
           "FORWARDER_DETECTED",
           `Intermediate forwarder URL: ${activePage.url()}`,
         );
-        await activePage.waitForTimeout(3000);
+        await safeWait(activePage, 3000);
 
         // Check if a new tab was created during forwarder wait
         if (context) {
@@ -1234,7 +1243,7 @@ export const runNaukriApplication = async ({
             await activePage
               .goto(destUrl, { waitUntil: "domcontentloaded", timeout: 15000 })
               .catch(() => {});
-            await activePage.waitForTimeout(3000);
+            await safeWait(activePage, 3000);
             currentUrlAfterSubmit = (activePage.url() || "").toLowerCase();
           }
         }
@@ -1381,7 +1390,7 @@ export const runNaukriApplication = async ({
                 "RESUME_ATTACHED",
                 "Tailored resume attached to portal file input",
               );
-              await activePage.waitForTimeout(2000);
+              await safeWait(activePage, 2000);
             }
 
             // Check if user has confirmed this specific step from frontend
@@ -1505,7 +1514,7 @@ export const runNaukriApplication = async ({
                 await activePage
                   .waitForLoadState("domcontentloaded")
                   .catch(() => {});
-                await activePage.waitForTimeout(3000);
+                await safeWait(activePage, 3000);
                 // Clear confirmed answers for the subsequent step
                 finalEditedAnswers = [];
                 continue; // Advance loop to next step!
@@ -1573,7 +1582,7 @@ export const runNaukriApplication = async ({
             await activePage
               .waitForLoadState("domcontentloaded")
               .catch(() => {});
-            await activePage.waitForTimeout(2500);
+            await safeWait(activePage, 2500);
             continue;
           }
 
@@ -1593,7 +1602,7 @@ export const runNaukriApplication = async ({
             await activePage
               .waitForLoadState("domcontentloaded")
               .catch(() => {});
-            await activePage.waitForTimeout(2500);
+            await safeWait(activePage, 2500);
             continue;
           }
 
@@ -1606,7 +1615,7 @@ export const runNaukriApplication = async ({
           if (navResult.newPage) {
             activePage = navResult.newPage;
           }
-          await activePage.waitForTimeout(2500);
+          await safeWait(activePage, 2500);
 
           if (!navResult.navigated) {
             break;

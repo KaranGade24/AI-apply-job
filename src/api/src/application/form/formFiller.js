@@ -323,9 +323,9 @@ export const selectCustomDropdown = async (page, selector, optionValue) => {
 
       // Try Playwright selectOption fallback with force
       const loc = page.locator(selector).first();
-      await loc.selectOption({ label: String(optionValue) }).catch(async () => {
-        await loc.selectOption({ value: String(optionValue) }).catch(async () => {
-          await loc.selectOption(String(optionValue));
+      await loc.selectOption({ label: String(optionValue) }, { timeout: 3000 }).catch(async () => {
+        await loc.selectOption({ value: String(optionValue) }, { timeout: 2000 }).catch(async () => {
+          await loc.selectOption(String(optionValue), { timeout: 2000 }).catch(() => {});
         });
       });
       return true;
@@ -333,7 +333,7 @@ export const selectCustomDropdown = async (page, selector, optionValue) => {
 
     // 2. Custom dropdown element (div/button/listbox)
     await el.scrollIntoViewIfNeeded().catch(() => {});
-    await el.click({ timeout: 3000 }).catch(async () => {
+    await el.click({ timeout: 2500 }).catch(async () => {
       await el.click({ force: true, timeout: 2000 }).catch(async () => {
         await page.evaluate((sel) => {
           const target = document.querySelector(sel);
@@ -342,7 +342,9 @@ export const selectCustomDropdown = async (page, selector, optionValue) => {
       });
     });
 
-    await page.waitForTimeout(350); // wait for dropdown menu to mount
+    if (!page.isClosed()) {
+      await page.waitForTimeout(350).catch(() => {}); // wait for dropdown menu to mount
+    }
 
     const options = await page.$$('.dropdown-menu .option, [role="listbox"] [role="option"], [role="option"], .dropdown-item, .select-option, li');
     for (const opt of options) {

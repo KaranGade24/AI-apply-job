@@ -81,11 +81,10 @@ export class ApplicationSessionRepository {
    */
   static async updateSession(applicationId, userId, updateData) {
     try {
-      await this.assertOwnership(applicationId, userId);
       return await ApplicationSession.findOneAndUpdate(
         { applicationId, userId },
         { $set: updateData },
-        { new: true, runValidators: true },
+        { new: true, upsert: true, setDefaultsOnInsert: true },
       );
     } catch (error) {
       await logError(
@@ -106,7 +105,6 @@ export class ApplicationSessionRepository {
    */
   static async appendHistory(applicationId, userId, historyItem) {
     try {
-      await this.assertOwnership(applicationId, userId);
       const maxCap = MAX_AGENT_STEPS || 50;
       const safeDetails =
         historyItem.details && typeof historyItem.details === "object"
@@ -139,7 +137,7 @@ export class ApplicationSessionRepository {
           },
           $inc: { stepCount: 1 },
         },
-        { new: true },
+        { new: true, upsert: true, setDefaultsOnInsert: true },
       );
     } catch (error) {
       await logError(
@@ -160,7 +158,6 @@ export class ApplicationSessionRepository {
    */
   static async recordError(applicationId, userId, errorItem) {
     try {
-      await this.assertOwnership(applicationId, userId);
       return await ApplicationSession.findOneAndUpdate(
         { applicationId, userId },
         {
@@ -173,7 +170,7 @@ export class ApplicationSessionRepository {
             },
           },
         },
-        { new: true },
+        { new: true, upsert: true, setDefaultsOnInsert: true },
       );
     } catch (error) {
       await logError("ApplicationSessionRepository.recordError", error.message);
@@ -205,11 +202,12 @@ export class ApplicationSessionRepository {
   }
 
   static async assertOwnership(applicationId, userId) {
+    if (!userId) {
+      throw new Error("Unauthorized");
+    }
     const session = await ApplicationSession.findOne({ applicationId, userId })
       .select("_id")
       .lean();
-    if (!session)
-      throw new Error("Application session not found or access denied.");
     return session;
   }
 
@@ -219,19 +217,21 @@ export class ApplicationSessionRepository {
     limit = MAX_AGENT_STEPS || 50,
   ) {
     try {
-      await this.assertOwnership(applicationId, userId);
       const session = await ApplicationSession.findOne({
         applicationId,
         userId,
       })
         .select("history")
         .lean();
-      return (session?.history || []).slice(
+      if (!session || !session.history) {
+        return [];
+      }
+      return (session.history || []).slice(
         -Math.max(1, Math.min(limit, MAX_AGENT_STEPS || 50)),
       );
     } catch (error) {
       await logError("ApplicationSessionRepository.getHistory", error.message);
-      throw error;
+      return [];
     }
   }
 }
