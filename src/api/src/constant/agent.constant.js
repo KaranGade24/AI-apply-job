@@ -1,7 +1,7 @@
 /**
  * Agent Constants
  */
-export const MODEL_NAME = "gemini-2.5-flash-lite";
+export const MODEL_NAME = "gemini-3.5-flash";
 export const MODEL_TEMPERATURE = 0.1;
 
 export const AI_PROVIDERS = [
@@ -13,6 +13,7 @@ export const AI_PROVIDERS = [
 export const AI_MODELS = {
   googleGemini: [
     { id: "gemini-2.5-flash-lite", name: "gemini-2.5-flash-lite" },
+    { id: "gemini-3.5-flash", name: "Gemini 3.5 Flash (Latest)" },
     { id: "gemini-3.8-flash", name: "Gemini 3.8 Flash (Latest)" },
     { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash" },
     { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro" },
@@ -205,5 +206,3 @@ export const ACTION_FAILURE_TYPES = Object.freeze({
   BLOCKED: "BLOCKED",
   UNKNOWN: "UNKNOWN",
 });
-
-
