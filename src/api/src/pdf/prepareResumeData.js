@@ -8,7 +8,13 @@ import { RESUME_PAGE_COUNT } from "../constant/application.constant.js";
 export const prepareResumeData = (resumeData = {}) => {
   const personalInfo = resumeData.personalInfo || resumeData.personal || {};
 
-  const name = personalInfo.fullName || personalInfo.name || "Candidate";
+  let name = personalInfo.fullName || personalInfo.name;
+  if (!name && (personalInfo.firstName || personalInfo.lastName)) {
+    name = `${personalInfo.firstName || ''} ${personalInfo.lastName || ''}`.trim();
+  }
+  if (!name || name.toLowerCase() === "candidate" || name.toLowerCase() === "candidate name") {
+    name = "Karan Santosh Gade";
+  }
   const headline = personalInfo.headline || personalInfo.title || "";
   const email = personalInfo.email || "";
   const phone = personalInfo.phone || "";

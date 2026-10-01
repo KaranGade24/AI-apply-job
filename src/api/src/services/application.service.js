@@ -2094,7 +2094,17 @@ export const tailorRoleOutreachService = async (applicationId, userId, roleDetai
       getActiveResumeByUserId(userId) || findOriginalResumeByUserId(userId),
     ]);
 
-    const candidateName = userProfile?.personal?.fullName || userProfile?.name || "Candidate";
+    const resInfo = activeResume?.parsedData?.personalInfo || activeResume?.parsedData?.personal || activeResume?.parsedData || {};
+    const profPersonal = userProfile?.personal || {};
+
+    const candidateName =
+      resInfo.fullName ||
+      resInfo.name ||
+      (resInfo.firstName ? `${resInfo.firstName} ${resInfo.lastName || ''}`.trim() : null) ||
+      (profPersonal.firstName ? `${profPersonal.firstName} ${profPersonal.lastName || ''}`.trim() : null) ||
+      userProfile?.fullName ||
+      userProfile?.name ||
+      "Karan Santosh Gade";
     const candidateSkills = userProfile?.skills || activeResume?.parsedData?.skills || [];
     const baseExperience = activeResume?.parsedData?.experience || [];
 

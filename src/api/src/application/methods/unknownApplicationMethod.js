@@ -130,8 +130,14 @@ export const runUnknownApplicationMethod = async ({
         };
       }
 
+      const uInfo = candidateInfo?.personalInfo || candidateInfo?.personal || candidateInfo || {};
       const candidateName =
-        candidateInfo?.personalInfo?.fullName || candidateInfo?.name || "Candidate";
+        uInfo.fullName ||
+        uInfo.name ||
+        (uInfo.firstName ? `${uInfo.firstName} ${uInfo.lastName || ''}`.trim() : null) ||
+        candidateInfo?.fullName ||
+        candidateInfo?.name ||
+        "Karan Santosh Gade";
       const jobTitle = jobDetails?.title || "Software Developer";
       const company = jobDetails?.company || "Company";
       const refId = pageResult.referenceIds?.[0] || pageResult.emailInstructions?.referenceId || "";
