@@ -79,14 +79,10 @@ const initApplicationNode = async (state) => {
     await logError("jobApplicationGraph.initApplicationNode", error.message);
     await logJobEvent("initApplicationNode", "FAILED", error.message);
     if (state.applicationId) {
-      await updateApplicationStatus(
-        state.applicationId,
-        APPLICATION_STATUS.FAILED,
-        {
-          error: error.message,
-          logMessage: `Init application failed: ${error.message}`,
-        },
-      );
+      await updateApplicationStatus(state.applicationId, APPLICATION_STATUS.FAILED, {
+        error: error.message,
+        logMessage: `Init application failed: ${error.message}`,
+      });
     }
     return {
       status: APPLICATION_STATUS.FAILED,
@@ -108,10 +104,7 @@ const loadExistingApplicationNode = async (state) => {
     }
 
     if (!application.jobId) {
-      throw new appError(
-        `Job record missing for application: ${state.applicationId}`,
-        404,
-      );
+      throw new appError(`Job record missing for application: ${state.applicationId}`, 404);
     }
 
     let jobDoc = application.jobId;
@@ -126,7 +119,7 @@ const loadExistingApplicationNode = async (state) => {
         ? application.userId._id.toString()
         : application.userId?.toString?.() || "");
 
-    const isRegeneration = !!application.resume?.tailoredResumeData;
+    const isRegeneration = !!(application.resume?.tailoredResumeData);
 
     const existingSourceResumeId =
       application.resume?.sourceResumeId?.toString?.() ||
@@ -149,27 +142,16 @@ const loadExistingApplicationNode = async (state) => {
       isRegeneration,
       sourceResumeId: existingSourceResumeId || state.sourceResumeId,
       status: APPLICATION_STATUS.PENDING,
-      targetPageLength:
-        state.targetPageLength ||
-        application.resume?.targetPages ||
-        userSettings.pageCount,
-      template:
-        state.template || application.resume?.template || userSettings.template,
+      targetPageLength: state.targetPageLength || application.resume?.targetPages || userSettings.pageCount,
+      template: state.template || application.resume?.template || userSettings.template,
     };
   } catch (error) {
-    await logError(
-      "jobApplicationGraph.loadExistingApplicationNode",
-      error.message,
-    );
+    await logError("jobApplicationGraph.loadExistingApplicationNode", error.message);
     await logJobEvent("loadExistingApplicationNode", "FAILED", error.message);
     if (state.applicationId) {
-      await updateApplicationStatus(
-        state.applicationId,
-        APPLICATION_STATUS.FAILED,
-        {
-          logMessage: `Load existing application failed: ${error.message}`,
-        },
-      );
+      await updateApplicationStatus(state.applicationId, APPLICATION_STATUS.FAILED, {
+        logMessage: `Load existing application failed: ${error.message}`,
+      });
     }
     return {
       status: APPLICATION_STATUS.FAILED,
@@ -199,7 +181,10 @@ const checkApplicationMethodNode = async (state) => {
     let normalizedMethod;
 
     // Priority 1: If applicationUrl is a direct Google Form link
-    if (job?.applicationUrl && isGoogleFormUrl(job.applicationUrl)) {
+    if (
+      job?.applicationUrl &&
+      isGoogleFormUrl(job.applicationUrl)
+    ) {
       normalizedMethod = APPLICATION_METHOD.GOOGLE_FORM;
     }
     // Priority 2: HR email present → email method
@@ -244,13 +229,9 @@ const checkApplicationMethodNode = async (state) => {
     );
     await logJobEvent("checkApplicationMethodNode", "FAILED", error.message);
     if (state.applicationId) {
-      await updateApplicationStatus(
-        state.applicationId,
-        APPLICATION_STATUS.FAILED,
-        {
-          logMessage: `Check application method failed: ${error.message}`,
-        },
-      );
+      await updateApplicationStatus(state.applicationId, APPLICATION_STATUS.FAILED, {
+        logMessage: `Check application method failed: ${error.message}`,
+      });
     }
     return {
       status: APPLICATION_STATUS.FAILED,
@@ -278,17 +259,11 @@ const getUserResumeNode = async (state) => {
     let sourceResumeId = state.sourceResumeId;
 
     if (!activeResume) {
-      const dbResumeDoc = await getActiveResumeByUserId(state.userId).catch(
-        () => null,
-      );
+      const dbResumeDoc = await getActiveResumeByUserId(state.userId).catch(() => null);
       if (dbResumeDoc) {
-        const dbResume = dbResumeDoc.toObject
-          ? dbResumeDoc.toObject()
-          : dbResumeDoc;
+        const dbResume = dbResumeDoc.toObject ? dbResumeDoc.toObject() : dbResumeDoc;
         activeResume = dbResume.parsedData || dbResume;
-        sourceResumeId = dbResume._id
-          ? dbResume._id.toString()
-          : state.sourceResumeId;
+        sourceResumeId = dbResume._id ? dbResume._id.toString() : state.sourceResumeId;
       } else {
         // Fallback candidate profile from User model
         const user = await User.findById(state.userId).catch(() => null);
@@ -298,24 +273,14 @@ const getUserResumeNode = async (state) => {
             email: user?.email || "candidate@example.com",
             phone: "",
           },
-          summary:
-            "Dedicated software engineer with proven experience in full-stack web development, scalable APIs, and clean software architecture.",
-          skills: [
-            "JavaScript",
-            "TypeScript",
-            "React",
-            "Node.js",
-            "MongoDB",
-            "SQL",
-            "Git",
-          ],
+          summary: "Dedicated software engineer with proven experience in full-stack web development, scalable APIs, and clean software architecture.",
+          skills: ["JavaScript", "TypeScript", "React", "Node.js", "MongoDB", "SQL", "Git"],
           experience: [
             {
               role: "Software Developer",
               company: "Technology Solutions",
               duration: "2023 - Present",
-              description:
-                "Developed and maintained full-stack web applications, REST APIs, and database models.",
+              description: "Developed and maintained full-stack web applications, REST APIs, and database models.",
             },
           ],
           education: [
@@ -343,14 +308,10 @@ const getUserResumeNode = async (state) => {
     await logError("jobApplicationGraph.getUserResumeNode", error.message);
     await logJobEvent("getUserResumeNode", "FAILED", error.message);
     if (state.applicationId) {
-      await updateApplicationStatus(
-        state.applicationId,
-        APPLICATION_STATUS.FAILED,
-        {
-          error: error.message,
-          logMessage: `Get user resume failed: ${error.message}`,
-        },
-      );
+      await updateApplicationStatus(state.applicationId, APPLICATION_STATUS.FAILED, {
+        error: error.message,
+        logMessage: `Get user resume failed: ${error.message}`,
+      });
     }
     return {
       status: APPLICATION_STATUS.FAILED,
@@ -390,22 +351,12 @@ const tailorResumeNode = async (state) => {
         { role: "user", content: promptText },
       ]);
     } catch (llmError) {
-      await logError(
-        "jobApplicationGraph.tailorResumeNode.llm",
-        llmError.message,
-      );
-      const targetSkills = state.job?.skills || [
-        "JavaScript",
-        "React",
-        "Node.js",
-        "SQL",
-      ];
+      await logError("jobApplicationGraph.tailorResumeNode.llm", llmError.message);
+      const targetSkills = state.job?.skills || ["JavaScript", "React", "Node.js", "SQL"];
       const baseResume = state.resume || {};
       const safeBaseSkills = Array.isArray(baseResume.skills)
         ? baseResume.skills
-        : typeof baseResume.skills === "string"
-          ? [baseResume.skills]
-          : [];
+        : (typeof baseResume.skills === "string" ? [baseResume.skills] : []);
 
       result = {
         tailoredResume: {
@@ -427,14 +378,10 @@ const tailorResumeNode = async (state) => {
     const baseResume = state.resume || {};
 
     if (result.error && state.applicationId) {
-      await updateApplicationStatus(
-        state.applicationId,
-        state.status || APPLICATION_STATUS.PROCESSING,
-        {
-          error: result.error,
-          logMessage: `AI Error during tailoring: ${result.error}`,
-        },
-      );
+      await updateApplicationStatus(state.applicationId, state.status || APPLICATION_STATUS.PROCESSING, {
+        error: result.error,
+        logMessage: `AI Error during tailoring: ${result.error}`,
+      });
     }
 
     // Merge & preserve personal links from base resume
@@ -463,43 +410,23 @@ const tailorResumeNode = async (state) => {
     };
 
     // Merge & preserve project links from base resume
-    const baseProjects = Array.isArray(baseResume.projects)
-      ? baseResume.projects
-      : [];
-    const tailoredProjects = Array.isArray(tailored.projects)
-      ? tailored.projects
-      : [];
+    const baseProjects = Array.isArray(baseResume.projects) ? baseResume.projects : [];
+    const tailoredProjects = Array.isArray(tailored.projects) ? tailored.projects : [];
 
     tailored.projects = tailoredProjects.map((proj) => {
       const match =
         baseProjects.find((b) => {
           const bTitle = (b.title || b.name || "").toLowerCase();
           const pTitle = (proj.title || proj.name || "").toLowerCase();
-          return (
-            bTitle &&
-            pTitle &&
-            (bTitle.includes(pTitle) || pTitle.includes(bTitle))
-          );
+          return bTitle && pTitle && (bTitle.includes(pTitle) || pTitle.includes(bTitle));
         }) || {};
 
       const github =
-        proj.links?.github ||
-        proj.githubUrl ||
-        proj.github ||
-        match.links?.github ||
-        match.githubUrl ||
-        match.github ||
-        "";
+        proj.links?.github || proj.githubUrl || proj.github ||
+        match.links?.github || match.githubUrl || match.github || "";
       const liveDemo =
-        proj.links?.liveDemo ||
-        proj.links?.demo ||
-        proj.demoUrl ||
-        proj.liveDemo ||
-        match.links?.liveDemo ||
-        match.links?.demo ||
-        match.demoUrl ||
-        match.liveDemo ||
-        "";
+        proj.links?.liveDemo || proj.links?.demo || proj.demoUrl || proj.liveDemo ||
+        match.links?.liveDemo || match.links?.demo || match.demoUrl || match.liveDemo || "";
 
       return {
         ...proj,
@@ -523,14 +450,10 @@ const tailorResumeNode = async (state) => {
     await logError("jobApplicationGraph.tailorResumeNode", error.message);
     await logJobEvent("tailorResumeNode", "FAILED", error.message);
     if (state.applicationId) {
-      await updateApplicationStatus(
-        state.applicationId,
-        APPLICATION_STATUS.FAILED,
-        {
-          error: error.message,
-          logMessage: `Resume tailoring failed: ${error.message}`,
-        },
-      );
+      await updateApplicationStatus(state.applicationId, APPLICATION_STATUS.FAILED, {
+        error: error.message,
+        logMessage: `Resume tailoring failed: ${error.message}`,
+      });
     }
     return {
       status: APPLICATION_STATUS.FAILED,
@@ -578,8 +501,7 @@ const generatePdfNode = async (state) => {
         APPLICATION_STATUS.WAITING_FOR_REVIEW,
         {
           error: null,
-          logMessage:
-            "Tailored PDF regenerated successfully. Returning to human review.",
+          logMessage: "Tailored PDF regenerated successfully. Returning to human review.",
         },
       );
 
@@ -599,8 +521,7 @@ const generatePdfNode = async (state) => {
       state.applicationId,
       APPLICATION_STATUS.EMAIL_GENERATING,
       {
-        logMessage:
-          "Tailored PDF generated successfully. Generating application email draft...",
+        logMessage: "Tailored PDF generated successfully. Generating application email draft...",
       },
     );
 
@@ -618,13 +539,9 @@ const generatePdfNode = async (state) => {
     await logError("jobApplicationGraph.generatePdfNode", error.message);
     await logJobEvent("generatePdfNode", "FAILED", error.message);
     if (state.applicationId) {
-      await updateApplicationStatus(
-        state.applicationId,
-        APPLICATION_STATUS.FAILED,
-        {
-          logMessage: `PDF generation failed: ${error.message}`,
-        },
-      );
+      await updateApplicationStatus(state.applicationId, APPLICATION_STATUS.FAILED, {
+        logMessage: `PDF generation failed: ${error.message}`,
+      });
     }
     return {
       status: APPLICATION_STATUS.FAILED,
@@ -669,10 +586,7 @@ const generateEmailNode = async (state) => {
         { role: "user", content: promptText },
       ]);
     } catch (llmError) {
-      await logError(
-        "jobApplicationGraph.generateEmailNode.llm",
-        llmError.message,
-      );
+      await logError("jobApplicationGraph.generateEmailNode.llm", llmError.message);
       const targetCompany = state.job?.company || "Hiring Team";
       const targetTitle = state.job?.title || "Software Developer";
       result = {
@@ -686,32 +600,20 @@ const generateEmailNode = async (state) => {
     const cleanedBody = formatAndCleanEmailBody(result.body, candidateName);
 
     if (result.error && state.applicationId) {
-      await updateApplicationStatus(
-        state.applicationId,
-        state.status || APPLICATION_STATUS.PROCESSING,
-        {
-          error: result.error,
-          logMessage: `AI Error during email generation: ${result.error}`,
-        },
-      );
+      await updateApplicationStatus(state.applicationId, state.status || APPLICATION_STATUS.PROCESSING, {
+        error: result.error,
+        logMessage: `AI Error during email generation: ${result.error}`,
+      });
     }
 
     const resolvedRecipient =
-      state.job?.hrEmail &&
-      state.job.hrEmail !== "unknown" &&
-      state.job.hrEmail !== "NOT_SPECIFIED"
+      state.job?.hrEmail && state.job.hrEmail !== "unknown" && state.job.hrEmail !== "NOT_SPECIFIED"
         ? state.job.hrEmail
-        : result.recipient &&
-            result.recipient !== "unknown" &&
-            result.recipient !== "NOT_SPECIFIED"
-          ? result.recipient
-          : "";
+        : (result.recipient && result.recipient !== "unknown" && result.recipient !== "NOT_SPECIFIED" ? result.recipient : "");
 
     await updateApplicationEmail(state.applicationId, {
       recipient: resolvedRecipient,
-      subject:
-        result.subject ||
-        `Application for ${state.job?.title || "Position"} - ${candidateName}`,
+      subject: result.subject || `Application for ${state.job?.title || "Position"} - ${candidateName}`,
       body: cleanedBody,
       approved: false,
     });
@@ -721,8 +623,7 @@ const generateEmailNode = async (state) => {
       APPLICATION_STATUS.WAITING_FOR_REVIEW,
       {
         error: null,
-        logMessage:
-          "Application draft created. Paused at human review checkpoint.",
+        logMessage: "Application draft created. Paused at human review checkpoint.",
       },
     );
 
@@ -745,14 +646,10 @@ const generateEmailNode = async (state) => {
     await logError("jobApplicationGraph.generateEmailNode", error.message);
     await logJobEvent("generateEmailNode", "FAILED", error.message);
     if (state.applicationId) {
-      await updateApplicationStatus(
-        state.applicationId,
-        APPLICATION_STATUS.FAILED,
-        {
-          error: error.message,
-          logMessage: `Email draft generation failed: ${error.message}`,
-        },
-      );
+      await updateApplicationStatus(state.applicationId, APPLICATION_STATUS.FAILED, {
+        error: error.message,
+        logMessage: `Email draft generation failed: ${error.message}`,
+      });
     }
     return {
       status: APPLICATION_STATUS.FAILED,
@@ -774,7 +671,10 @@ const phoneApplicationNode = async (state) => {
     }
 
     const phoneNumber =
-      state.job?.phone || state.job?.contactPhone || state.job?.hrPhone || "";
+      state.job?.phone ||
+      state.job?.contactPhone ||
+      state.job?.hrPhone ||
+      "";
 
     await logJobEvent(
       "phoneApplicationNode",
@@ -843,13 +743,9 @@ const phoneApplicationNode = async (state) => {
     await logError("jobApplicationGraph.phoneApplicationNode", error.message);
     await logJobEvent("phoneApplicationNode", "FAILED", error.message);
     if (state.applicationId) {
-      await updateApplicationStatus(
-        state.applicationId,
-        APPLICATION_STATUS.FAILED,
-        {
-          logMessage: `Phone application preparation failed: ${error.message}`,
-        },
-      );
+      await updateApplicationStatus(state.applicationId, APPLICATION_STATUS.FAILED, {
+        logMessage: `Phone application preparation failed: ${error.message}`,
+      });
     }
     return {
       status: APPLICATION_STATUS.FAILED,
@@ -910,13 +806,9 @@ const googleFormApplicationNode = async (state) => {
         `Google Form closed. Falling back to email if HR email available.`,
       );
 
-      await updateApplicationStatus(
-        state.applicationId,
-        APPLICATION_STATUS.WAITING_FOR_REVIEW,
-        {
-          logMessage: `Google Form is closed. Manual follow-up required.`,
-        },
-      );
+      await updateApplicationStatus(state.applicationId, APPLICATION_STATUS.WAITING_FOR_REVIEW, {
+        logMessage: `Google Form is closed. Manual follow-up required.`,
+      });
 
       return {
         googleFormResult: formResult,
@@ -956,19 +848,12 @@ const googleFormApplicationNode = async (state) => {
       status: finalStatus,
     };
   } catch (error) {
-    await logError(
-      "jobApplicationGraph.googleFormApplicationNode",
-      error.message,
-    );
+    await logError("jobApplicationGraph.googleFormApplicationNode", error.message);
     await logJobEvent("googleFormApplicationNode", "FAILED", error.message);
     if (state.applicationId) {
-      await updateApplicationStatus(
-        state.applicationId,
-        APPLICATION_STATUS.FAILED,
-        {
-          logMessage: `Google Form application failed: ${error.message}`,
-        },
-      );
+      await updateApplicationStatus(state.applicationId, APPLICATION_STATUS.FAILED, {
+        logMessage: `Google Form application failed: ${error.message}`,
+      });
     }
     return {
       status: APPLICATION_STATUS.FAILED,
@@ -992,7 +877,10 @@ const unknownApplicationNode = async (state) => {
     }
 
     // Use applicationUrl or sourceUrl as the page to analyze
-    const pageUrl = state.job?.applicationUrl || state.job?.sourceUrl || "";
+    const pageUrl =
+      state.job?.applicationUrl ||
+      state.job?.sourceUrl ||
+      "";
 
     if (!pageUrl) {
       await logJobEvent(
@@ -1000,13 +888,9 @@ const unknownApplicationNode = async (state) => {
         "NO_URL",
         "No URL available for unknown application method. Setting to WAITING_FOR_REVIEW.",
       );
-      await updateApplicationStatus(
-        state.applicationId,
-        APPLICATION_STATUS.WAITING_FOR_REVIEW,
-        {
-          logMessage: "No application URL found. Human review required.",
-        },
-      );
+      await updateApplicationStatus(state.applicationId, APPLICATION_STATUS.WAITING_FOR_REVIEW, {
+        logMessage: "No application URL found. Human review required.",
+      });
       return { status: APPLICATION_STATUS.WAITING_FOR_REVIEW };
     }
 
@@ -1032,11 +916,14 @@ const unknownApplicationNode = async (state) => {
     );
 
     // Determine final status
-    let finalStatus =
-      unknownResult.status || APPLICATION_STATUS.WAITING_FOR_REVIEW;
+    let finalStatus = unknownResult.status || APPLICATION_STATUS.WAITING_FOR_REVIEW;
     if (
       unknownResult.actionTaken === "email_sent" ||
-      unknownResult.actionTaken === "verified_submission"
+      unknownResult.actionTaken === "google_form_submitted" ||
+      unknownResult.actionTaken === "custom_form_submitted" ||
+      unknownResult.actionTaken === "success" ||
+      unknownResult.actionTaken === "verified_submission" ||
+      unknownResult.pageResult?.terminalState === "success"
     ) {
       finalStatus = APPLICATION_STATUS.APPLIED;
     } else if (
@@ -1061,21 +948,16 @@ const unknownApplicationNode = async (state) => {
     return {
       unknownPageResult: unknownResult,
       agentState: unknownResult.pageResult?.agentState || null,
-      pendingHumanAction:
-        unknownResult.pageResult?.agentState?.pendingHumanAction || null,
+      pendingHumanAction: unknownResult.pageResult?.agentState?.pendingHumanAction || null,
       status: finalStatus,
     };
   } catch (error) {
     await logError("jobApplicationGraph.unknownApplicationNode", error.message);
     await logJobEvent("unknownApplicationNode", "FAILED", error.message);
     if (state.applicationId) {
-      await updateApplicationStatus(
-        state.applicationId,
-        APPLICATION_STATUS.FAILED,
-        {
-          logMessage: `Unknown application method failed: ${error.message}`,
-        },
-      );
+      await updateApplicationStatus(state.applicationId, APPLICATION_STATUS.FAILED, {
+        logMessage: `Unknown application method failed: ${error.message}`,
+      });
     }
     return {
       status: APPLICATION_STATUS.FAILED,
@@ -1239,10 +1121,7 @@ const routeAfterPdf = (state) => {
   if (state.status === APPLICATION_STATUS.FAILED) {
     return END;
   }
-  if (
-    state.isRegeneration ||
-    state.status === APPLICATION_STATUS.WAITING_FOR_REVIEW
-  ) {
+  if (state.isRegeneration || state.status === APPLICATION_STATUS.WAITING_FOR_REVIEW) {
     return END;
   }
 
@@ -1278,10 +1157,7 @@ const workflow = new StateGraph({
       value: (x, y) => y ?? x,
       default: () => RESUME_PAGE_COUNT,
     },
-    applicationMethod: {
-      value: (x, y) => y ?? x,
-      default: () => APPLICATION_METHOD.EMAIL,
-    },
+    applicationMethod: { value: (x, y) => y ?? x, default: () => APPLICATION_METHOD.EMAIL },
     tailoredResume: { value: (x, y) => y ?? x, default: () => null },
     resumeStrategy: { value: (x, y) => y ?? x, default: () => null },
     resumePdfPath: { value: (x, y) => y ?? x, default: () => "" },
@@ -1325,23 +1201,15 @@ workflow.addConditionalEdges("initApplicationNode", routeAfterInit, {
   [END]: END,
 });
 
-workflow.addConditionalEdges(
-  "loadExistingApplicationNode",
-  routeAfterLoadExisting,
-  {
-    checkApplicationMethodNode: "checkApplicationMethodNode",
-    [END]: END,
-  },
-);
+workflow.addConditionalEdges("loadExistingApplicationNode", routeAfterLoadExisting, {
+  checkApplicationMethodNode: "checkApplicationMethodNode",
+  [END]: END,
+});
 
-workflow.addConditionalEdges(
-  "checkApplicationMethodNode",
-  routeAfterMethodCheck,
-  {
-    [END]: END,
-    getUserResumeNode: "getUserResumeNode",
-  },
-);
+workflow.addConditionalEdges("checkApplicationMethodNode", routeAfterMethodCheck, {
+  [END]: END,
+  getUserResumeNode: "getUserResumeNode",
+});
 
 workflow.addConditionalEdges("getUserResumeNode", routeAfterGetUserResume, {
   tailorResumeNode: "tailorResumeNode",

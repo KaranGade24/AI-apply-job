@@ -1,4 +1,3 @@
-import mongoose from "mongoose";
 import { logJobEvent, logError } from "../../utils/logger.js";
 import { executeAutonomousUnknownApplication } from "../unknown/unknownPageHandler.js";
 import { updateApplicationStatus, updateApplicationEmail } from "../../repositories/application.repository.js";
@@ -54,7 +53,7 @@ export const runUnknownApplicationMethod = async ({
     if (applicationId) {
       await updateApplicationStatus(applicationId, APPLICATION_STATUS.ANALYZING_PORTAL, {
         logMessage: `AI browser agent analyzing portal: ${pageUrl}`,
-      }).catch(() => {});
+      });
     }
 
     // Run the autonomous browser agent
@@ -79,7 +78,7 @@ export const runUnknownApplicationMethod = async ({
     // If dynamic handoff was executed (e.g. to Google Form, Phone, or Email)
     if (pageResult.handoffExecuted) {
       // Persist any form fields or state to JobApplication
-      if (applicationId && mongoose.Types.ObjectId.isValid(applicationId) && (pageResult.formFields || pageResult.agentState)) {
+      if (applicationId && (pageResult.formFields || pageResult.agentState)) {
         const updateData = {};
         if (pageResult.formFields) {
           updateData["form.fields"] = pageResult.formFields;
@@ -91,7 +90,7 @@ export const runUnknownApplicationMethod = async ({
           updateData["form.answers"] = pageResult.answeredQuestions;
         }
         if (Object.keys(updateData).length > 0) {
-          await JobApplication.findByIdAndUpdate(applicationId, updateData).catch(() => {});
+          await JobApplication.findByIdAndUpdate(applicationId, updateData);
         }
       }
 
@@ -120,7 +119,7 @@ export const runUnknownApplicationMethod = async ({
         if (applicationId) {
           await updateApplicationStatus(applicationId, APPLICATION_STATUS.WAITING_FOR_REVIEW, {
             logMessage: `Email method detected but no recipient found. Human review required.`,
-          }).catch(() => {});
+          });
         }
         return {
           detectedMethod,
@@ -174,10 +173,10 @@ ${candidateName}`;
           subject,
           body,
           approved: false,
-        }).catch(() => {});
+        });
         await updateApplicationStatus(applicationId, APPLICATION_STATUS.WAITING_FOR_REVIEW, {
           logMessage: `Created draft application email to ${recipientEmail} (awaiting human approval).`,
-        }).catch(() => {});
+        });
       }
 
       return {
@@ -251,7 +250,7 @@ ${candidateName}`;
       if (applicationId) {
         await updateApplicationStatus(applicationId, loopResult.status, {
           logMessage: `Agent loop finished with status "${loopResult.status}". Summary: ${loopResult.summary}`,
-        }).catch(() => {});
+        });
       }
 
       return {
@@ -268,11 +267,11 @@ ${candidateName}`;
     if (applicationId) {
       await updateApplicationStatus(applicationId, APPLICATION_STATUS.WAITING_FOR_REVIEW, {
         logMessage: `Unknown page analyzed. Method: ${detectedMethod}. ${pageResult.message}`,
-      }).catch(() => {});
+      });
     }
 
     // Persist any form fields or state to JobApplication
-    if (applicationId && mongoose.Types.ObjectId.isValid(applicationId) && (pageResult.formFields || pageResult.agentState)) {
+    if (applicationId && (pageResult.formFields || pageResult.agentState)) {
       const updateData = {};
       if (pageResult.formFields) {
         updateData["form.fields"] = pageResult.formFields;
@@ -284,7 +283,7 @@ ${candidateName}`;
         updateData["form.answers"] = pageResult.answeredQuestions;
       }
       if (Object.keys(updateData).length > 0) {
-        await JobApplication.findByIdAndUpdate(applicationId, updateData).catch(() => {});
+        await JobApplication.findByIdAndUpdate(applicationId, updateData);
       }
     }
 
@@ -301,7 +300,7 @@ ${candidateName}`;
     if (applicationId) {
       await updateApplicationStatus(applicationId, APPLICATION_STATUS.WAITING_FOR_REVIEW, {
         logMessage: `Portal navigation halted: ${error.message}. Manual review available.`,
-      }).catch(() => {});
+      });
     }
 
     return {
