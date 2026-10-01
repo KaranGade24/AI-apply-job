@@ -153,7 +153,9 @@ export const resolveAllFormAnswers = async (fields = [], context = {}) => {
 
     // File Upload / Resume
     if (field.type === FIELD_TYPES.FILE || /resume|cv|file|attachment|document/i.test(qText) || (field.name && /resume|cv|file/i.test(field.name))) {
-      const resumePath = context.resumePdfPath || resumeData?.pdfPath || userProfile?.resumePdfPath || 'resume.pdf';
+      const candidatePath = context.resumePdfPath || resumeData?.pdfPath || userProfile?.resumePdfPath || null;
+      const isWindowsPath = candidatePath && (candidatePath.includes(':\\') || candidatePath.includes('\\'));
+      const resumePath = isWindowsPath ? (context.resumePdfPath || null) : (candidatePath || context.resumePdfPath || null);
       resolvedAnswers.push({
         questionId: qId,
         fieldId: fId,

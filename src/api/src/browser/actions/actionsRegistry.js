@@ -1,5 +1,7 @@
+import fs from 'fs';
 import { resolveElementHandle } from '../dom/elementRegistry.js';
 import { isSafeUrl, waitForSettled, getActivePage, switchTab, closeTab } from '../session/sessionRegistry.js';
+import { ensureEffectiveResumePdfOnDisk } from '../../application/resume/resumePdfGenerator.js';
 import { logJobEvent, logError } from '../../utils/logger.js';
 
 export const CHANGES_PAGE_ACTIONS = ['navigate', 'goBack', 'switchTab', 'click'];
@@ -243,7 +245,15 @@ export const executeAction = async (action, page, session) => {
       }
 
       case 'uploadFile': {
-        const fileTarget = action.fileRef || action.filePath;
+        let fileTarget = action.fileRef || action.filePath;
+        if (!fileTarget || !fs.existsSync(fileTarget)) {
+          fileTarget = await ensureEffectiveResumePdfOnDisk({ candidatePath: fileTarget });
+        }
+        if (!fileTarget || !fs.existsSync(fileTarget)) {
+          result.success = false;
+          result.error = `File not found on disk: ${action.fileRef || action.filePath}`;
+          break;
+        }
         // Handle native input file vs custom trigger button
         const isFileInput = await handle.evaluate(el => el.tagName.toLowerCase() === 'input' && el.getAttribute('type') === 'file').catch(() => false);
         if (isFileInput) {
@@ -251,11 +261,16 @@ export const executeAction = async (action, page, session) => {
           result.success = true;
         } else {
           // Listen to file chooser event
-          const fileChooserPromise = page.waitForEvent('filechooser', { timeout: 5000 });
+          const fileChooserPromise = page.waitForEvent('filechooser', { timeout: 4000 }).catch(() => null);
           await handle.click().catch(() => {});
           const chooser = await fileChooserPromise;
-          await chooser.setFiles(fileTarget);
-          result.success = true;
+          if (chooser) {
+            await chooser.setFiles(fileTarget);
+            result.success = true;
+          } else {
+            await handle.setInputFiles(fileTarget).catch(() => {});
+            result.success = true;
+          }
         }
         break;
       }

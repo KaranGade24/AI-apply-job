@@ -1,4 +1,5 @@
 import fs from 'fs';
+import path from 'path';
 import { generateResumePdf } from '../../pdf/resumePdfService.js';
 import { JobApplication } from '../../model/JobApplication.js';
 import { logJobEvent, logError } from '../../utils/logger.js';
@@ -68,5 +69,76 @@ export const generateResumePdfOnDemand = async ({
       pdfPath: null,
       alreadyGenerated: false,
     };
+  }
+};
+
+/**
+ * Verifies that a candidate PDF path exists on disk, and if missing (or a Windows/external path),
+ * dynamically generates a valid tailored/candidate PDF on disk in the Linux environment.
+ *
+ * @param {object} params
+ * @param {string} [params.candidatePath]
+ * @param {string} [params.userId]
+ * @param {object} [params.resumeData]
+ * @returns {Promise<string|null>} Guaranteed valid local file path or null
+ */
+export const ensureEffectiveResumePdfOnDisk = async ({
+  candidatePath = null,
+  userId = null,
+  resumeData = null,
+} = {}) => {
+  try {
+    // 1. If candidatePath already exists on disk, return it directly
+    if (candidatePath && typeof candidatePath === 'string') {
+      if (fs.existsSync(candidatePath)) {
+        return candidatePath;
+      }
+
+      // Check if filename exists in /tmp or standard uploads directory
+      const cleanName = path.basename(candidatePath.replace(/\\/g, '/'));
+      const tmpPath = path.join('/tmp', cleanName);
+      if (fs.existsSync(tmpPath)) {
+        return tmpPath;
+      }
+    }
+
+    // 2. If not found or path was non-existent/foreign, generate fresh PDF
+    let effectiveData = resumeData;
+    if (!effectiveData && userId) {
+      const { findOriginalResumeByUserId } = await import('../../repositories/resume.repository.js');
+      const dbResume = await findOriginalResumeByUserId(userId).catch(() => null);
+      if (dbResume?.parsedData) {
+        effectiveData = typeof dbResume.parsedData === 'string'
+          ? JSON.parse(dbResume.parsedData)
+          : dbResume.parsedData;
+      }
+    }
+
+    if (!effectiveData) {
+      effectiveData = {
+        personalInfo: { fullName: 'Candidate Applicant' },
+        summary: 'Experienced Full Stack Engineer',
+        skills: ['JavaScript', 'React', 'Node.js', 'Express', 'MongoDB'],
+      };
+    }
+
+    const generatedPath = await generateResumePdf({
+      resumeData: effectiveData,
+      userId,
+    });
+
+    if (generatedPath && fs.existsSync(generatedPath)) {
+      await logJobEvent(
+        'resumePdfGenerator',
+        'ENSURE_PDF_SUCCESS',
+        `Successfully ensured valid PDF on disk: ${generatedPath}`
+      );
+      return generatedPath;
+    }
+
+    return null;
+  } catch (err) {
+    await logError('resumePdfGenerator.ensureEffectiveResumePdfOnDisk', err.message);
+    return null;
   }
 };

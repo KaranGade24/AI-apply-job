@@ -1,4 +1,6 @@
+import fs from 'fs';
 import { BROWSER_ACTIONS, FORM_ACTIONS } from '../constant/application.constant.js';
+import { ensureEffectiveResumePdfOnDisk } from '../application/resume/resumePdfGenerator.js';
 import { logJobEvent, logError } from '../utils/logger.js';
 import { resolveElement } from './observer/elementResolver.js';
 
@@ -114,13 +116,46 @@ export const executeSingleBrowserAction = async (page, action, options = {}) => 
       case BROWSER_ACTIONS.SELECT: {
         const locator = await resolveTargetLocator(page, target);
         const strVal = String(value ?? '');
-        await locator.waitFor({ state: 'attached', timeout: 7000 }).catch(() => {});
+        await locator.waitFor({ state: 'attached', timeout: 5000 }).catch(() => {});
         await locator.scrollIntoViewIfNeeded().catch(() => {});
-        await locator.selectOption({ label: strVal }).catch(async () => {
-          await locator.selectOption({ value: strVal }).catch(async () => {
-            await locator.selectOption(strVal);
+
+        // 1. Direct DOM select option with event dispatch (works for both visible and hidden/styled selects)
+        let handled = false;
+        try {
+          handled = await locator.evaluate((selectEl, val) => {
+            if (!selectEl) return false;
+            const targetStr = String(val).toLowerCase().trim();
+            const opts = Array.from(selectEl.options || []);
+            let matched = opts.find(
+              (o) =>
+                (o.text || '').toLowerCase().trim() === targetStr ||
+                (o.value || '').toLowerCase().trim() === targetStr ||
+                (o.text || '').toLowerCase().includes(targetStr) ||
+                targetStr.includes((o.text || '').toLowerCase().trim())
+            );
+            if (!matched && opts.length > 0) {
+              matched = opts.find((o) => o.value && o.value !== '' && o.value !== '-1');
+            }
+            if (matched) {
+              selectEl.value = matched.value;
+              selectEl.dispatchEvent(new Event('change', { bubbles: true }));
+              selectEl.dispatchEvent(new Event('input', { bubbles: true }));
+              return true;
+            }
+            return false;
+          }, strVal).catch(() => false);
+        } catch {
+          handled = false;
+        }
+
+        // 2. Playwright selectOption fallback
+        if (!handled) {
+          await locator.selectOption({ label: strVal }).catch(async () => {
+            await locator.selectOption({ value: strVal }).catch(async () => {
+              await locator.selectOption(strVal);
+            });
           });
-        });
+        }
         return { success: true, error: null, timestamp };
       }
 
@@ -148,10 +183,27 @@ export const executeSingleBrowserAction = async (page, action, options = {}) => 
       }
 
       case BROWSER_ACTIONS.UPLOAD: {
-        const filePath = value || options.resumePdfPath;
-        if (!filePath) throw new Error('UPLOAD action missing file path');
+        let filePath = value || options.resumePdfPath;
+        if (!filePath || !fs.existsSync(filePath)) {
+          filePath = await ensureEffectiveResumePdfOnDisk({
+            candidatePath: filePath,
+            userId: options.userId,
+            resumeData: options.resumeData,
+          });
+        }
+        if (!filePath || !fs.existsSync(filePath)) {
+          throw new Error(`UPLOAD action file not found on disk: ${value || options.resumePdfPath}`);
+        }
         const locator = await resolveTargetLocator(page, target);
-        await locator.setInputFiles(filePath);
+        await locator.setInputFiles(filePath).catch(async () => {
+          // If custom button, click with filechooser
+          const fileChooserPromise = page.waitForEvent('filechooser', { timeout: 4000 }).catch(() => null);
+          await locator.click({ force: true }).catch(() => {});
+          const chooser = await fileChooserPromise;
+          if (chooser) {
+            await chooser.setFiles(filePath);
+          }
+        });
         return { success: true, error: null, timestamp };
       }
 

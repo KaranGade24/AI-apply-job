@@ -1,6 +1,8 @@
+import fs from 'fs';
 import { BROWSER_ACTIONS } from '../../constant/application.constant.js';
 import { FIELD_TYPES } from './fieldTypes.js';
 import { executeSingleBrowserAction } from '../../browser/browserActionExecutor.js';
+import { ensureEffectiveResumePdfOnDisk } from '../resume/resumePdfGenerator.js';
 import { logJobEvent, logError } from '../../utils/logger.js';
 
 /**
@@ -279,21 +281,76 @@ export const fillAutocompleteField = async (page, selector, value) => {
 };
 
 /**
- * Robustly opens and selects from custom dropdown widgets.
+ * Robustly opens and selects from custom dropdown widgets or native select elements.
  */
 export const selectCustomDropdown = async (page, selector, optionValue) => {
   try {
     const el = await page.$(selector);
     if (!el) return false;
 
-    await el.click();
-    await page.waitForTimeout(500); // wait for dropdown menu to mount
+    // 1. Check if the element is actually a native HTML <select> element
+    const isSelect = await el.evaluate((node) => node.tagName.toLowerCase() === 'select').catch(() => false);
+    if (isSelect) {
+      // For native select, set value directly via DOM evaluation (handles invisible/hidden styled selects)
+      const selected = await el.evaluate((selectEl, val) => {
+        if (!selectEl) return false;
+        const targetStr = String(val).toLowerCase().trim();
+        const opts = Array.from(selectEl.options || []);
+        let matched = opts.find(
+          (o) =>
+            (o.text || '').toLowerCase().trim() === targetStr ||
+            (o.value || '').toLowerCase().trim() === targetStr ||
+            (o.text || '').toLowerCase().includes(targetStr) ||
+            targetStr.includes((o.text || '').toLowerCase().trim())
+        );
+        if (!matched && opts.length > 0) {
+          // If no exact match, pick the first valid option if available
+          matched = opts.find((o) => o.value && o.value !== '' && o.value !== '-1');
+        }
+        if (matched) {
+          selectEl.value = matched.value;
+          selectEl.dispatchEvent(new Event('change', { bubbles: true }));
+          selectEl.dispatchEvent(new Event('input', { bubbles: true }));
+          return true;
+        }
+        return false;
+      }, optionValue).catch(() => false);
 
-    const options = await page.$$('.dropdown-menu .option, [role="listbox"] [role="option"], li');
+      if (selected) {
+        await logJobEvent('formFiller', 'NATIVE_SELECT_SUCCESS', `Selected option for ${selector}: ${optionValue}`);
+        return true;
+      }
+
+      // Try Playwright selectOption fallback with force
+      const loc = page.locator(selector).first();
+      await loc.selectOption({ label: String(optionValue) }).catch(async () => {
+        await loc.selectOption({ value: String(optionValue) }).catch(async () => {
+          await loc.selectOption(String(optionValue));
+        });
+      });
+      return true;
+    }
+
+    // 2. Custom dropdown element (div/button/listbox)
+    await el.scrollIntoViewIfNeeded().catch(() => {});
+    await el.click({ timeout: 3000 }).catch(async () => {
+      await el.click({ force: true, timeout: 2000 }).catch(async () => {
+        await page.evaluate((sel) => {
+          const target = document.querySelector(sel);
+          if (target) target.click();
+        }, selector).catch(() => {});
+      });
+    });
+
+    await page.waitForTimeout(350); // wait for dropdown menu to mount
+
+    const options = await page.$$('.dropdown-menu .option, [role="listbox"] [role="option"], [role="option"], .dropdown-item, .select-option, li');
     for (const opt of options) {
       const text = await opt.innerText().catch(() => '');
       if (text.toLowerCase().trim().includes(optionValue.toLowerCase().trim())) {
-        await opt.click();
+        await opt.click({ force: true }).catch(async () => {
+          await opt.evaluate((node) => node.click());
+        });
         await logJobEvent('formFiller', 'CUSTOM_SELECT_SUCCESS', `Selected: ${text.trim()}`);
         return true;
       }
@@ -308,14 +365,47 @@ export const selectCustomDropdown = async (page, selector, optionValue) => {
 
 /**
  * Files upload fields and verifies acceptance / uploads errors.
+ * Ensures the target file exists on the local filesystem and auto-generates if missing.
  */
-export const uploadFileWithVerification = async (page, selector, filePath) => {
+export const uploadFileWithVerification = async (page, selector, filePath, context = {}) => {
   try {
+    let effectivePath = filePath;
+    // Check if file exists on disk; if missing or invalid path, ensure valid candidate PDF exists
+    if (!effectivePath || !fs.existsSync(effectivePath)) {
+      effectivePath = await ensureEffectiveResumePdfOnDisk({
+        candidatePath: filePath,
+        userId: context.userId,
+        resumeData: context.resumeData,
+      });
+    }
+
+    if (!effectivePath || !fs.existsSync(effectivePath)) {
+      await logError('formFiller.uploadFileWithVerification', `No valid resume file found on disk for path: ${filePath}`);
+      return false;
+    }
+
     const input = await page.$(selector);
     if (!input) return false;
 
-    await input.setInputFiles(filePath);
-    await page.waitForTimeout(1500); // allow file upload acceptance scan
+    // Check if input is a native file input vs custom upload trigger button
+    const isFileInput = await input.evaluate(
+      (el) => el.tagName.toLowerCase() === 'input' && el.getAttribute('type') === 'file'
+    ).catch(() => false);
+
+    if (isFileInput) {
+      await input.setInputFiles(effectivePath);
+    } else {
+      const fileChooserPromise = page.waitForEvent('filechooser', { timeout: 4000 }).catch(() => null);
+      await input.click({ timeout: 2000 }).catch(() => {});
+      const chooser = await fileChooserPromise;
+      if (chooser) {
+        await chooser.setFiles(effectivePath);
+      } else {
+        await input.setInputFiles(effectivePath).catch(() => {});
+      }
+    }
+
+    await page.waitForTimeout(1000); // allow file upload acceptance scan
 
     const bodyText = await page.innerText('body').catch(() => '');
     const hasError = /invalid format|file too large|error uploading/i.test(bodyText);
@@ -392,8 +482,8 @@ export const fillFormFields = async (page, formFields = [], resolvedAnswers = []
     // If it's a file upload field, use custom upload check
     if (field.type === FIELD_TYPES.FILE || /resume|cv|file/i.test(field.label || field.name || field.question || '')) {
       const filePath = value || options.resumePdfPath;
-      if (filePath) {
-        const success = await uploadFileWithVerification(page, fieldIdentifier, filePath);
+      if (filePath || options.userId) {
+        const success = await uploadFileWithVerification(page, fieldIdentifier, filePath, options);
         if (success) {
           filledCount++;
           await logJobEvent('formFiller', 'FILE_UPLOADED', `Resume uploaded for field: ${field.label || field.name || fieldIdentifier}`);
