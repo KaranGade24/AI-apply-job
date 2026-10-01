@@ -15,6 +15,7 @@ CRITICAL HARD RULES:
 5. TAILOR PRESENTATION ONLY: Reorder skills, refine professional summary, emphasize matching experience/projects, and align terminology with the target job posting without altering historical truth.
 6. PAGE LENGTH & VOLUME OPTIMIZATION: Tailor the depth and count of bullet points so the text volume naturally populates the target page length without leaving large empty bottom gaps or spilling over into unwanted overflow pages.
 7. ABSOLUTE COMPLIANCE: Return output matching the requested structured JSON schema cleanly.
+8. GET ONLY INFO THAT PRESENT IN RESUME NO NEED TO GET THE USER INFO FROM IS LOGIC ACCOUNT JUST ALL INFO FROM IT RESUME.
 `;
 
 /**
