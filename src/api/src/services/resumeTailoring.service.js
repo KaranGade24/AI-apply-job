@@ -94,28 +94,34 @@ export const tailorResumeForJobDescription = async ({
     const tailored = result.tailoredResume || {};
     const baseResume = candidateResume || {};
 
-    // Merge & preserve personal links from base resume
+    // Merge & preserve personal info and links strictly from original base resume
     const basePersonal = baseResume.personalInfo || baseResume.personal || {};
     const tailoredPersonal = tailored.personalInfo || {};
 
     tailored.personalInfo = {
       ...tailoredPersonal,
+      fullName: basePersonal.fullName || basePersonal.name || tailoredPersonal.fullName || "Candidate",
+      firstName: basePersonal.firstName || tailoredPersonal.firstName || "",
+      lastName: basePersonal.lastName || tailoredPersonal.lastName || "",
+      phone: basePersonal.phone || basePersonal.contactNo || basePersonal.phoneNumber || tailoredPersonal.phone || "",
+      email: basePersonal.email || tailoredPersonal.email || "",
+      location: basePersonal.location || basePersonal.address || tailoredPersonal.location || "",
       linkedin:
-        tailoredPersonal.linkedin ||
         basePersonal.linkedin ||
         basePersonal.linkedinUrl ||
+        tailoredPersonal.linkedin ||
         "",
       github:
-        tailoredPersonal.github ||
         basePersonal.github ||
         basePersonal.githubUrl ||
+        tailoredPersonal.github ||
         "",
       website:
-        tailoredPersonal.website ||
-        tailoredPersonal.portfolio ||
         basePersonal.website ||
         basePersonal.portfolio ||
         basePersonal.websiteUrl ||
+        tailoredPersonal.website ||
+        tailoredPersonal.portfolio ||
         "",
     };
 

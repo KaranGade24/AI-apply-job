@@ -117,16 +117,27 @@ export const generateResumePdf = async ({ resumeData, template = "ATS Modern", f
     if (lowerT.includes("minimal")) themeName = "minimal";
     else if (lowerT.includes("ats")) themeName = "ats";
     
-    const fullName = personalInfo.fullName || personalInfo.name || "Candidate Name";
+    const fullName = personalInfo.fullName || personalInfo.name || "Candidate Resume";
     const nameParts = fullName.trim().split(/\s+/);
-    const firstName = nameParts[0]?.toLowerCase().replace(/[^a-z0-9]/gi, "") || "candidate";
-    const lastName = nameParts.length > 1 ? nameParts.slice(1).join("_").toLowerCase().replace(/[^a-z0-9]/gi, "") : "user";
-    const rawPhone = personalInfo.phone || "";
-    const phone = rawPhone.replace(/[^0-9]/g, "") || "0000000000";
-    const cryptoRandomId = crypto.randomBytes(4).toString("hex");
+    
+    // First Name
+    const rawFirstName = personalInfo.firstName || nameParts[0] || "Candidate";
+    const firstName = rawFirstName.replace(/[^a-zA-Z0-9]/g, "") || "Candidate";
 
-    const defaultFilename = `${firstName}_${lastName}_${phone}_${cryptoRandomId}.pdf`;
-    const pdfFilename = filename || defaultFilename;
+    // Last Name
+    const rawLastName = personalInfo.lastName || (nameParts.length > 1 ? nameParts.slice(1).join("_") : "Resume");
+    const lastName = rawLastName.replace(/[^a-zA-Z0-9_]/g, "") || "Resume";
+
+    // Contact Number
+    const rawPhone = personalInfo.phone || personalInfo.contactNo || personalInfo.phoneNumber || "";
+    const digits = String(rawPhone).replace(/[^0-9]/g, "");
+    const contactNo = digits.length >= 6 ? digits : (digits || "0000000000");
+
+    // Random Cryptic Unique ID (8 hex chars)
+    const randomCrypticId = crypto.randomBytes(4).toString("hex");
+
+    // Strictly format: <FirstName>_<LastName>_<ContactNo>_<RandomCrypticId>.pdf
+    const pdfFilename = `${firstName}_${lastName}_${contactNo}_${randomCrypticId}.pdf`;
     const outputPath = path.join("uploads", "resumes", pdfFilename);
 
     // Dynamic Robust Fitting Loop
