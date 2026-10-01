@@ -7,10 +7,10 @@ const applicationRouter = express.Router();
 
 /**
  * @swagger
- * /api/applications/{id}/start:
+ * /api/applications/{id}/agent/start:
  *   post:
  *     summary: Start or advance autonomous browser application workflow
- *     tags: [Applications]
+ *     tags: [Agent Execution]
  *     parameters:
  *       - in: path
  *         name: id
@@ -25,14 +25,14 @@ const applicationRouter = express.Router();
  *       409:
  *         description: Already running
  */
-applicationRouter.post("/:id/start", authMiddleware, agentExecutionController.startApplication);
+applicationRouter.post("/:id/agent/start", authMiddleware, agentExecutionController.startApplication);
 
 /**
  * @swagger
- * /api/applications/{id}/status:
+ * /api/applications/{id}/agent/status:
  *   get:
  *     summary: Retrieve automation execution status and progress
- *     tags: [Applications]
+ *     tags: [Agent Execution]
  *     parameters:
  *       - in: path
  *         name: id
@@ -43,14 +43,14 @@ applicationRouter.post("/:id/start", authMiddleware, agentExecutionController.st
  *       200:
  *         description: Current automation status
  */
-applicationRouter.get("/:id/status", authMiddleware, agentExecutionController.getStatus);
+applicationRouter.get("/:id/agent/status", authMiddleware, agentExecutionController.getStatus);
 
 /**
  * @swagger
- * /api/applications/{id}/questions:
+ * /api/applications/{id}/agent/questions:
  *   get:
  *     summary: Retrieve pending human-in-the-loop questionnaire questions
- *     tags: [Applications]
+ *     tags: [Agent Execution]
  *     parameters:
  *       - in: path
  *         name: id
@@ -61,14 +61,14 @@ applicationRouter.get("/:id/status", authMiddleware, agentExecutionController.ge
  *       200:
  *         description: List of pending questions
  */
-applicationRouter.get("/:id/questions", authMiddleware, agentExecutionController.getQuestions);
+applicationRouter.get("/:id/agent/questions", authMiddleware, agentExecutionController.getQuestions);
 
 /**
  * @swagger
- * /api/applications/{id}/answers:
+ * /api/applications/{id}/agent/answers:
  *   post:
  *     summary: Submit human answers to pending questions and resume paused workflow
- *     tags: [Applications]
+ *     tags: [Agent Execution]
  *     parameters:
  *       - in: path
  *         name: id
@@ -90,14 +90,14 @@ applicationRouter.get("/:id/questions", authMiddleware, agentExecutionController
  *       200:
  *         description: Answers accepted and workflow resumed
  */
-applicationRouter.post("/:id/answers", authMiddleware, agentExecutionController.submitAnswers);
+applicationRouter.post("/:id/agent/answers", authMiddleware, agentExecutionController.submitAnswers);
 
 /**
  * @swagger
- * /api/applications/{id}/review:
+ * /api/applications/{id}/agent/review:
  *   get:
  *     summary: Retrieve pre-submission summary and answers verification hash
- *     tags: [Applications]
+ *     tags: [Agent Execution]
  *     parameters:
  *       - in: path
  *         name: id
@@ -107,15 +107,28 @@ applicationRouter.post("/:id/answers", authMiddleware, agentExecutionController.
  *     responses:
  *       200:
  *         description: Application review summary
+ *   patch:
+ *     summary: Apply edits to pre-submission review and return new reviewHash
+ *     tags: [Agent Execution]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Review updated with new reviewHash
  */
-applicationRouter.get("/:id/review", authMiddleware, agentExecutionController.getReview);
+applicationRouter.get("/:id/agent/review", authMiddleware, agentExecutionController.getReview);
+applicationRouter.patch("/:id/agent/review", authMiddleware, agentExecutionController.updateReviewEdits);
 
 /**
  * @swagger
- * /api/applications/{id}/confirm:
+ * /api/applications/{id}/agent/confirm:
  *   post:
  *     summary: Approve pre-submission review and execute final submission
- *     tags: [Applications]
+ *     tags: [Agent Execution]
  *     parameters:
  *       - in: path
  *         name: id
@@ -126,14 +139,14 @@ applicationRouter.get("/:id/review", authMiddleware, agentExecutionController.ge
  *       200:
  *         description: Final submission triggered
  */
-applicationRouter.post("/:id/confirm", authMiddleware, agentExecutionController.confirmReview);
+applicationRouter.post("/:id/agent/confirm", authMiddleware, agentExecutionController.confirmReview);
 
 /**
  * @swagger
- * /api/applications/{id}/cancel:
+ * /api/applications/{id}/agent/cancel:
  *   post:
  *     summary: Cancel active application workflow
- *     tags: [Applications]
+ *     tags: [Agent Execution]
  *     parameters:
  *       - in: path
  *         name: id
@@ -144,7 +157,7 @@ applicationRouter.post("/:id/confirm", authMiddleware, agentExecutionController.
  *       200:
  *         description: Workflow cancelled
  */
-applicationRouter.post("/:id/cancel", authMiddleware, agentExecutionController.cancelApplication);
+applicationRouter.post("/:id/agent/cancel", authMiddleware, agentExecutionController.cancelApplication);
 
 /**
  * @swagger
@@ -179,7 +192,7 @@ applicationRouter.post("/:id/retry-google-form", authMiddleware, applicationCont
  * @swagger
  * /api/applications/create-from-job/{jobId}:
  *   post:
- *     summary: Create application for a specific saved job and run pipeline
+ *     summary: Create application from specific job ID
  *     tags: [Applications]
  *     parameters:
  *       - in: path
@@ -189,9 +202,7 @@ applicationRouter.post("/:id/retry-google-form", authMiddleware, applicationCont
  *           type: string
  *     responses:
  *       201:
- *         description: Application created and draft email/PDF generated
- *       404:
- *         description: Job posting not found
+ *         description: Application created successfully
  */
 applicationRouter.post("/create-from-job/:jobId", authMiddleware, applicationController.createFromJob);
 
@@ -199,24 +210,8 @@ applicationRouter.post("/create-from-job/:jobId", authMiddleware, applicationCon
  * @swagger
  * /api/applications:
  *   get:
- *     summary: Retrieve user applications list with pagination and optional status filter
+ *     summary: Get all applications for authenticated user
  *     tags: [Applications]
- *     parameters:
- *       - in: query
- *         name: status
- *         schema:
- *           type: string
- *           enum: [pending, processing, unsupported_method, resume_generating, email_generating, waiting_for_review, approved, rejected, sending, sent, failed]
- *       - in: query
- *         name: page
- *         schema:
- *           type: integer
- *           default: 1
- *       - in: query
- *         name: limit
- *         schema:
- *           type: integer
- *           default: 10
  *     responses:
  *       200:
  *         description: List of applications
@@ -227,7 +222,7 @@ applicationRouter.get("/", authMiddleware, applicationController.getApplications
  * @swagger
  * /api/applications/{id}:
  *   get:
- *     summary: Get detailed single job application
+ *     summary: Get single application details by ID
  *     tags: [Applications]
  *     parameters:
  *       - in: path
@@ -237,175 +232,8 @@ applicationRouter.get("/", authMiddleware, applicationController.getApplications
  *           type: string
  *     responses:
  *       200:
- *         description: Detailed job application record
- *       404:
- *         description: Application not found
+ *         description: Application details
  */
 applicationRouter.get("/:id", authMiddleware, applicationController.getApplication);
-
-/**
- * @swagger
- * /api/applications/{id}:
- *   delete:
- *     summary: Delete a job application record
- *     description: Only allowed if the application is not approved or applied.
- *     tags: [Applications]
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: string
- *     responses:
- *       200:
- *         description: Application deleted successfully
- *       400:
- *         description: Cannot delete approved/applied application
- *       404:
- *         description: Application not found
- *       401:
- *         description: Unauthorized
- */
-applicationRouter.delete("/:id", authMiddleware, applicationController.deleteApplication);
-
-/**
- * @swagger
- * /api/applications/{id}/approve:
- *   post:
- *     summary: Explicit Human Approval action - approves draft and sends application email
- *     tags: [Applications]
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: string
- *     responses:
- *       200:
- *         description: Application approved and email dispatched
- *       400:
- *         description: Invalid status or missing recipient email
- */
-applicationRouter.post("/:id/approve", authMiddleware, applicationController.approve);
-
-/**
- * @swagger
- * /api/applications/{id}/reject:
- *   post:
- *     summary: Explicit Human Rejection action
- *     tags: [Applications]
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: string
- *     requestBody:
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               reason:
- *                 type: string
- *                 example: "Candidate declined to apply to this role"
- *     responses:
- *       200:
- *         description: Application marked as rejected
- */
-applicationRouter.post("/:id/reject", authMiddleware, applicationController.reject);
-
-/**
- * @swagger
- * /api/applications/{id}/review:
- *   put:
- *     summary: Edit email draft before human approval
- *     tags: [Applications]
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: string
- *     requestBody:
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               recipient:
- *                 type: string
- *                 example: "hr@company.com"
- *               subject:
- *                 type: string
- *                 example: "Application for MERN Developer - Karan Gade"
- *               body:
- *                 type: string
- *                 example: "Updated email cover letter content..."
- *     responses:
- *       200:
- *         description: Email draft updated successfully
- */
-applicationRouter.put("/:id/review", authMiddleware, applicationController.editEmail);
-
-/**
- * @swagger
- * /api/applications/{id}/resume:
- *   put:
- *     summary: Update or regenerate tailored resume for a specific job application
- *     tags: [Applications]
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: string
- *     requestBody:
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               targetPageLength:
- *                 type: integer
- *                 example: 1
- *               pageCount:
- *                 type: integer
- *                 example: 1
- *               regenerate:
- *                 type: boolean
- *                 example: true
- *               tailoredResumeData:
- *                 type: object
- *               template:
- *                 type: string
- *                 example: "modern"
- *     responses:
- *       200:
- *         description: Resume updated or regenerated successfully
- *       404:
- *         description: Application not found
- */
-applicationRouter.put("/:id/resume", authMiddleware, applicationController.updateResume);
-
-/**
- * @swagger
- * /api/applications/{id}/pdf:
- *   get:
- *     summary: Download or stream the tailored PDF resume for an application
- *     tags: [Applications]
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: string
- *     responses:
- *       200:
- *         description: PDF file stream
- *       404:
- *         description: PDF resume not found
- */
-applicationRouter.get("/:id/pdf", authMiddleware, applicationController.downloadPdf);
 
 export default applicationRouter;

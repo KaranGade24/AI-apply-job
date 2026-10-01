@@ -140,6 +140,52 @@ export const retryGoogleFormApi = async (id) => {
   });
 };
 
+export const startAgentWorkflowApi = async (id, payload = {}) => {
+  return await fetchWithAuth(`/applications/${id}/agent/start`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+};
+
+export const getAgentStatusApi = async (id) => {
+  return await fetchWithAuth(`/applications/${id}/agent/status`);
+};
+
+export const getAgentQuestionsApi = async (id) => {
+  return await fetchWithAuth(`/applications/${id}/agent/questions`);
+};
+
+export const submitAgentAnswersApi = async (id, answers = []) => {
+  return await fetchWithAuth(`/applications/${id}/agent/answers`, {
+    method: 'POST',
+    body: JSON.stringify({ answers }),
+  });
+};
+
+export const getAgentReviewApi = async (id) => {
+  return await fetchWithAuth(`/applications/${id}/agent/review`);
+};
+
+export const patchAgentReviewEditsApi = async (id, edits = []) => {
+  return await fetchWithAuth(`/applications/${id}/agent/review`, {
+    method: 'PATCH',
+    body: JSON.stringify({ edits }),
+  });
+};
+
+export const confirmAgentReviewApi = async (id, confirmation = {}) => {
+  return await fetchWithAuth(`/applications/${id}/agent/confirm`, {
+    method: 'POST',
+    body: JSON.stringify(confirmation),
+  });
+};
+
+export const cancelAgentWorkflowApi = async (id) => {
+  return await fetchWithAuth(`/applications/${id}/agent/cancel`, {
+    method: 'POST',
+  });
+};
+
 
 
 
