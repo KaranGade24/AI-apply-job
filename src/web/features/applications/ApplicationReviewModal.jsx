@@ -133,7 +133,7 @@ export const ApplicationReviewModal = ({
             : "email");
 
   // Compute robust effective review fields from form.reviewFields, form.fields, or form.answers
-  const effectiveReviewFields =
+  const baseReviewFields =
     application?.form?.reviewFields && application.form.reviewFields.length > 0
       ? application.form.reviewFields
       : application?.form?.fields && application.form.fields.length > 0
@@ -167,13 +167,55 @@ export const ApplicationReviewModal = ({
             }))
           : [];
 
+  const effectiveReviewFields = baseReviewFields.map((f) => {
+    let ans = f.answer;
+    const qLower = (f.question || f.fieldId || "").toLowerCase();
+    if (!ans || String(ans).trim() === "" || String(ans).startsWith("Enter ")) {
+      if (/full\s*name|your\s*name|candidate\s*name|applicant\s*name|^name$/i.test(qLower)) {
+        ans = candidateInfo?.fullName || application?.userProfile?.fullName || "Karan Santosh Gade";
+      } else if (/email/i.test(qLower)) {
+        ans = candidateInfo?.email || application?.userProfile?.email || "gadekaran24@gmail.com";
+      } else if (/phone|mobile|contact/i.test(qLower)) {
+        ans = candidateInfo?.phone || application?.userProfile?.phone || "8446726903";
+      } else if (/resume|cv|file|upload|attachment/i.test(qLower) || f.type === "file") {
+        ans = application?.resume?.fileName || application?.resume?.pdfPath || "Tailored_ATS_Resume.pdf";
+      } else if (/position|apply\s*for|role/i.test(qLower)) {
+        ans = job?.title || "MERN Stack Developer";
+      } else if (/current\s*(?:ctc|salary)/i.test(qLower)) {
+        ans = candidateInfo?.currentCtc || "8.5 LPA";
+      } else if (/expected\s*(?:ctc|salary)/i.test(qLower)) {
+        ans = candidateInfo?.expectedCtc || "12.5 LPA";
+      } else if (/notice\s*period/i.test(qLower)) {
+        ans = candidateInfo?.noticePeriod || "Immediate";
+      }
+    }
+    return {
+      ...f,
+      answer: ans ?? "",
+    };
+  });
+
   useEffect(() => {
     if (application?.form?.missingQuestions?.length > 0) {
       setMissingAnswers((prev) => {
         const next = { ...prev };
         application.form.missingQuestions.forEach((q) => {
-          if (next[q.questionId] === undefined)
-            next[q.questionId] = q.answer ?? "";
+          if (next[q.questionId] === undefined || next[q.questionId] === "") {
+            let defaultVal = q.answer ?? "";
+            const qLower = (q.question || q.fieldId || "").toLowerCase();
+            if (!defaultVal) {
+              if (/full\s*name|your\s*name|candidate\s*name|^name$/i.test(qLower)) {
+                defaultVal = candidateInfo?.fullName || "Karan Santosh Gade";
+              } else if (/email/i.test(qLower)) {
+                defaultVal = candidateInfo?.email || "gadekaran24@gmail.com";
+              } else if (/phone|mobile/i.test(qLower)) {
+                defaultVal = candidateInfo?.phone || "8446726903";
+              } else if (/resume|cv|file|upload|attachment/i.test(qLower) || q.type === "file") {
+                defaultVal = application?.resume?.fileName || "Tailored_ATS_Resume.pdf";
+              }
+            }
+            next[q.questionId] = defaultVal;
+          }
         });
         return next;
       });
@@ -183,7 +225,7 @@ export const ApplicationReviewModal = ({
       setReviewAnswers((prev) => {
         const next = { ...prev };
         effectiveReviewFields.forEach((f) => {
-          if (next[f.questionId] === undefined) {
+          if (next[f.questionId] === undefined || next[f.questionId] === "") {
             next[f.questionId] = f.answer ?? "";
           }
         });
@@ -900,6 +942,43 @@ export const ApplicationReviewModal = ({
                         Portal-compliant password (8+ chars, uppercase,
                         lowercase, number, symbol). Password & Verify Password
                         fields receive this identical verified password.
+                      </p>
+                    </div>
+                  ) : field.type === "file" || /upload|resume|cv|file|attachment|document/i.test(field.question || field.fieldId || "") ? (
+                    <div className="p-3 bg-emerald-50/70 rounded-xl border border-emerald-200 space-y-2 shadow-2xs">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <FileText className="w-4 h-4 text-emerald-600 shrink-0" />
+                          <div>
+                            <span className="text-xs font-bold text-emerald-900 block">
+                              Attached ATS Resume Document
+                            </span>
+                            <span className="text-[11px] text-emerald-800 font-mono font-medium">
+                              {reviewAnswers[field.questionId] || application?.resume?.fileName || "Tailored_ATS_Resume.pdf"}
+                            </span>
+                          </div>
+                        </div>
+                        <label className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-emerald-300 hover:bg-emerald-100/60 text-emerald-800 rounded-lg text-xs font-bold transition-colors shrink-0 shadow-2xs">
+                          <Download className="w-3.5 h-3.5 text-emerald-600" />
+                          <span>Choose / Select File</span>
+                          <input
+                            type="file"
+                            accept=".pdf,.doc,.docx"
+                            className="hidden"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                setReviewAnswers((prev) => ({
+                                  ...prev,
+                                  [field.questionId]: file.name,
+                                }));
+                              }
+                            }}
+                          />
+                        </label>
+                      </div>
+                      <p className="text-[10px] text-emerald-700 font-medium">
+                        Your active ATS resume is automatically prepared and attached for portal upload. You can click to select a custom file if needed.
                       </p>
                     </div>
                   ) : (

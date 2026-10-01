@@ -1103,39 +1103,38 @@ export const runNaukriApplication = async ({
       // Build structured action plan from resolved answers
       const actions = [];
       const answersMap = new Map();
-      resolvedAnswers.forEach((a) => answersMap.set(a.questionId, a.answer));
+      resolvedAnswers.forEach((a) => {
+        if (a.questionId) answersMap.set(a.questionId, a.answer);
+        if (a.fieldId) answersMap.set(a.fieldId, a.answer);
+      });
 
-      for (const field of formInspection.fields) {
-        const ans = answersMap.get(field.questionId);
-        if (ans !== undefined && ans !== null) {
+      for (let i = 0; i < formInspection.fields.length; i++) {
+        const field = formInspection.fields[i];
+        const ans = answersMap.get(field.questionId) || answersMap.get(field.fieldId) || answersMap.get(field.name);
+        if (ans !== undefined && ans !== null && ans !== '') {
+          let type = "fill";
           if (field.type === FIELD_TYPES.SELECT) {
-            actions.push({
-              fieldId: field.fieldId,
-              action: FORM_ACTIONS.SELECT,
-              value: ans,
-            });
+            type = "select";
           } else if (
             field.type === FIELD_TYPES.RADIO ||
             field.type === FIELD_TYPES.CHECKBOX
           ) {
-            actions.push({
-              fieldId: field.fieldId,
-              action: FORM_ACTIONS.CHECK,
-              value: ans,
-            });
+            type = "check";
           } else if (field.type === FIELD_TYPES.FILE) {
-            actions.push({
-              fieldId: field.fieldId,
-              action: FORM_ACTIONS.UPLOAD,
-              value: application.resume?.pdfPath,
-            });
-          } else {
-            actions.push({
-              fieldId: field.fieldId,
-              action: FORM_ACTIONS.FILL,
-              value: ans,
-            });
+            type = "upload";
           }
+
+          actions.push({
+            actionId: `act_${i}_${field.fieldId || field.questionId || 'field'}`,
+            type,
+            target: { selector: field.fieldId || field.selector || field.name || null },
+            fieldId: field.fieldId,
+            action: type,
+            value: field.type === FIELD_TYPES.FILE ? (application.resume?.pdfPath || String(ans)) : String(ans),
+            intent: `Populate field ${field.question || field.name || 'field'}`,
+            expectedOutcome: `Value set for ${field.question || field.name || 'field'}`,
+            riskLevel: "LOW",
+          });
         }
       }
 
