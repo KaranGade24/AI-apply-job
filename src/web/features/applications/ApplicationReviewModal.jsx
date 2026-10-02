@@ -1654,33 +1654,48 @@ export const ApplicationReviewModal = ({
   // Re-tailor and re-generate AI draft on demand
   const formatAiError = (errorStr) => {
     if (!errorStr) return "";
+    const str = String(errorStr);
 
-    // Check for common Gemini Rate Limit errors
+    // Check for common Gemini Rate Limit / Quota errors
     if (
-      errorStr.includes("429") ||
-      errorStr.includes("quota") ||
-      errorStr.includes("Rate limit")
+      str.includes("429") ||
+      str.includes("quota") ||
+      str.includes("Quota exceeded") ||
+      str.includes("Rate limit") ||
+      str.includes("generativelanguage") ||
+      str.includes("GoogleGenerativeAI") ||
+      str.includes("ResourceHasBeenExhausted")
     ) {
-      // Try to extract the retry delay if present
-      const retryMatch = errorStr.match(/retry in ([\d\.]+s|[\d\.]+ seconds)/i);
-      const retryText = retryMatch ? ` Please retry in ${retryMatch[1]}.` : "";
-      return `AI Rate Limit Exceeded: The AI model is currently busy or you have reached your request quota.${retryText}`;
+      const retryMatch = str.match(/retry in ([\d\.]+s|[\d\.]+ seconds)/i);
+      const retryText = retryMatch ? ` Please retry in ${retryMatch[1]}.` : " Please try again in a few seconds.";
+      return `AI Rate Limit Reached: The AI model is temporarily busy.${retryText}`;
     }
 
     // Check for model not found / service unavailable
-    if (errorStr.includes("503") || errorStr.includes("Service Unavailable")) {
-      return "AI Service Temporarily Unavailable: The AI model is currently overloaded. Please try again in a few minutes.";
+    if (str.includes("503") || str.includes("Service Unavailable") || str.includes("overloaded")) {
+      return "AI Service Temporarily Busy: The AI model is overloaded. Please try again shortly.";
     }
 
-    // Generic cleanup for structured errors
-    if (errorStr.includes("[GoogleGenerativeAI Error]")) {
-      return "AI Processing Error: There was an issue generating your content. This usually happens with complex jobs or large resumes.";
+    // Generic cleanup for structured errors or raw JSON / Google RPC dumps
+    if (
+      str.includes("[GoogleGenerativeAI Error]") ||
+      str.includes("Error fetching from") ||
+      str.includes("@type") ||
+      str.includes("googleapis.com") ||
+      str.includes("Classification Exception")
+    ) {
+      return "AI Processing Notice: The AI service encountered a transient rate limit or timeout. Please click Re-Analyze or retry in a moment.";
     }
 
-    // Return first sentence or first 100 chars if it's too long
-    return errorStr.length > 150
-      ? errorStr.substring(0, 150) + "..."
-      : errorStr;
+    let cleaned = str
+      .replace(/^Classification Exception:\s*/gi, "")
+      .replace(/^Agent Decision Engine Exception:\s*/gi, "")
+      .replace(/\[GoogleGenerativeAI Error\]:\s*/gi, "")
+      .replace(/Error fetching from https?:\/\/[^\s]+/gi, "")
+      .replace(/https?:\/\/[^\s]+/gi, "")
+      .trim();
+
+    return cleaned.length > 180 ? cleaned.substring(0, 180) + "..." : cleaned || "AI operation temporarily busy.";
   };
 
   const handleRegenerateDraft = async () => {
@@ -2511,7 +2526,7 @@ export const ApplicationReviewModal = ({
                           <div className="space-y-3 pt-1 text-xs">
                             <div className="p-3 bg-white rounded-lg border border-indigo-100 space-y-3">
                               <p className="text-slate-700 leading-relaxed font-medium">
-                                {application.pageAnalysis.summary}
+                                {formatAiError(application.pageAnalysis.summary)}
                               </p>
 
                               {/* External ATS (Workday, Greenhouse, Lever, etc.) Action Card */}
@@ -2547,7 +2562,7 @@ export const ApplicationReviewModal = ({
                                     </span>
                                   </div>
                                   <p className="text-blue-800 text-[11px] leading-relaxed">
-                                    {application.pageAnalysis.summary ||
+                                    {formatAiError(application.pageAnalysis.summary) ||
                                       "This employer uses an external career system (e.g., Workday). You can proceed directly to the portal with your tailored resume and autofill answers."}
                                   </p>
                                   <div className="pt-1 flex flex-wrap items-center justify-between gap-2 border-t border-blue-200/60">

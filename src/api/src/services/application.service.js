@@ -1756,22 +1756,33 @@ export const analyzeEmployerPortalService = async (applicationId, userId) => {
       combinedStorageState ? { storageState: combinedStorageState } : {}
     );
     await injectGoogleSessionIntoContext(context, userId);
+
+    let latestPopupPage = null;
+    context.on('page', (p) => {
+      latestPopupPage = p;
+    });
+
     page = await context.newPage();
 
     await updateApplicationStatus(applicationId, APPLICATION_STATUS.ANALYZING_PORTAL, {
       logMessage: `Opening and analyzing actual application portal: ${targetUrl}...`,
     });
 
-    await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 25000 }).catch(async () => {
+    await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 35000 }).catch(async () => {
       await page.evaluate(() => window.stop()).catch(() => {});
     });
     await page.waitForTimeout(2000);
 
+    let activePage = latestPopupPage && !latestPopupPage.isClosed() ? latestPopupPage : page;
+    if (activePage.isClosed()) {
+      const openPages = context.pages().filter(p => !p.isClosed());
+      activePage = openPages.length > 0 ? openPages[openPages.length - 1] : page;
+    }
+
     // If on Naukri job page with #company-site-button, click it to reach the actual company portal
-    let activePage = page;
     const isNaukriListingPage = activePage.url().includes("naukri.com/job-listings");
     if (isNaukriListingPage) {
-      const companySiteBtn = page
+      const companySiteBtn = activePage
         .locator(
           '#company-site-button, button:has-text("Apply on company site"), a:has-text("Apply on company site")'
         )
@@ -1784,18 +1795,29 @@ export const analyzeEmployerPortalService = async (applicationId, userId) => {
           "NAVIGATE_EXTERNAL",
           "Clicking #company-site-button to navigate to employer careers site"
         );
-        const newPagePromise = context.waitForEvent("page", { timeout: 6000 }).catch(() => null);
+        latestPopupPage = null;
         await companySiteBtn.click().catch(() => {});
-        const popup = await newPagePromise;
-        if (popup) {
-          await popup.waitForLoadState("domcontentloaded").catch(() => {});
-          activePage = popup;
-        }
         await activePage.waitForTimeout(3000);
+
+        if (latestPopupPage && !latestPopupPage.isClosed()) {
+          await latestPopupPage.waitForLoadState("domcontentloaded").catch(() => {});
+          activePage = latestPopupPage;
+        } else {
+          const openPages = context.pages().filter(p => !p.isClosed());
+          if (openPages.length > 1) {
+            activePage = openPages[openPages.length - 1];
+          }
+        }
+        await activePage.waitForTimeout(2500);
       }
     }
 
-    const actualApplicationUrl = activePage.url();
+    if (!activePage || activePage.isClosed()) {
+      const openPages = context.pages().filter(p => !p.isClosed());
+      activePage = openPages.length > 0 ? openPages[openPages.length - 1] : page;
+    }
+
+    const actualApplicationUrl = activePage && !activePage.isClosed() ? activePage.url() : targetUrl;
 
     // Permanently save the resolved actual application link in Job record if valid
     const jobId = job._id || application.jobId;
@@ -1902,31 +1924,48 @@ export const advanceEmployerPortalActionService = async (applicationId, userId, 
       combinedStorageState ? { storageState: combinedStorageState } : {}
     );
     await injectGoogleSessionIntoContext(context, userId);
+
+    let latestPopupPage = null;
+    context.on('page', (p) => {
+      latestPopupPage = p;
+    });
+
     page = await context.newPage();
 
-    await page.goto(portalUrl, { waitUntil: "domcontentloaded", timeout: 25000 }).catch(async () => {
+    await page.goto(portalUrl, { waitUntil: "domcontentloaded", timeout: 35000 }).catch(async () => {
       await page.evaluate(() => window.stop()).catch(() => {});
     });
     await page.waitForTimeout(2000);
 
+    let activePage = latestPopupPage && !latestPopupPage.isClosed() ? latestPopupPage : page;
+    if (activePage.isClosed()) {
+      const openPages = context.pages().filter(p => !p.isClosed());
+      activePage = openPages.length > 0 ? openPages[openPages.length - 1] : page;
+    }
+
     // If still on Naukri job page with company site button
-    let activePage = page;
     const isNaukriListingPage = activePage.url().includes("naukri.com/job-listings");
     if (isNaukriListingPage) {
-      const companySiteBtn = page
+      const companySiteBtn = activePage
         .locator(
           '#company-site-button, button:has-text("Apply on company site"), a:has-text("Apply on company site")'
         )
         .first();
       if (await companySiteBtn.isVisible().catch(() => false)) {
-        const newPagePromise = context.waitForEvent("page", { timeout: 6000 }).catch(() => null);
+        latestPopupPage = null;
         await companySiteBtn.click().catch(() => {});
-        const popup = await newPagePromise;
-        if (popup) {
-          await popup.waitForLoadState("domcontentloaded").catch(() => {});
-          activePage = popup;
-        }
         await activePage.waitForTimeout(3000);
+
+        if (latestPopupPage && !latestPopupPage.isClosed()) {
+          await latestPopupPage.waitForLoadState("domcontentloaded").catch(() => {});
+          activePage = latestPopupPage;
+        } else {
+          const openPages = context.pages().filter(p => !p.isClosed());
+          if (openPages.length > 1) {
+            activePage = openPages[openPages.length - 1];
+          }
+        }
+        await activePage.waitForTimeout(2500);
       }
     }
 

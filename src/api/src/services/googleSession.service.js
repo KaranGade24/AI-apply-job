@@ -93,14 +93,32 @@ export const detectGoogleAuthState = async (page) => {
 export const getDecryptedGoogleSession = async (userId) => {
   try {
     if (!userId) return null;
-    const account = await findGoogleAccountByUserId(userId);
+    let account = await findGoogleAccountByUserId(userId);
+
+    // Fallback lookup if not found by strict userId query
+    if (!account) {
+      try {
+        const { GoogleAccount } = await import('../model/GoogleAccount.js');
+        account = await GoogleAccount.findOne({
+          $or: [
+            { userId: String(userId) },
+            { userId: userId }
+          ]
+        });
+      } catch {}
+    }
+
     if (!account?.encryptedStorageState?.cipherText) {
       return null;
     }
 
     try {
       const decryptedJson = decryptValue(account.encryptedStorageState);
-      return JSON.parse(decryptedJson);
+      const parsed = JSON.parse(decryptedJson);
+      if (Array.isArray(parsed)) {
+        return { cookies: parsed, origins: [] };
+      }
+      return parsed;
     } catch {
       // In case encryption secret changed or key cannot authenticate legacy ciphertext
       return null;
@@ -123,11 +141,7 @@ export const injectGoogleSessionIntoContext = async (context, userId) => {
     if (!context || !userId) return false;
     const session = await getDecryptedGoogleSession(userId);
     if (!session?.cookies || !Array.isArray(session.cookies) || session.cookies.length === 0) {
-      await logJobEvent(
-        'googleSessionService',
-        'NO_GOOGLE_SESSION_TO_INJECT',
-        `No stored Google session found for User: ${userId}`
-      );
+      // Silent skip - user does not have an active Google session connected
       return false;
     }
 

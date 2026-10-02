@@ -111,6 +111,8 @@ RETURN STRICT JSON ONLY MATCHING THE FOLLOWING SCHEMA. Do NOT include markdown b
 
   } catch (error) {
     await logError('pageClassifierLlm.classifyPageStateLlm', error.message);
+    const { sanitizeAiErrorMessage } = await import('../../utils/errors.js');
+    const cleanError = sanitizeAiErrorMessage(error.message);
     return {
       state: PAGE_STATES.UNKNOWN,
       confidence: 0.0,
@@ -119,7 +121,7 @@ RETURN STRICT JSON ONLY MATCHING THE FOLLOWING SCHEMA. Do NOT include markdown b
       totalSteps: 1,
       activeStepName: '',
       isFormClosed: false,
-      reason: `Classification Exception: ${error.message}`
+      reason: cleanError
     };
   }
 };

@@ -183,6 +183,8 @@ export const decideNextAction = async (
 
   } catch (error) {
     await logError('agentDecision.decideNextAction', error.message);
+    const { sanitizeAiErrorMessage } = await import('../../utils/errors.js');
+    const cleanError = sanitizeAiErrorMessage(error.message);
 
     // Safe, fail-secure fallback
     return {
@@ -193,7 +195,7 @@ export const decideNextAction = async (
       expectedOutcome: 'human_intervention',
       confidence: 0.0,
       riskLevel: 'CRITICAL',
-      reason: `Agent Decision Engine Exception: ${error.message}`
+      reason: cleanError
     };
   }
 };
