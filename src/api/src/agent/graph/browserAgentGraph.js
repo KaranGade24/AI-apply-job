@@ -40,8 +40,13 @@ import {
   AGENT_STATUS,
   PERCEPTION_PAGE_TYPES,
   MAX_AGENT_STEPS,
+  CONTROL_MODES,
+  HUMAN_INTERVENTION_REASONS,
+  REALTIME_EVENTS,
 } from "../../constant/agent.constant.js";
+import { broadcastToApp } from "../../browser/session/browserStreamService.js";
 import { logJobEvent, logError } from "../../utils/logger.js";
+
 
 /**
  * Computes a deterministic SHA-256 hash of answers for final review confirmation integrity.
@@ -157,23 +162,52 @@ const observeAndActNode = async (state) => {
   );
 
   // 4. Branching based on Page Type
-  if (pageType === PERCEPTION_PAGE_TYPES.CAPTCHA_OR_BLOCKED) {
-    const captchaQuestion = {
-      questionId: "captcha_resolution",
-      question:
-        "The application portal is presenting a CAPTCHA / bot challenge. Please solve it in the browser.",
-      reason: "captcha",
+  if (
+    pageType === PERCEPTION_PAGE_TYPES.CAPTCHA_OR_BLOCKED ||
+    pageType === PERCEPTION_PAGE_TYPES.LOGIN
+  ) {
+    const isCaptcha = pageType === PERCEPTION_PAGE_TYPES.CAPTCHA_OR_BLOCKED;
+    const humanReason = isCaptcha
+      ? HUMAN_INTERVENTION_REASONS.CAPTCHA_REQUIRED
+      : HUMAN_INTERVENTION_REASONS.LOGIN_CHALLENGE;
+    const humanMessage = isCaptcha
+      ? "CAPTCHA / bot verification challenge detected. Please solve the challenge directly inside the browser."
+      : "Authentication or credentials challenge detected. Please sign in or complete verification in the browser.";
+
+    const session = SessionRegistry.getSession(appIdStr);
+    if (session) {
+      session.controlMode = CONTROL_MODES.HUMAN;
+      session.humanReason = humanReason;
+      session.humanMessage = humanMessage;
+    }
+
+    broadcastToApp(appIdStr, {
+      type: REALTIME_EVENTS.HUMAN_INTERVENTION_REQUIRED,
+      controlMode: CONTROL_MODES.HUMAN,
+      humanReason,
+      humanMessage,
+      pageType,
+      currentUrl: url,
+      status: AGENT_STATUS.WAITING_FOR_HUMAN,
+      timestamp: Date.now(),
+    });
+
+    const humanQuestion = {
+      questionId: isCaptcha ? "captcha_resolution" : "login_resolution",
+      question: humanMessage,
+      reason: isCaptcha ? "captcha" : "login",
       required: true,
-      options: ["I have solved the CAPTCHA"],
+      options: [isCaptcha ? "I have solved the CAPTCHA" : "I have completed login"],
     };
 
     return {
       pageType,
       currentUrl: url,
-      pendingQuestions: [captchaQuestion],
-      status: AGENT_STATUS.WAITING_FOR_USER,
+      pendingQuestions: [humanQuestion],
+      status: AGENT_STATUS.WAITING_FOR_HUMAN,
     };
   }
+
 
   if (pageType === PERCEPTION_PAGE_TYPES.SUBMISSION_SUCCESS) {
     return {

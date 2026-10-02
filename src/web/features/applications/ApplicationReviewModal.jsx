@@ -53,7 +53,9 @@ import {
 } from "../../services/applicationService";
 import { GoogleSessionModal } from "../google/GoogleSessionModal";
 import { AgentActivityPanel } from "./components/AgentActivityPanel";
+import { EmbeddedInteractiveBrowser } from "./components/EmbeddedInteractiveBrowser";
 import { formatDate, getStatusBadgeStyle } from "../../utils/formatters";
+
 
 export const ApplicationReviewModal = ({
   isOpen,
@@ -82,6 +84,8 @@ export const ApplicationReviewModal = ({
   const [missingAnswers, setMissingAnswers] = useState({});
   const [reviewAnswers, setReviewAnswers] = useState({});
   const [analyzingPortal, setAnalyzingPortal] = useState(false);
+  const [showLiveBrowserInIntelligence, setShowLiveBrowserInIntelligence] = useState(false);
+
   const [advancingPortal, setAdvancingPortal] = useState(false);
   const [refillingForm, setRefillingForm] = useState(false);
   const [savingAnswers, setSavingAnswers] = useState(false);
@@ -2472,23 +2476,35 @@ export const ApplicationReviewModal = ({
 
                       {(application?.form?.humanReason === "captcha" ||
                         application?.form?.humanReason === "otp" ||
-                        application?.form?.humanReason === "2fa") && (
-                        <div className="p-4 rounded-xl border border-amber-300 bg-amber-50 text-amber-900 text-xs flex items-start gap-3">
-                          <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-                          <div>
-                            <span className="font-bold text-amber-950 block">
-                              Security Verification Required (
-                              {application.form.humanReason.toUpperCase()})
-                            </span>
-                            <p className="mt-0.5 text-amber-800">
-                              Naukri has requested a security check (
-                              {application.form.humanReason.toUpperCase()}).
-                              Please complete the challenge in your active
-                              browser session, then click continue.
-                            </p>
+                        application?.form?.humanReason === "2fa" ||
+                        application?.form?.humanReason === "CAPTCHA_REQUIRED" ||
+                        application?.form?.humanReason === "LOGIN_CHALLENGE") && (
+                        <div className="p-4 rounded-xl border border-amber-300 bg-amber-50 text-amber-900 text-xs space-y-3">
+                          <div className="flex items-start gap-3">
+                            <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                            <div>
+                              <span className="font-bold text-amber-950 block">
+                                Security Verification Required (
+                                {application.form.humanReason.toUpperCase()})
+                              </span>
+                              <p className="mt-0.5 text-amber-800">
+                                A security verification challenge is active on the application portal.
+                                Solve the challenge directly inside the interactive browser below, then click &quot;I&apos;m Done — Resume AI&quot;.
+                              </p>
+                            </div>
                           </div>
+                          <EmbeddedInteractiveBrowser
+                            applicationId={application?._id}
+                            initialUrl={application?.pageAnalysis?.currentUrl || job?.applicationUrl || ""}
+                            jobTitle={job?.title || ""}
+                            companyName={job?.company || ""}
+                            onStatusChange={() => {
+                              if (onApplicationUpdated) onApplicationUpdated();
+                            }}
+                          />
                         </div>
                       )}
+
 
                       {/* Header Channel Bar */}
                       {!isAppliedState && (
@@ -2766,23 +2782,60 @@ export const ApplicationReviewModal = ({
                             </div>
                           </div>
 
-                          <Button
-                            size="xs"
-                            variant="outline"
-                            loading={analyzingPortal}
-                            onClick={handleAnalyzePortal}
-                            className="gap-1.5 text-indigo-700 border-indigo-300 hover:bg-indigo-50 shrink-0 font-bold cursor-pointer"
-                          >
-                            <RefreshCw
-                              className={`w-3 h-3 ${analyzingPortal ? "animate-spin" : ""}`}
-                            />
-                            <span>
-                              {application?.pageAnalysis
-                                ? "Re-Analyze with AI"
-                                : "AI Analyze Page"}
-                            </span>
-                          </Button>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setShowLiveBrowserInIntelligence(
+                                  !showLiveBrowserInIntelligence,
+                                )
+                              }
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer shadow-xs"
+                            >
+                              <Globe className="w-3 h-3 text-blue-400" />
+                              <span>
+                                {showLiveBrowserInIntelligence
+                                  ? "Hide Live Browser"
+                                  : "Open Live Browser"}
+                              </span>
+                            </button>
+                            <Button
+                              size="xs"
+                              variant="outline"
+                              loading={analyzingPortal}
+                              onClick={handleAnalyzePortal}
+                              className="gap-1.5 text-indigo-700 border-indigo-300 hover:bg-indigo-50 shrink-0 font-bold cursor-pointer"
+                            >
+                              <RefreshCw
+                                className={`w-3 h-3 ${analyzingPortal ? "animate-spin" : ""}`}
+                              />
+                              <span>
+                                {application?.pageAnalysis
+                                  ? "Re-Analyze with AI"
+                                  : "AI Analyze Page"}
+                              </span>
+                            </Button>
+                          </div>
                         </div>
+
+                        {showLiveBrowserInIntelligence && (
+                          <div className="pt-2">
+                            <EmbeddedInteractiveBrowser
+                              applicationId={application?._id}
+                              initialUrl={
+                                application?.pageAnalysis?.currentUrl ||
+                                job?.applicationUrl ||
+                                ""
+                              }
+                              jobTitle={job?.title || ""}
+                              companyName={job?.company || ""}
+                              onStatusChange={() => {
+                                if (onApplicationUpdated) onApplicationUpdated();
+                              }}
+                            />
+                          </div>
+                        )}
+
 
                         {/* Closed Form / Dead Google Form Detection Alert Banner */}
                         {application?.pageAnalysis?.isFormClosed && (

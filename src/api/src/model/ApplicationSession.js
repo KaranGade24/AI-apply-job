@@ -25,6 +25,20 @@ const applicationSessionSchema = new mongoose.Schema(
       default: "processing",
       index: true,
     },
+    controlMode: {
+      type: String,
+      enum: ["AI", "HUMAN"],
+      default: "AI",
+      index: true,
+    },
+    humanReason: {
+      type: String,
+      default: "",
+    },
+    humanMessage: {
+      type: String,
+      default: "",
+    },
     notes: {
       type: String,
       default: "",

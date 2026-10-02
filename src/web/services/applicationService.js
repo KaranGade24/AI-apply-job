@@ -192,9 +192,44 @@ export const cancelAgentWorkflowApi = async (id) => {
   });
 };
 
-export const openPortalTabApi = async (id, url) => {
-  return await fetchWithAuth(`/applications/${id}/open-tab`, {
+export const takeControlApi = async (id) => {
+  return await fetchWithAuth(`/applications/${id}/agent/take-control`, {
     method: "POST",
-    body: JSON.stringify({ url }),
   });
 };
+
+export const returnControlApi = async (id) => {
+  return await fetchWithAuth(`/applications/${id}/agent/return-control`, {
+    method: "POST",
+  });
+};
+
+export const resumeAfterVerificationApi = async (id) => {
+  return await fetchWithAuth(`/applications/${id}/agent/resume`, {
+    method: "POST",
+  });
+};
+
+export const pauseAgentApi = async (id) => {
+  return await fetchWithAuth(`/applications/${id}/agent/pause`, {
+    method: "POST",
+  });
+};
+
+export const stopAgentApi = async (id) => {
+  return await fetchWithAuth(`/applications/${id}/agent/stop`, {
+    method: "POST",
+  });
+};
+
+export const dispatchBrowserActionApi = async (id, action = {}) => {
+  return await fetchWithAuth(`/applications/${id}/agent/browser-action`, {
+    method: "POST",
+    body: JSON.stringify(action),
+  });
+};
+
+export const getBrowserFrameApi = async (id) => {
+  return await fetchWithAuth(`/applications/${id}/agent/browser-frame`);
+};
+

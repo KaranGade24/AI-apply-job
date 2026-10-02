@@ -25,6 +25,11 @@ export class BrowserSession {
     this.downloads = [];
     this.redirectReports = [];
     this.ownerUserId = this.userId;
+
+    // AI vs Human control switch
+    this.controlMode = "AI"; // "AI" | "HUMAN"
+    this.humanReason = null;
+    this.humanMessage = null;
   }
 
   async start() {
@@ -66,6 +71,11 @@ export class BrowserSession {
 
   attachPage(page) {
     attachDialogHandler(page, this.applicationId);
+
+    // Auto-attach live screencast for real-time remote browser viewing & interaction
+    import("./browserStreamService.js")
+      .then((m) => m.attachScreencast(this.applicationId, page))
+      .catch(() => {});
 
     // Sync tabs array for functional compatibility
     const existingTab = this.tabs.find(t => t.page === page);

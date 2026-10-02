@@ -4,7 +4,6 @@ import swaggerUi from "swagger-ui-express";
 import swaggerJsdoc from "swagger-jsdoc";
 import path from "path";
 import { fileURLToPath } from "url";
-import { createServer as createViteServer } from "vite";
 
 import { connectToDatabase } from "./src/config/database.config.js";
 import authRouter from "./src/router/auth.router.js";
@@ -23,26 +22,16 @@ import { DEFAULT_PORT } from "./src/constant/api.constant.js";
 import { appError, globalErrorHandler } from "./src/utils/errors.js";
 import { logJobEvent, sanitizeSecrets } from "./src/utils/logger.js";
 import { SessionRegistry } from "./src/browser/session/sessionRegistry.js";
+import { WebSocketServer } from "ws";
+import { subscribeClient } from "./src/browser/session/browserStreamService.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
 
-// Request logging middleware
+// Request logging middleware using centralized logger with strict body redaction & route exclusions
 app.use((req, res, next) => {
-  if (
-    req.originalUrl.startsWith("/@") ||
-    req.originalUrl.startsWith("/src") ||
-    req.originalUrl.startsWith("/node_modules") ||
-    req.originalUrl.endsWith(".jsx") ||
-    req.originalUrl.endsWith(".js") ||
-    req.originalUrl.endsWith(".css") ||
-    req.originalUrl.endsWith(".ico")
-  ) {
-    return next();
-  }
-
   const start = Date.now();
   const { method, originalUrl } = req;
   const authHeader = req.headers.authorization ? "Bearer ***" : "None";
@@ -82,6 +71,17 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(jsonSyntaxErrorHandler);
 
+// Root API Health Check
+app.get("/", (req, res) => {
+  res
+    .status(200)
+    .json({
+      status: "ok",
+      service: "AI Apply Job Backend API",
+      docs: "/api-docs",
+    });
+});
+
 // Swagger API Documentation setup
 const swaggerSpec = swaggerJsdoc(swaggerOptions);
 app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
@@ -101,27 +101,8 @@ if (process.env.NODE_ENV !== "production") {
   app.use("/api/test-pages", testPlaygroundRouter);
 }
 
-// Static upload serving
-app.use("/uploads", express.static(path.join(__dirname, "../../uploads")));
-
-// Database offline fallback middleware for /api
-app.use("/api", (err, req, res, next) => {
-  if (
-    err.name === "MongooseError" ||
-    err.name === "MongoNetworkError" ||
-    (err.message && err.message.includes("buffering timed out"))
-  ) {
-    console.warn("[AI Studio] Database offline — returning mock empty response");
-    if (req.method === "GET") {
-      return res.json(req.path.endsWith("s") || req.path.endsWith("s/") ? [] : {});
-    }
-    return res.status(503).json({ error: "Service temporarily unavailable (database offline)" });
-  }
-  next(err);
-});
-
 // 404 Handler for undefined API endpoints
-app.use("/api", (req, res, next) => {
+app.use((req, res, next) => {
   next(
     new appError(
       `Cannot find endpoint ${req.originalUrl} on this server!`,
@@ -133,47 +114,53 @@ app.use("/api", (req, res, next) => {
 // Centralized Global Error Handler
 app.use(globalErrorHandler);
 
-// Vite Frontend Middleware / Static files serving
-const setupFrontend = async () => {
-  if (process.env.NODE_ENV === "production") {
-    const distPath = path.resolve(__dirname, "../../src/web/dist");
-    app.use(express.static(distPath));
-    app.get("*", (req, res, next) => {
-      if (req.originalUrl.startsWith("/api") || req.originalUrl.startsWith("/api-docs")) {
-        return next();
-      }
-      res.sendFile(path.join(distPath, "index.html"));
-    });
-  } else {
-    const vite = await createViteServer({
-      server: { middlewareMode: true, host: "0.0.0.0", port: 3000 },
-      appType: "spa",
-      configFile: path.resolve(__dirname, "../../vite.config.js"),
-    });
-    app.use(vite.middlewares);
-  }
-};
+const PORT = process.env.API_PORT || DEFAULT_PORT || 5000;
 
-const PORT = Number(process.env.PORT || process.env.API_PORT || DEFAULT_PORT || 3000);
+const server = app.listen(PORT, () => {
+  console.log(`🚀 Standalone Backend API Server is running on port ${PORT}`);
+  console.log(
+    `📚 Swagger documentation available at: http://localhost:${PORT}/api-docs`,
+  );
 
-async function startServer() {
-  await setupFrontend();
-
-  const server = app.listen(PORT, "0.0.0.0", () => {
-    console.log(`🚀 Standalone Server is running on port ${PORT}`);
-    console.log(`📚 Swagger documentation available at: http://localhost:${PORT}/api-docs`);
-
-    // Connect to database asynchronously after server start
-    connectToDatabase().catch((err) => {
-      console.warn("Failed async DB connect:", err.message);
-    });
+  // Connect to database asynchronously after server start
+  connectToDatabase().catch((err) => {
+    console.error("Failed async DB connect:", err.message);
   });
-
-  // Setup graceful shutdown hooks for browser sessions
-  SessionRegistry.setupShutdownHooks(server);
-}
-
-startServer().catch((err) => {
-  console.error("Failed to start server:", err);
-  process.exit(1);
 });
+
+// Setup WebSocket server for real-time live browser streaming & user interactions
+const wss = new WebSocketServer({ noServer: true });
+
+server.on("upgrade", (request, socket, head) => {
+  try {
+    const url = new URL(request.url, `http://${request.headers.host || "localhost"}`);
+    let applicationId = url.searchParams.get("applicationId");
+    if (!applicationId) {
+      const match =
+        url.pathname.match(/\/api\/applications\/([^/]+)\/agent\/stream/) ||
+        url.pathname.match(/\/api\/applications\/([^/]+)\/browser-stream/) ||
+        url.pathname.match(/\/api\/browser-stream\/([^/]+)/);
+      if (match) {
+        applicationId = match[1];
+      }
+    }
+
+    if (applicationId) {
+      wss.handleUpgrade(request, socket, head, (ws) => {
+        wss.emit("connection", ws, request, applicationId);
+      });
+    } else {
+      socket.destroy();
+    }
+  } catch {
+    socket.destroy();
+  }
+});
+
+wss.on("connection", (ws, req, applicationId) => {
+  subscribeClient(applicationId, ws);
+});
+
+// Setup graceful shutdown hooks for browser sessions
+SessionRegistry.setupShutdownHooks(server);
+

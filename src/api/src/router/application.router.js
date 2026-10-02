@@ -1,12 +1,52 @@
 import express from "express";
 import * as applicationController from "../controller/application.controller.js";
 import * as agentExecutionController from "../controller/agentExecution.controller.js";
+import * as browserControlController from "../controller/browserControl.controller.js";
 import {
   authMiddleware,
   optionalAuthMiddleware,
 } from "../middlewares/auth.middleware.js";
 
 const applicationRouter = express.Router();
+
+/**
+ * Browser Live Interaction & Human Control Routes
+ */
+applicationRouter.post(
+  "/:id/agent/take-control",
+  authMiddleware,
+  browserControlController.takeControl,
+);
+applicationRouter.post(
+  "/:id/agent/return-control",
+  authMiddleware,
+  browserControlController.returnControl,
+);
+applicationRouter.post(
+  "/:id/agent/resume",
+  authMiddleware,
+  browserControlController.resumeAfterVerification,
+);
+applicationRouter.post(
+  "/:id/agent/pause",
+  authMiddleware,
+  browserControlController.pauseAgent,
+);
+applicationRouter.post(
+  "/:id/agent/stop",
+  authMiddleware,
+  browserControlController.stopAgent,
+);
+applicationRouter.post(
+  "/:id/agent/browser-action",
+  authMiddleware,
+  browserControlController.dispatchAction,
+);
+applicationRouter.get(
+  "/:id/agent/browser-frame",
+  authMiddleware,
+  browserControlController.getBrowserFrame,
+);
 
 /**
  * @swagger
