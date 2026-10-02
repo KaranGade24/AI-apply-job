@@ -1852,8 +1852,30 @@ export const analyzeEmployerPortalService = async (applicationId, userId) => {
     ).populate("jobId");
 
     await updateApplicationStatus(applicationId, APPLICATION_STATUS.WAITING_FOR_REVIEW, {
-      logMessage: `AI analyzed actual page: ${analysis.pageType} (${actualApplicationUrl}). ${analysis.summary}`,
+      logMessage: `AI analyzed actual page: ${analysis.pageType} (${actualApplicationUrl}). Candidate Domain: ${analysis.candidateDomain || 'Matched'}. ${analysis.summary}`,
     });
+
+    // If autoApplyEnabled is active in settings, immediately deep dive into the best matched opening
+    try {
+      const { Setting } = await import('../model/Setting.js');
+      const settingDoc = await Setting.findOne({ userId }).lean().catch(() => null);
+      if (
+        settingDoc?.applicationSetting?.autoApplyEnabled &&
+        analysis.matchedRole?.title &&
+        (analysis.pageType === 'job_listing_page' || analysis.pageType === 'job_listings_accordion' || (analysis.openingsList && analysis.openingsList.length > 0))
+      ) {
+        await logJobEvent(
+          "analyzeEmployerPortalService",
+          "AUTO_ADVANCE_BEST_MATCH",
+          `Auto-apply enabled. Deep diving into best matched role: "${analysis.matchedRole.title}" (Candidate Domain: ${analysis.candidateDomain})`
+        );
+        advanceEmployerPortalActionService(applicationId, userId, analysis.matchedRole).catch((err) => {
+          logError("analyzeEmployerPortalService.autoAdvance", err.message);
+        });
+      }
+    } catch {
+      // Non-blocking
+    }
 
     return updated;
   } catch (error) {
@@ -1948,6 +1970,7 @@ export const advanceEmployerPortalActionService = async (applicationId, userId, 
     const MAX_LOOP = 3;
     let reachedForm = false;
     let lastAnalysis = null;
+    let lastNavResult = { success: true, navigated: true, message: 'Advanced portal navigation' };
 
     while (loopCount < MAX_LOOP) {
       loopCount++;
@@ -1971,8 +1994,16 @@ export const advanceEmployerPortalActionService = async (applicationId, userId, 
       }
 
       // 3. Decide and execute navigation if it's a listing or description page
-      if (analysis.pageType === 'job_listing_page' || analysis.pageType === 'job_description_page' || analysis.pageType === 'external_ats') {
+      if (
+        analysis.pageType === 'job_listing_page' ||
+        analysis.pageType === 'job_listings_accordion' ||
+        analysis.pageType === 'job_description_page' ||
+        analysis.pageType === 'external_ats' ||
+        specificRoleOverride ||
+        (analysis.openingsList && analysis.openingsList.length > 0)
+      ) {
         const navResult = await navigatePortalWithAiDecision(activePage, analysis, context, specificRoleOverride);
+        lastNavResult = navResult;
         
         if (navResult.navigated) {
           if (navResult.newPage) activePage = navResult.newPage;
@@ -2130,7 +2161,7 @@ export const advanceEmployerPortalActionService = async (applicationId, userId, 
     ).populate("jobId");
 
     await updateApplicationStatus(applicationId, APPLICATION_STATUS.WAITING_FOR_REVIEW, {
-      logMessage: `Advanced portal action: ${navResult.message}. New state: ${postAnalysis.pageType} (${actualApplicationUrl})`,
+      logMessage: `Advanced portal action: ${lastNavResult?.message || "Action executed"}. New state: ${postAnalysis.pageType} (${actualApplicationUrl})`,
     });
 
     return updated;

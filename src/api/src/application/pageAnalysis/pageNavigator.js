@@ -62,7 +62,14 @@ await activePage.waitForTimeout(2500);
     }
 
     // 1. Action: Click Opening Accordion / Role Card and then click its inner "Apply" / "Autofill"
-    if (nextRecommendedAction === 'click_opening_apply' || pageType === 'job_listings_accordion' || (analysis?.openingsList && analysis.openingsList.length > 0)) {
+    if (
+      nextRecommendedAction === 'click_opening_apply' ||
+      nextRecommendedAction === 'select_job_from_list' ||
+      pageType === 'job_listings_accordion' ||
+      pageType === 'job_listing_page' ||
+      specificRoleOverride ||
+      (analysis?.openingsList && analysis.openingsList.length > 0)
+    ) {
       const rawTitle = effectiveRole.title || '';
       const roleTitle = rawTitle
         .replace(/^back\s+to\s+(?:job\s+posting|search\s+results|all\s+jobs|jobs)?/i, '')
@@ -90,7 +97,7 @@ await activePage.waitForTimeout(2500);
         const matchingElements = allElements.filter((el) => {
           const txt = (el.textContent || '').trim().toLowerCase();
           return (
-            (txt.includes(normTarget) || (normTarget.length > 8 && txt.includes(normTarget.slice(0, 10)))) &&
+            (txt.includes(normTarget) || (normTarget.length > 6 && txt.includes(normTarget.slice(0, 8)))) &&
             txt.length < 150
           );
         });
@@ -99,13 +106,40 @@ await activePage.waitForTimeout(2500);
         matchingElements.sort((a, b) => (a.textContent || '').length - (b.textContent || '').length);
 
         for (const matchEl of matchingElements) {
+          // If matchEl itself is a link or button, click it directly
+          if (matchEl.tagName === 'A' || matchEl.tagName === 'BUTTON' || matchEl.getAttribute('role') === 'button') {
+            const href = matchEl.getAttribute('href') || '';
+            matchEl.scrollIntoView({ behavior: 'instant', block: 'center' });
+            matchEl.click();
+            return {
+              clicked: true,
+              href,
+              btnText: matchEl.textContent.trim(),
+              isMailto: href.toLowerCase().startsWith('mailto:'),
+              matchedTitle: (matchEl.textContent || '').trim(),
+            };
+          }
+
           let container = matchEl;
           for (let i = 0; i < 7 && container && container !== document.body; i++) {
             const btn = Array.from(container.querySelectorAll('button, a, [role="button"], input[type="button"], input[type="submit"], [data-automation-id*="apply" i], [data-automation-id*="autofill" i]')).find((b) => {
               const text = (b.textContent || b.value || b.getAttribute('aria-label') || '').toLowerCase().trim();
               const href = (b.getAttribute('href') || '').toLowerCase();
               const autoId = (b.getAttribute('data-automation-id') || '').toLowerCase();
-              return text === 'apply' || text.includes('apply') || href.includes('mailto:') || href.includes('apply') || autoId.includes('apply') || autoId.includes('autofill');
+              return (
+                text === 'apply' || 
+                text.includes('apply') || 
+                text.includes('autofill') ||
+                text.includes('details') ||
+                text.includes('explore') ||
+                text.includes('open') ||
+                href.includes('mailto:') || 
+                href.includes('apply') || 
+                href.includes('job') ||
+                href.includes('career') ||
+                autoId.includes('apply') || 
+                autoId.includes('autofill')
+              );
             });
 
             if (btn) {
@@ -123,6 +157,17 @@ await activePage.waitForTimeout(2500);
             }
             container = container.parentElement;
           }
+
+          // If no inner button found inside container, click matchEl itself to expand accordion/modal
+          matchEl.scrollIntoView({ behavior: 'instant', block: 'center' });
+          matchEl.click();
+          return {
+            clicked: true,
+            href: '',
+            btnText: matchEl.textContent.trim(),
+            isMailto: false,
+            matchedTitle: (matchEl.textContent || '').trim(),
+          };
         }
 
         // Fallback: Click any visible button or link with text 'Apply' or 'Autofill with Resume'

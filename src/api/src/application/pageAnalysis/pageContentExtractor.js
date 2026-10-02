@@ -195,9 +195,79 @@ export const extractPageContent = async (page) => {
       // 9. Closed Form Detection
       const isFormClosed = /(applications\s+closed|no\s+longer\s+accepting|job\s+expired|form\s+closed)/i.test((document.body ? document.body.innerText : ''));
 
-      // Raw text snippet extraction
+      // 10. Detected Job Openings / Titles & Specialization Domains
+      const openingsList = [];
+      const seenTitles = new Set();
+      const roleKeywords = /developer|engineer|scientist|architect|specialist|designer|manager|lead|consultant|analyst|tester|qa|intern|full\s*stack|frontend|backend|devops|data|ml|ai|machine\s*learning|rpa|salesforce|cloud|android|ios|software|web|product|scrum|programmer|automation/i;
+
+      // 10a. Extract domain/title tokens from document title if structured with separators (e.g. InnoWise | RPA | Product Development | Machine Learning | DevOps | Salesforce)
+      if (title && /[|•—–\/-]/.test(title)) {
+        const titleTokens = title.split(/[|•—–\/-]/).map(t => t.trim()).filter(Boolean);
+        titleTokens.forEach((tok, tIdx) => {
+          if (tok.length >= 3 && tok.length <= 60 && roleKeywords.test(tok)) {
+            const norm = tok.toLowerCase();
+            if (!seenTitles.has(norm)) {
+              seenTitles.add(norm);
+              openingsList.push({
+                id: `title-tok-${tIdx}`,
+                title: tok,
+                department: /ml|ai|machine\s*learning/i.test(tok) ? 'AI & Machine Learning' :
+                            /devops|cloud/i.test(tok) ? 'DevOps & Cloud' :
+                            /rpa|automation/i.test(tok) ? 'RPA & Automation' :
+                            /salesforce/i.test(tok) ? 'Salesforce & CRM' :
+                            /product/i.test(tok) ? 'Product Development' : 'Engineering',
+                location: 'Remote / Hybrid',
+                referenceId: '',
+                applyUrl: '',
+                descriptionSnippet: `Specialization role extracted from careers portal: ${tok}`,
+                targetButtonText: 'Apply'
+              });
+            }
+          }
+        });
+      }
+
+      // 10b. Scan headings and elements that look like job titles, vacancy cards, or career links
+      const roleCandidates = document.querySelectorAll(
+        'h1, h2, h3, h4, h5, h6, [role="heading"], [class*="job" i], [class*="career" i], [class*="opening" i], [class*="position" i], [class*="vacancy" i], [class*="role" i], [class*="title" i], [class*="service" i], [class*="card" i], [class*="accordion" i], [class*="item" i], a[href*="job"], a[href*="career"], a[href*="position"], a[href*="vacancy"], a[href*="apply"]'
+      );
+
+      roleCandidates.forEach((el, idx) => {
+        const text = (el.textContent || '').trim().replace(/\s+/g, ' ');
+        if (text.length >= 3 && text.length <= 80 && roleKeywords.test(text)) {
+          const norm = text.toLowerCase();
+          if (!seenTitles.has(norm) && !/^(careers|openings|all\s+jobs|our\s+openings|explore|view\s+all|open\s+positions|job\s+openings|join\s+us|work\s+with\s+us|apply\s+now)$/i.test(text)) {
+            seenTitles.add(norm);
+            const parent = el.closest('div, li, tr, article, section') || el;
+            const refMatch = (parent.textContent || '').match(/(?:ref|id|code|requisition|req)[:\s#]*([a-zA-Z0-9-]{3,15})/i);
+            const locMatch = (parent.textContent || '').match(/(remote|hybrid|usa|united states|india|pune|bangalore|bengaluru|mumbai|delhi|hyderabad|london|new york|california|germany|poland|singapore)/i);
+            const linkEl = parent.querySelector('a') || (el.tagName.toLowerCase() === 'a' ? el : null);
+            const descEl = parent.querySelector('p, span[class*="desc" i]');
+
+            const dept = /ml|ai|machine\s*learning|data/i.test(text) ? 'AI & Machine Learning' :
+                         /devops|cloud|aws|kubernetes/i.test(text) ? 'DevOps & Cloud' :
+                         /rpa|automation/i.test(text) ? 'RPA & Automation' :
+                         /salesforce/i.test(text) ? 'Salesforce' :
+                         /product/i.test(text) ? 'Product Development' :
+                         /full\s*stack|mern|web|frontend|backend/i.test(text) ? 'Software Engineering' : 'Engineering';
+
+            openingsList.push({
+              id: `role-${idx}`,
+              title: text,
+              department: dept,
+              location: locMatch ? locMatch[0] : 'Remote / Hybrid',
+              referenceId: refMatch ? refMatch[1] : '',
+              applyUrl: linkEl?.href || '',
+              descriptionSnippet: (descEl?.textContent || '').trim().slice(0, 200),
+              targetButtonText: 'Apply'
+            });
+          }
+        }
+      });
+
+      // Raw text snippet extraction (expanded to 35,000 characters so LLM sees all openings)
       const bodyText = (document.body ? document.body.innerText : '') + '\n' + extraIframeText;
-      const textSnippet = bodyText.replace(/\s+/g, ' ').slice(0, 4000);
+      const textSnippet = bodyText.replace(/\s+/g, ' ').slice(0, 35000);
 
       // Accessibility general information
       const accessibilityInfo = {
@@ -228,6 +298,7 @@ export const extractPageContent = async (page) => {
         loadingState,
         successEvidence,
         isFormClosed,
+        openingsList,
         textSnippet
       };
     }, iframeContent);
@@ -235,7 +306,7 @@ export const extractPageContent = async (page) => {
     await logJobEvent(
       'pageContentExtractor',
       'EXTRACTED_DETAILED',
-      `URL: ${snapshot.url} | Title: "${snapshot.title}" | Form fields: ${snapshot.formFieldsCount} | Load state: ${snapshot.loadingState.isLoading} | Errors: ${snapshot.validationErrors.length}`
+      `URL: ${snapshot.url} | Title: "${snapshot.title}" | Openings: ${snapshot.openingsList?.length || 0} | Form fields: ${snapshot.formFieldsCount} | Load state: ${snapshot.loadingState.isLoading} | Errors: ${snapshot.validationErrors.length}`
     );
 
     return snapshot;
@@ -256,6 +327,7 @@ export const extractPageContent = async (page) => {
       loadingState: { isLoading: false },
       successEvidence: { level: 0, confirmationId: null },
       isFormClosed: false,
+      openingsList: [],
       textSnippet: ''
     };
   }

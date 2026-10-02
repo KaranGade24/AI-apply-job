@@ -27,6 +27,7 @@ import {
   Edit2,
   Eye,
   EyeOff,
+  Zap,
 } from "lucide-react";
 import { Button } from "../../components/ui/Button";
 import { openProtectedFile } from "../../services/api";
@@ -2619,88 +2620,87 @@ export const ApplicationReviewModal = ({
                                 </div>
                               )}
 
-                              {/* Matched Opening Details (like "Node JS Developer", Reference Id: IN-NJ-01, Exp: 1-3 Years, Loc: Pune) */}
+                              {/* Matched Opening Details Hero Card */}
                               {application.pageAnalysis.matchedRole?.title && (
-                                <div className="p-3 bg-amber-50/70 rounded-xl border border-amber-200/80 space-y-2">
-                                  <div className="flex items-center justify-between">
-                                    <span className="text-[10px] font-bold text-amber-800 uppercase tracking-wider">
-                                      AI Matched Opening for Candidate
-                                    </span>
-                                    {application.pageAnalysis.matchedRole
-                                      .referenceId && (
-                                      <span className="px-2 py-0.5 bg-amber-200/80 text-amber-900 rounded font-mono text-[10px] font-bold">
-                                        Ref ID:{" "}
-                                        {
-                                          application.pageAnalysis.matchedRole
-                                            .referenceId
-                                        }
+                                <div className="p-4 bg-gradient-to-r from-amber-50/90 via-indigo-50/60 to-blue-50/80 rounded-xl border border-amber-200/90 space-y-3 shadow-xs">
+                                  <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <div className="flex items-center gap-2">
+                                      <span className="px-2 py-0.5 bg-emerald-600 text-white rounded text-[10px] font-black uppercase tracking-wider">
+                                        {application.pageAnalysis.matchedRole.matchScore || 98}% MATCH
                                       </span>
-                                    )}
+                                      <span className="text-[11px] font-bold text-slate-800">
+                                        Best Matched Role for Your Profile
+                                      </span>
+                                    </div>
+                                    <div className="flex items-center gap-1.5">
+                                      {application.pageAnalysis.candidateDomain && (
+                                        <span className="px-2 py-0.5 bg-blue-100/90 text-blue-900 rounded-md font-semibold text-[10px]">
+                                          Profile Domain: {application.pageAnalysis.candidateDomain}
+                                        </span>
+                                      )}
+                                      {application.pageAnalysis.matchedRole.referenceId && (
+                                        <span className="px-2 py-0.5 bg-amber-200/80 text-amber-900 rounded font-mono text-[10px] font-bold">
+                                          Ref: {application.pageAnalysis.matchedRole.referenceId}
+                                        </span>
+                                      )}
+                                    </div>
                                   </div>
-                                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-slate-800 font-bold text-sm">
-                                    <span>
-                                      {
-                                        application.pageAnalysis.matchedRole
-                                          .title
-                                      }
-                                    </span>
-                                    {application.pageAnalysis.matchedRole
-                                      .experience && (
-                                      <span className="text-xs text-slate-600 font-normal">
-                                        • Exp:{" "}
-                                        {
-                                          application.pageAnalysis.matchedRole
-                                            .experience
-                                        }
-                                      </span>
-                                    )}
-                                    {application.pageAnalysis.matchedRole
-                                      .location && (
-                                      <span className="text-xs text-slate-600 font-normal">
-                                        • Loc:{" "}
-                                        {
-                                          application.pageAnalysis.matchedRole
-                                            .location
-                                        }
-                                      </span>
+
+                                  <div className="space-y-1">
+                                    <h4 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                                      <span>{application.pageAnalysis.matchedRole.title}</span>
+                                      {application.pageAnalysis.matchedRole.department && (
+                                        <span className="text-xs font-normal text-slate-500">
+                                          ({application.pageAnalysis.matchedRole.department})
+                                        </span>
+                                      )}
+                                    </h4>
+                                    <p className="text-xs text-slate-600 leading-relaxed">
+                                      {application.pageAnalysis.matchedRole.matchReason ||
+                                        `AI selected this position based on your ${application.pageAnalysis.candidateDomain || 'candidate'} background. Click Deep Dive to autonomously navigate into this job listing, open the application form, and auto-fill your profile credentials.`}
+                                    </p>
+                                    {(application.pageAnalysis.matchedRole.experience || application.pageAnalysis.matchedRole.location) && (
+                                      <div className="flex items-center gap-3 text-[11px] text-slate-500 pt-0.5">
+                                        {application.pageAnalysis.matchedRole.experience && (
+                                          <span>• Experience: {application.pageAnalysis.matchedRole.experience}</span>
+                                        )}
+                                        {application.pageAnalysis.matchedRole.location && (
+                                          <span>• Location: {application.pageAnalysis.matchedRole.location}</span>
+                                        )}
+                                      </div>
                                     )}
                                   </div>
 
-                                  <div className="pt-1 flex flex-wrap items-center justify-between gap-2 border-t border-amber-200/50">
-                                    <span className="text-[11px] text-amber-900 font-medium">
-                                      Target Role Actions:
+                                  <div className="pt-2 flex flex-wrap items-center justify-between gap-2 border-t border-amber-200/60">
+                                    <span className="text-[11px] text-amber-950 font-semibold">
+                                      Autonomous Actions:
                                     </span>
                                     <div className="flex items-center gap-2">
                                       <Button
                                         size="xs"
+                                        variant="outline"
                                         loading={
                                           tailoringRoleId ===
-                                          application.pageAnalysis.matchedRole
-                                            .title
+                                          application.pageAnalysis.matchedRole.title
                                         }
                                         onClick={() =>
                                           handleTailorRoleOutreach({
                                             title:
-                                              application.pageAnalysis
-                                                .matchedRole.title,
+                                              application.pageAnalysis.matchedRole.title,
                                             referenceId:
-                                              application.pageAnalysis
-                                                .matchedRole.referenceId,
+                                              application.pageAnalysis.matchedRole.referenceId,
                                             experience:
-                                              application.pageAnalysis
-                                                .matchedRole.experience,
+                                              application.pageAnalysis.matchedRole.experience,
                                             location:
-                                              application.pageAnalysis
-                                                .matchedRole.location,
+                                              application.pageAnalysis.matchedRole.location,
                                             email:
-                                              application.pageAnalysis
-                                                .emailContact?.email,
+                                              application.pageAnalysis.emailContact?.email,
                                           })
                                         }
-                                        className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold gap-1 shadow-xs cursor-pointer"
+                                        className="text-indigo-700 border-indigo-300 hover:bg-indigo-50 font-bold gap-1 shadow-2xs cursor-pointer"
                                       >
-                                        <Sparkles className="w-3 h-3" />
-                                        <span>⚡ Tailor Resume & Email</span>
+                                        <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+                                        <span>Tailor Resume & Draft</span>
                                       </Button>
 
                                       <Button
@@ -2708,14 +2708,13 @@ export const ApplicationReviewModal = ({
                                         loading={advancingPortal}
                                         onClick={() =>
                                           handleAdvancePortalAction(
-                                            application.pageAnalysis
-                                              .matchedRole,
+                                            application.pageAnalysis.matchedRole
                                           )
                                         }
-                                        className="bg-amber-600 hover:bg-amber-700 text-white font-bold gap-1 shadow-xs cursor-pointer"
+                                        className="bg-amber-600 hover:bg-amber-700 text-white font-bold gap-1.5 shadow-xs cursor-pointer"
                                       >
-                                        <ArrowRight className="w-3 h-3" />
-                                        <span>Expand & Click Apply Now</span>
+                                        <ArrowRight className="w-3.5 h-3.5" />
+                                        <span>🚀 Deep Dive into {application.pageAnalysis.matchedRole.title}</span>
                                       </Button>
                                     </div>
                                   </div>
@@ -2724,28 +2723,26 @@ export const ApplicationReviewModal = ({
 
                               {/* Multi-Openings Explorer & Selector */}
                               {((application.pageAnalysis.openingsList &&
-                                application.pageAnalysis.openingsList.length >
-                                  0) ||
+                                application.pageAnalysis.openingsList.length > 0) ||
                                 (application.pageAnalysis.detectedOpenings &&
-                                  application.pageAnalysis.detectedOpenings
-                                    .length > 0)) && (
-                                <div className="space-y-2.5 pt-2 border-t border-slate-100">
+                                  application.pageAnalysis.detectedOpenings.length > 0)) && (
+                                <div className="space-y-3 pt-2 border-t border-slate-200">
                                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                                     <div>
-                                      <span className="text-xs font-bold text-slate-900 block">
-                                        All Openings Detected on Careers Portal
-                                        (
-                                        {application.pageAnalysis.openingsList
-                                          ?.length ||
-                                          application.pageAnalysis
-                                            .detectedOpenings?.length ||
-                                          0}
-                                        )
-                                      </span>
-                                      <p className="text-[11px] text-slate-500">
-                                        Click any role to generate a
-                                        role-specific tailored resume and draft
-                                        an email with its exact Ref ID
+                                      <div className="flex items-center gap-2">
+                                        <span className="px-2 py-0.5 bg-blue-600 text-white rounded text-[10px] font-black uppercase tracking-wider">
+                                          ALL EXTRACTED TITLES
+                                        </span>
+                                        <span className="text-xs font-bold text-slate-900">
+                                          Careers Portal Openings & Specializations (
+                                          {application.pageAnalysis.openingsList?.length ||
+                                            application.pageAnalysis.detectedOpenings?.length ||
+                                            0}
+                                          )
+                                        </span>
+                                      </div>
+                                      <p className="text-[11px] text-slate-500 mt-0.5">
+                                        All open roles detected on the page. Deep dive into any role with AI or tailor a role-specific resume.
                                       </p>
                                     </div>
 
@@ -2765,116 +2762,153 @@ export const ApplicationReviewModal = ({
                                     )}
                                   </div>
 
-                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-72 overflow-y-auto p-1 bg-slate-50/70 rounded-xl border border-slate-200">
+                                  {/* Filter & Search Bar */}
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <input
+                                      type="text"
+                                      placeholder="Filter extracted titles (e.g. Machine Learning, Full Stack, DevOps)..."
+                                      value={selectedOpeningFilter}
+                                      onChange={(e) => setSelectedOpeningFilter(e.target.value)}
+                                      className="flex-1 min-w-[200px] text-xs px-3 py-1.5 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-blue-500"
+                                    />
+                                    {selectedOpeningFilter && (
+                                      <button
+                                        type="button"
+                                        onClick={() => setSelectedOpeningFilter('')}
+                                        className="text-xs text-slate-500 hover:text-slate-800 px-2 py-1 bg-slate-100 rounded-md"
+                                      >
+                                        Clear
+                                      </button>
+                                    )}
+                                  </div>
+
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-80 overflow-y-auto p-1.5 bg-slate-50/80 rounded-xl border border-slate-200">
                                     {(application.pageAnalysis.openingsList &&
-                                    application.pageAnalysis.openingsList
-                                      .length > 0
+                                    application.pageAnalysis.openingsList.length > 0
                                       ? application.pageAnalysis.openingsList
-                                      : (
-                                          application.pageAnalysis
-                                            .detectedOpenings || []
-                                        ).map((t, i) => ({
+                                      : (application.pageAnalysis.detectedOpenings || []).map((t, i) => ({
                                           id: `role-${i}`,
                                           title: t,
+                                          matchScore: 80,
                                         }))
-                                    ).map((role, idx) => {
-                                      const isSelected =
-                                        selectedRolesBatch.some(
-                                          (r) =>
-                                            (r.id || r.title) ===
-                                            (role.id || role.title),
+                                    )
+                                      .filter((role) => {
+                                        if (!selectedOpeningFilter.trim()) return true;
+                                        const query = selectedOpeningFilter.toLowerCase();
+                                        return (
+                                          (role.title || '').toLowerCase().includes(query) ||
+                                          (role.department || '').toLowerCase().includes(query) ||
+                                          (role.location || '').toLowerCase().includes(query)
                                         );
-                                      const isTargetMatch = role.title
-                                        ?.toLowerCase()
-                                        .includes(
-                                          (job.title || "").toLowerCase(),
+                                      })
+                                      .map((role, idx) => {
+                                        const isSelected = selectedRolesBatch.some(
+                                          (r) => (r.id || r.title) === (role.id || role.title)
                                         );
-                                      const isTailoringThis =
-                                        tailoringRoleId === role.title;
+                                        const isBestMatch = Boolean(
+                                          role.isBestMatch ||
+                                          role.title?.toLowerCase() ===
+                                            application.pageAnalysis.matchedRole?.title?.toLowerCase()
+                                        );
+                                        const isTailoringThis = tailoringRoleId === role.title;
+                                        const matchScore = role.matchScore || (isBestMatch ? 98 : 80);
 
-                                      return (
-                                        <div
-                                          key={role.id || idx}
-                                          className={`p-3 rounded-lg border transition-all flex flex-col justify-between gap-2 ${
-                                            isSelected
-                                              ? "bg-emerald-50/80 border-emerald-300 shadow-xs"
-                                              : isTargetMatch
-                                                ? "bg-blue-50/60 border-blue-200"
-                                                : "bg-white border-slate-200 hover:border-indigo-300"
-                                          }`}
-                                        >
-                                          <div>
-                                            <div className="flex items-start justify-between gap-2">
-                                              <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-900 text-xs">
-                                                <input
-                                                  type="checkbox"
-                                                  checked={isSelected}
-                                                  onChange={() =>
-                                                    toggleBatchRole(role)
-                                                  }
-                                                  className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 w-3.5 h-3.5"
-                                                />
-                                                <span>{role.title}</span>
-                                              </label>
-                                              {role.referenceId && (
-                                                <span className="px-1.5 py-0.5 bg-slate-100 text-slate-700 rounded font-mono text-[9px] font-bold shrink-0">
-                                                  {role.referenceId}
-                                                </span>
-                                              )}
-                                            </div>
+                                        return (
+                                          <div
+                                            key={role.id || idx}
+                                            className={`p-3 rounded-xl border transition-all flex flex-col justify-between gap-2 ${
+                                              isBestMatch
+                                                ? "bg-amber-50/80 border-amber-300 shadow-xs ring-1 ring-amber-300/60"
+                                                : isSelected
+                                                  ? "bg-emerald-50/80 border-emerald-300 shadow-xs"
+                                                  : "bg-white border-slate-200 hover:border-indigo-300 hover:shadow-2xs"
+                                            }`}
+                                          >
+                                            <div>
+                                              <div className="flex items-start justify-between gap-2">
+                                                <label className="flex items-start gap-2 cursor-pointer font-bold text-slate-900 text-xs">
+                                                  <input
+                                                    type="checkbox"
+                                                    checked={isSelected}
+                                                    onChange={() => toggleBatchRole(role)}
+                                                    className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 w-3.5 h-3.5 mt-0.5"
+                                                  />
+                                                  <span className="leading-snug">{role.title}</span>
+                                                </label>
+                                                <div className="flex items-center gap-1 shrink-0">
+                                                  {isBestMatch && (
+                                                    <span className="px-1.5 py-0.5 bg-amber-200 text-amber-900 rounded font-black text-[9px] uppercase">
+                                                      BEST MATCH
+                                                    </span>
+                                                  )}
+                                                  <span
+                                                    className={`px-1.5 py-0.5 rounded font-black text-[9px] ${
+                                                      matchScore >= 90
+                                                        ? "bg-emerald-100 text-emerald-800"
+                                                        : matchScore >= 80
+                                                          ? "bg-blue-100 text-blue-800"
+                                                          : "bg-slate-100 text-slate-700"
+                                                    }`}
+                                                  >
+                                                    {matchScore}%
+                                                  </span>
+                                                </div>
+                                              </div>
 
-                                            {(role.experience ||
-                                              role.location) && (
-                                              <div className="flex items-center gap-2 mt-1 text-[10px] text-slate-500">
-                                                {role.experience && (
-                                                  <span>
-                                                    Exp: {role.experience}
+                                              <div className="flex flex-wrap items-center gap-2 mt-1.5 text-[10px] text-slate-500">
+                                                {role.department && (
+                                                  <span className="px-1.5 py-0.5 bg-slate-100 rounded text-slate-600 font-medium">
+                                                    {role.department}
+                                                  </span>
+                                                )}
+                                                {role.referenceId && (
+                                                  <span className="font-mono bg-slate-100 px-1 py-0.5 rounded text-slate-700">
+                                                    Ref: {role.referenceId}
                                                   </span>
                                                 )}
                                                 {role.location && (
-                                                  <span>
-                                                    • Loc: {role.location}
-                                                  </span>
+                                                  <span>• {role.location}</span>
                                                 )}
                                               </div>
-                                            )}
 
-                                            {role.descriptionSnippet && (
-                                              <p className="text-[10px] text-slate-500 line-clamp-2 mt-1">
-                                                {role.descriptionSnippet}
-                                              </p>
-                                            )}
+                                              {role.matchReason && (
+                                                <p className="text-[10px] text-slate-600 italic mt-1 line-clamp-1">
+                                                  "{role.matchReason}"
+                                                </p>
+                                              )}
+
+                                              {role.descriptionSnippet && (
+                                                <p className="text-[10px] text-slate-500 line-clamp-2 mt-1">
+                                                  {role.descriptionSnippet}
+                                                </p>
+                                              )}
+                                            </div>
+
+                                            <div className="flex items-center gap-1.5 pt-1.5 border-t border-slate-100">
+                                              <Button
+                                                size="xs"
+                                                variant="outline"
+                                                loading={isTailoringThis}
+                                                onClick={() => handleTailorRoleOutreach(role)}
+                                                className="flex-1 text-[10px] h-7 gap-1 text-indigo-700 border-indigo-200 hover:bg-indigo-50 font-bold cursor-pointer"
+                                              >
+                                                <Sparkles className="w-3 h-3 text-indigo-600" />
+                                                <span>Tailor & Draft</span>
+                                              </Button>
+
+                                              <Button
+                                                size="xs"
+                                                loading={advancingPortal}
+                                                onClick={() => handleAdvancePortalAction(role)}
+                                                className="flex-1 text-[10px] h-7 gap-1 bg-slate-800 hover:bg-slate-900 text-white font-bold cursor-pointer"
+                                              >
+                                                <ArrowRight className="w-3 h-3" />
+                                                <span>⚡ Deep Dive</span>
+                                              </Button>
+                                            </div>
                                           </div>
-
-                                          <div className="flex items-center gap-1.5 pt-1 border-t border-slate-100">
-                                            <Button
-                                              size="xs"
-                                              variant="outline"
-                                              loading={isTailoringThis}
-                                              onClick={() =>
-                                                handleTailorRoleOutreach(role)
-                                              }
-                                              className="flex-1 text-[10px] h-7 gap-1 text-indigo-700 border-indigo-200 hover:bg-indigo-50 font-bold cursor-pointer"
-                                            >
-                                              <Sparkles className="w-3 h-3 text-indigo-600" />
-                                              <span>Tailor & Draft</span>
-                                            </Button>
-
-                                            <Button
-                                              size="xs"
-                                              loading={advancingPortal}
-                                              onClick={() =>
-                                                handleAdvancePortalAction(role)
-                                              }
-                                              className="flex-1 text-[10px] h-7 gap-1 bg-slate-800 hover:bg-slate-900 text-white font-bold cursor-pointer"
-                                            >
-                                              <ArrowRight className="w-3 h-3" />
-                                              <span>Apply (Web)</span>
-                                            </Button>
-                                          </div>
-                                        </div>
-                                      );
-                                    })}
+                                        );
+                                      })}
                                   </div>
                                 </div>
                               )}

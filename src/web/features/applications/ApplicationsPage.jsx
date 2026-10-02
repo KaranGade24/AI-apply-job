@@ -14,6 +14,7 @@ import {
   Plus,
   Globe,
   Zap,
+  ArrowRight,
 } from 'lucide-react';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
@@ -26,6 +27,7 @@ import {
   deleteApplicationApi,
   createApplicationApi,
   startAgentWorkflowApi,
+  advancePortalActionApi,
 } from '../../services/applicationService';
 import { formatDate, getStatusBadgeStyle, formatStatusLabel } from '../../utils/formatters';
 
@@ -39,6 +41,7 @@ export const ApplicationsPage = () => {
   const [tailoringId, setTailoringId] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
   const [runningAgentId, setRunningAgentId] = useState(null);
+  const [deepDivingId, setDeepDivingId] = useState(null);
   const [toastMessage, setToastMessage] = useState('');
 
   // Autonomous Apply Modal State
@@ -127,6 +130,26 @@ export const ApplicationsPage = () => {
       showToast('Opened application review details.');
     } finally {
       setTailoringId(null);
+    }
+  };
+
+  const handleDeepDivePortal = async (app) => {
+    const appId = app._id;
+    setDeepDivingId(appId);
+    showToast(`AI Browser Agent deep diving into ${app.pageAnalysis?.matchedRole?.title || 'matched opening'}...`);
+    try {
+      const res = await advancePortalActionApi(appId, app.pageAnalysis?.matchedRole || null);
+      const updatedDoc = res.data || app;
+      setApplications((prev) =>
+        prev.map((a) => (a._id === appId ? updatedDoc : a))
+      );
+      setSelectedApp(updatedDoc);
+      showToast('Deep dive executed! Form inspected & filled.');
+    } catch (err) {
+      setSelectedApp(app);
+      showToast('Deep dive error: ' + (err.message || 'Please review in modal'));
+    } finally {
+      setDeepDivingId(null);
     }
   };
 
@@ -391,6 +414,20 @@ export const ApplicationsPage = () => {
                           <span className="text-[11px] text-slate-400">
                             {app.jobId?.location || app.location || 'Remote'}
                           </span>
+                          {((app.pageAnalysis?.openingsList && app.pageAnalysis.openingsList.length > 0) || app.pageAnalysis?.matchedRole?.title) && (
+                            <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                              {app.pageAnalysis?.openingsList?.length > 0 && (
+                                <span className="px-1.5 py-0.5 bg-blue-50 text-blue-700 border border-blue-200 rounded text-[10px] font-bold">
+                                  📋 {app.pageAnalysis.openingsList.length} Extracted Titles
+                                </span>
+                              )}
+                              {app.pageAnalysis?.matchedRole?.title && (
+                                <span className="px-1.5 py-0.5 bg-amber-50 text-amber-800 border border-amber-200 rounded text-[10px] font-semibold truncate max-w-[200px]" title={`Best match: ${app.pageAnalysis.matchedRole.title}`}>
+                                  🎯 {app.pageAnalysis.matchedRole.title}
+                                </span>
+                              )}
+                            </div>
+                          )}
                         </div>
                       </td>
 
@@ -516,6 +553,24 @@ export const ApplicationsPage = () => {
                               <Bot className="w-3.5 h-3.5 text-indigo-600" />
                             )}
                             <span>Run AI Agent</span>
+                          </button>
+                        )}
+
+                        {/* Direct Deep Dive Button if portal openings or matched role detected */}
+                        {!isLocked && app.pageAnalysis?.matchedRole?.title && (
+                          <button
+                            type="button"
+                            onClick={() => handleDeepDivePortal(app)}
+                            disabled={deepDivingId === app._id}
+                            className="inline-flex items-center gap-1 text-xs font-bold text-amber-900 bg-amber-100 hover:bg-amber-200 border border-amber-300 px-3 py-1.5 rounded-lg transition-colors cursor-pointer shadow-2xs"
+                            title={`AI Deep Dive into ${app.pageAnalysis.matchedRole.title}`}
+                          >
+                            {deepDivingId === app._id ? (
+                              <RefreshCw className="w-3 h-3 animate-spin text-amber-700" />
+                            ) : (
+                              <ArrowRight className="w-3.5 h-3.5 text-amber-700" />
+                            )}
+                            <span>Deep Dive</span>
                           </button>
                         )}
 
