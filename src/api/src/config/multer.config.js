@@ -38,7 +38,7 @@ const fileFilter = (req, file, cb) => {
   if (isValidMime || isValidExt) {
     cb(null, true);
   } else {
-    cb(new appError('Invalid file type. Only PDF and DOC/DOCX files are supported.', 400), false);
+    cb(new appError('Invalid file type. Only PDF and DOCX files are supported (legacy .doc is not supported).', 400), false);
   }
 };
 

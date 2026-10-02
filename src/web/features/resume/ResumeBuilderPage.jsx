@@ -112,7 +112,7 @@ export const ResumeBuilderPage = () => {
               period: edu.graduationYear || edu.period || edu.year || edu.dates || '',
             }));
 
-            // Map projects
+            // Map projects preserving BOTH liveDemo and github
             const rawProj = pData.projects || [];
             const mappedProj = rawProj.map((proj) => ({
               title: proj.title || proj.name || '',
@@ -122,7 +122,19 @@ export const ResumeBuilderPage = () => {
                 : typeof proj.technologies === 'string'
                 ? proj.technologies.split(',').map((t) => t.trim())
                 : [],
-              link: proj.link || proj.links?.liveDemo || proj.links?.github || proj.githubUrl || proj.demoUrl || '',
+              links: {
+                liveDemo:
+                  proj.links?.liveDemo ||
+                  proj.demoUrl ||
+                  proj.links?.demo ||
+                  (proj.link && !proj.link.includes('github.com') ? proj.link : '') ||
+                  '',
+                github:
+                  proj.links?.github ||
+                  proj.githubUrl ||
+                  (proj.link && proj.link.includes('github.com') ? proj.link : '') ||
+                  '',
+              },
             }));
 
             // Map certifications
@@ -229,12 +241,56 @@ export const ResumeBuilderPage = () => {
 
   const handleSave = async () => {
     try {
-      await saveResumeDataApi(resumeData);
+      const canonicalPayload = {
+        personalInfo: {
+          fullName: resumeData.fullName || '',
+          email: resumeData.email || '',
+          phone: resumeData.phone || '',
+          location: resumeData.location || '',
+          linkedin: resumeData.linkedinUrl || '',
+          github: resumeData.githubUrl || '',
+          website: resumeData.portfolioUrl || '',
+        },
+        summary: resumeData.summary || '',
+        skills: {
+          technicalSkills: Array.isArray(resumeData.skills) ? resumeData.skills : [],
+          softSkills: [],
+          languages: [],
+        },
+        workExperience: (resumeData.experience || []).map((exp) => ({
+          jobTitle: exp.role || exp.title || '',
+          company: exp.company || '',
+          location: '',
+          startDate: exp.period?.split(' - ')?.[0] || exp.period || '',
+          endDate: exp.period?.split(' - ')?.[1] || '',
+          description: Array.isArray(exp.bullets) ? exp.bullets : (exp.bullets ? [exp.bullets] : []),
+        })),
+        education: (resumeData.education || []).map((edu) => ({
+          institution: edu.institution || '',
+          degree: edu.degree || '',
+          fieldOfStudy: '',
+          location: '',
+          graduationYear: edu.period || '',
+        })),
+        projects: (resumeData.projects || []).map((proj) => ({
+          title: proj.title || '',
+          description: proj.description || '',
+          technologies: Array.isArray(proj.technologies) ? proj.technologies : [],
+          links: {
+            liveDemo: proj.links?.liveDemo || '',
+            github: proj.links?.github || '',
+          },
+        })),
+        certifications: (resumeData.certifications || []).map((c) =>
+          typeof c === 'string' ? c : c.name || ''
+        ),
+      };
+
+      await saveResumeDataApi(canonicalPayload);
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3000);
     } catch (err) {
-      setSaveSuccess(true);
-      setTimeout(() => setSaveSuccess(false), 3000);
+      setUploadError(err.message || 'Failed to save resume');
     }
   };
 
@@ -296,7 +352,7 @@ export const ResumeBuilderPage = () => {
                   <label className="flex items-center justify-center gap-2 px-3 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-bold transition-all cursor-pointer shadow-2xs">
                     <RefreshCw className={`w-3.5 h-3.5 ${isUploading ? 'animate-spin' : ''}`} />
                     {isUploading ? 'Processing...' : 'Replace'}
-                    <input type="file" className="hidden" accept=".pdf,.doc,.docx" onChange={handleFileUpload} disabled={isUploading} />
+                    <input type="file" className="hidden" accept=".pdf,.docx,.txt" onChange={handleFileUpload} disabled={isUploading} />
                   </label>
                   
                   <button 
@@ -316,7 +372,7 @@ export const ResumeBuilderPage = () => {
                 <label className="flex items-center justify-center gap-2 w-full p-4 bg-blue-50 border-2 border-dashed border-blue-200 hover:border-blue-400 text-blue-700 rounded-xl transition-all cursor-pointer group">
                   <Upload className={`w-5 h-5 group-hover:scale-110 transition-transform ${isUploading ? 'animate-bounce' : ''}`} />
                   <span className="text-sm font-bold">{isUploading ? 'Processing with AI...' : 'Upload Resume'}</span>
-                  <input type="file" className="hidden" accept=".pdf,.doc,.docx" onChange={handleFileUpload} disabled={isUploading} />
+                  <input type="file" className="hidden" accept=".pdf,.docx,.txt" onChange={handleFileUpload} disabled={isUploading} />
                 </label>
               </div>
             )}
@@ -490,16 +546,30 @@ export const ResumeBuilderPage = () => {
                 <div key={idx} className="space-y-1">
                   <div className="flex items-center justify-between">
                     <p className="text-xs font-bold text-slate-900">{proj.title || proj.name}</p>
-                    {proj.link && (
-                      <a
-                        href={proj.link}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-[11px] font-semibold text-blue-600 hover:underline flex items-center gap-1"
-                      >
-                        View Project <Globe className="w-3 h-3" />
-                      </a>
-                    )}
+                    <div className="flex items-center gap-3">
+                      {proj.links?.liveDemo && (
+                        <a
+                          href={proj.links.liveDemo}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-[11px] font-semibold text-blue-600 hover:underline flex items-center gap-1"
+                          title="Open Live Demo"
+                        >
+                          <ExternalLink className="w-3 h-3" /> Live Demo
+                        </a>
+                      )}
+                      {proj.links?.github && (
+                        <a
+                          href={proj.links.github}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-[11px] font-semibold text-slate-700 hover:underline flex items-center gap-1"
+                          title="Open GitHub Repository"
+                        >
+                          <Globe className="w-3 h-3" /> GitHub
+                        </a>
+                      )}
+                    </div>
                   </div>
                   <p className="text-xs text-slate-600 leading-relaxed">{proj.description}</p>
                   {proj.technologies && proj.technologies.length > 0 && (

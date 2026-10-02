@@ -204,13 +204,206 @@ export class BrowserSession {
     return this.getActivePage();
   }
 
-  async goto(url, options = {}) {
+  async getUrl() {
     const page = this.getActivePage();
+    return page ? page.url() : this.currentUrl;
+  }
+
+  async getTitle() {
+    const page = this.getActivePage();
+    if (!page) return "";
+    return await page.title().catch(() => "");
+  }
+
+  async goto(url, options = {}) {
+    return this.navigate(url, options);
+  }
+
+  async navigate(url, options = {}) {
+    let page = this.getActivePage();
+    if (!page) {
+      await this.recoverSession();
+      page = this.getActivePage();
+    }
     if (!page) throw new Error("Active browser page is unavailable.");
-    await page.goto(url, options);
+
+    const waitUntil = options.waitUntil || "domcontentloaded";
+    const timeout = options.timeout || 30000;
+
+    try {
+      await page.goto(url, { waitUntil, timeout });
+    } catch (navErr) {
+      // Fallback: If network idle timed out, domcontentloaded may still be healthy
+      if (waitUntil !== "commit") {
+        await page.waitForLoadState("domcontentloaded", { timeout: 10000 }).catch(() => {});
+      }
+    }
+
     this.currentUrl = page.url();
     this.lastUsedAt = new Date();
     return page;
+  }
+
+  async openNewTab(url = "about:blank") {
+    if (!this.context) await this.start();
+    const newPage = await this.context.newPage();
+    this.attachPage(newPage);
+    if (url && url !== "about:blank") {
+      await newPage.goto(url, { waitUntil: "domcontentloaded" }).catch(() => {});
+    }
+    this.activePage = newPage;
+    return newPage;
+  }
+
+  async closeTab(tabId) {
+    const tab = this.tabs.find((t) => t.id === tabId);
+    if (tab && tab.page && !tab.page.isClosed()) {
+      await tab.page.close().catch(() => {});
+    }
+    return this.getActivePage();
+  }
+
+  async detectIframes() {
+    const page = this.getActivePage();
+    if (!page || page.isClosed()) return [];
+
+    try {
+      const frames = page.frames();
+      return frames.map((frame, index) => {
+        const frameUrl = frame.url() || "";
+        const frameName = frame.name() || `frame_${index}`;
+        const isCaptcha = /captcha|recaptcha|hcaptcha|turnstile|challenge/i.test(frameUrl);
+        const isGoogleForm = /docs\.google\.com\/forms|forms\.gle/i.test(frameUrl);
+        const isWorkday = /myworkdayjobs|workday/i.test(frameUrl);
+
+        return {
+          index,
+          name: frameName,
+          url: frameUrl,
+          isMainFrame: frame === page.mainFrame(),
+          isCaptcha,
+          isGoogleForm,
+          isWorkday,
+        };
+      });
+    } catch (err) {
+      return [];
+    }
+  }
+
+  async captureScreenshot(options = {}) {
+    const page = this.getActivePage();
+    if (!page || page.isClosed()) return null;
+
+    const {
+      fullPage = false,
+      elementSelector = null,
+      encoding = "base64",
+    } = options;
+
+    try {
+      if (elementSelector) {
+        const el = page.locator(elementSelector).first();
+        const visible = await el.isVisible().catch(() => false);
+        if (visible) {
+          const buffer = await el.screenshot();
+          return encoding === "base64" ? buffer.toString("base64") : buffer;
+        }
+      }
+
+      const buffer = await page.screenshot({ fullPage });
+      return encoding === "base64" ? buffer.toString("base64") : buffer;
+    } catch (err) {
+      await logJobEvent(
+        "browserSession",
+        "SCREENSHOT_ERROR",
+        `Screenshot failed for ${this.applicationId}: ${err.message}`
+      ).catch(() => {});
+      return null;
+    }
+  }
+
+  async saveCookies(customPath = null) {
+    if (!this.context) return null;
+    try {
+      const storage = await this.context.storageState();
+      if (customPath) {
+        fs.writeFileSync(customPath, JSON.stringify(storage, null, 2), "utf8");
+      }
+      return storage;
+    } catch (err) {
+      return null;
+    }
+  }
+
+  async restoreCookies(storageDataOrPath) {
+    if (!this.context) await this.start();
+    try {
+      let state = storageDataOrPath;
+      if (typeof storageDataOrPath === "string") {
+        if (fs.existsSync(storageDataOrPath)) {
+          state = JSON.parse(fs.readFileSync(storageDataOrPath, "utf8"));
+        }
+      }
+      if (state && Array.isArray(state.cookies)) {
+        await this.context.addCookies(state.cookies);
+      }
+      return true;
+    } catch (err) {
+      return false;
+    }
+  }
+
+  async recoverSession() {
+    await logJobEvent(
+      "browserSession",
+      "RECOVER_SESSION",
+      `Attempting session recovery for application ${this.applicationId}`
+    ).catch(() => {});
+
+    try {
+      if (!this.browser || !this.browser.isConnected()) {
+        await this.close().catch(() => {});
+        await this.start();
+        return this.getActivePage();
+      }
+
+      if (!this.context) {
+        const launched = await BrowserManager.launchWithSession(this.options);
+        this.context = launched.context;
+        this.activePage = launched.page;
+        this.pages = [launched.page];
+        this.attachPage(launched.page);
+        return this.activePage;
+      }
+
+      // Check if any page is still alive
+      const alivePage = this.pages.find((p) => !p.isClosed());
+      if (alivePage) {
+        this.activePage = alivePage;
+        return alivePage;
+      }
+
+      // Create new page inside existing context
+      const newPage = await this.context.newPage();
+      this.attachPage(newPage);
+      this.activePage = newPage;
+      return newPage;
+    } catch (err) {
+      await logJobEvent(
+        "browserSession",
+        "RECOVERY_FAILED",
+        `Session recovery failed: ${err.message}. Relaunching clean session...`
+      ).catch(() => {});
+
+      await this.close().catch(() => {});
+      await this.start();
+      return this.getActivePage();
+    }
+  }
+
+  async cleanup() {
+    return this.close();
   }
 
   async close() {

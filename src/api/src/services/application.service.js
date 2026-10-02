@@ -1742,9 +1742,19 @@ export const previewOrGenerateDraftService = async (userId, payload) => {
       (uRecord?.username && uRecord.username !== "Candidate" ? uRecord.username : "Candidate");
     const candidateEmail = parsedData.personalInfo?.email || uRecord?.email || "";
     const candidatePhone = parsedData.personalInfo?.phone || uProfile?.personal?.phone || "";
-    const candidateSkills = Array.isArray(parsedData.skills)
-      ? parsedData.skills
-      : skills || ["React", "Node.js", "TypeScript"];
+    let candidateSkills = [];
+    if (Array.isArray(parsedData.skills)) {
+      candidateSkills = parsedData.skills;
+    } else if (parsedData.skills && typeof parsedData.skills === "object") {
+      candidateSkills = [
+        ...(parsedData.skills.technicalSkills || []),
+        ...(parsedData.skills.softSkills || []),
+        ...(parsedData.skills.languages || [])
+      ];
+    }
+    if (candidateSkills.length === 0) {
+      candidateSkills = skills || ["React", "Node.js", "JavaScript"];
+    }
 
     const targetTitle = jobTitle || "Software Engineer";
     const targetCompany = company || "Hiring Team";
@@ -2396,8 +2406,19 @@ export const tailorRoleOutreachService = async (applicationId, userId, roleDetai
       userProfile?.fullName ||
       userProfile?.name ||
       "Karan Santosh Gade";
-    const candidateSkills = userProfile?.skills || activeResume?.parsedData?.skills || [];
-    const baseExperience = activeResume?.parsedData?.experience || [];
+    let candidateSkills = [];
+    if (Array.isArray(activeResume?.parsedData?.skills)) {
+      candidateSkills = activeResume.parsedData.skills;
+    } else if (activeResume?.parsedData?.skills && typeof activeResume.parsedData.skills === "object") {
+      candidateSkills = [
+        ...(activeResume.parsedData.skills.technicalSkills || []),
+        ...(activeResume.parsedData.skills.softSkills || []),
+        ...(activeResume.parsedData.skills.languages || [])
+      ];
+    } else if (userProfile?.skills?.length > 0) {
+      candidateSkills = userProfile.skills;
+    }
+    const baseExperience = activeResume?.parsedData?.workExperience || activeResume?.parsedData?.experience || [];
 
     // Use Gemini model to generate a role-specific tailored resume and email draft
     const model = await getGeminiModel(userId);

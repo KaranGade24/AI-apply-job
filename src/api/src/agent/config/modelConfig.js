@@ -1,6 +1,12 @@
 import { ChatGoogleGenerativeAI } from '@langchain/google-genai';
 import { GEMINI_API_KEY } from '../../config/env.js';
-import { MODEL_NAME, MODEL_TEMPERATURE, resolveUserAiSettings } from '../../constant/agent.constant.js';
+import {
+  MODEL_NAME,
+  MODEL_TEMPERATURE,
+  RESUME_PARSER_MODEL_NAME,
+  RESUME_PARSER_TEMPERATURE,
+  resolveUserAiSettings,
+} from '../../constant/agent.constant.js';
 import { tools } from '../tools/all.tools.js';
 import { logError } from '../../utils/logger.js';
 
@@ -57,6 +63,19 @@ export const getGeminiModel = async (userId) => {
 
   return wrapModelInvoke(instance);
 };
+
+// Dedicated structured model instance for resume parsing (ensures stability across user settings)
+export const getResumeParserModel = () => {
+  const instance = new ChatGoogleGenerativeAI({
+    model: RESUME_PARSER_MODEL_NAME,
+    apiKey: GEMINI_API_KEY,
+    temperature: RESUME_PARSER_TEMPERATURE,
+    maxRetries: 1,
+  });
+  return wrapModelInvoke(instance);
+};
+
+export const resumeParserModel = getResumeParserModel();
 
 // Default singleton instance for general tasks
 export const geminiModel = wrapModelInvoke(new ChatGoogleGenerativeAI({

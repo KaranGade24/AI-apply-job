@@ -9,22 +9,25 @@ import {
   MemorySaver,
 } from "@langchain/langgraph";
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
-import { geminiModel } from "../config/modelConfig.js";
+import { getResumeParserModel } from "../config/modelConfig.js";
 import { extractResumeText } from "../tools/resumeParse.tool.js";
-import { RESUME_PARSER_SYSTEM_PROMPT } from "../prompt/resumeParser.js";
+import {
+  RESUME_PARSER_SYSTEM_PROMPT,
+  buildResumeParsePrompt,
+} from "../prompt/resumeParser.js";
 import { resumeSchema } from "../schema/resumeSchema.js";
 import { logError, logResumeEvent } from "../../utils/logger.js";
 import {
   MAX_ATTEMPTS,
   MAX_TOOL_CALLS,
-  LLM_TIMEOUT_MS,
+  RESUME_PARSER_TIMEOUT_MS,
   AGENT_STATUS,
   ERROR_CODES,
 } from "../../constant/agent.constant.js";
 import { MAX_FILE_SIZE_BYTES } from "../../constant/api.constant.js";
 
 /**
- * Explicit State Annotation for the Resume Processing Pipeline
+ * Canonical State Annotation for the Resume Processing Pipeline
  */
 export const ResumeStateAnnotation = Annotation.Root({
   filePath: Annotation({
@@ -107,9 +110,24 @@ const validateFileNode = async (state) => {
       };
     }
 
+    const ext = path.extname(resolvedPath).toLowerCase();
+    if (ext === ".doc") {
+      const errorMsg = "Validation failed: Legacy binary .doc is not supported. Please upload .pdf or .docx.";
+      await logError("validateFileNode", errorMsg);
+      return {
+        status: AGENT_STATUS.FAILED,
+        fileValidated: false,
+        errorInfo: {
+          message: errorMsg,
+          code: ERROR_CODES.VALIDATION_EXCEPTION,
+          timestamp: new Date().toISOString(),
+        },
+      };
+    }
+
     const stats = fs.statSync(resolvedPath);
     if (stats.size >= MAX_FILE_SIZE_BYTES) {
-      const errorMsg = `Validation failed: File size (${(stats.size / 1024 / 1024).toFixed(2)}MB) exceeds maximum limit`;
+      const errorMsg = `Validation failed: File size (${(stats.size / 1024 / 1024).toFixed(2)}MB) exceeds maximum limit of 5MB`;
       await logError("validateFileNode", errorMsg);
       return {
         status: AGENT_STATUS.FAILED,
@@ -125,8 +143,9 @@ const validateFileNode = async (state) => {
     await logResumeEvent(
       filePath,
       "VALIDATED",
-      "File validated successfully on disk",
+      `File validated successfully (${ext}, ${(stats.size / 1024).toFixed(1)} KB)`
     );
+
     return {
       fileValidated: true,
       status: AGENT_STATUS.VALIDATED,
@@ -147,7 +166,7 @@ const validateFileNode = async (state) => {
 
 /**
  * 2. Extract Resume Text Node
- * Extracts raw text from PDF/DOC using tool logic and saves explicitly to state.
+ * Extracts readable text, candidate links, and project hyperlinks into structured evidence.
  */
 const extractResumeTextNode = async (state) => {
   try {
@@ -156,18 +175,12 @@ const extractResumeTextNode = async (state) => {
     }
 
     const currentToolCalls = (state.toolCallCount || 0) + 1;
-
     if (currentToolCalls > MAX_TOOL_CALLS) {
-      const errorMsg =
-        "Extraction halted: Tool call count limit reached to prevent looping";
-
+      const errorMsg = "Extraction halted: Tool call count limit exceeded";
       await logError("extractResumeTextNode", errorMsg);
-
       return {
         status: AGENT_STATUS.FAILED,
-
         toolCallCount: currentToolCalls,
-
         errorInfo: {
           message: errorMsg,
           code: ERROR_CODES.TOOL_CALL_LIMIT_EXCEEDED,
@@ -176,53 +189,27 @@ const extractResumeTextNode = async (state) => {
       };
     }
 
-    /*
-     * extractResumeText() now returns:
-     *
-     * {
-     *   text,
-     *   hyperlinks,
-     *   resumeLinks
-     * }
-     */
     const resumeData = await extractResumeText(state.filePath);
 
-    /*
-     * Validate extraction result.
-     */
-    if (
-      !resumeData ||
-      typeof resumeData.text !== "string" ||
-      !resumeData.text.trim()
-    ) {
-      throw new Error("Resume extraction returned empty text");
+    if (!resumeData || typeof resumeData.text !== "string" || !resumeData.text.trim()) {
+      throw new Error("Resume extraction returned empty text content");
     }
 
-    /*
-     * Log correct values.
-     */
     await logResumeEvent(
       state.filePath,
       "EXTRACTED",
-      `Extracted ${resumeData.text.length} characters and ${resumeData.hyperlinks.length} hyperlinks`,
+      `Text length: ${resumeData.text.length}, Hyperlinks: ${resumeData.hyperlinks?.length || 0}, Project links: ${resumeData.projectLinks?.length || 0}`
     );
 
-    /*
-     * Store complete extraction result in graph state.
-     */
     return {
       extractedResumeData: resumeData,
-
       status: AGENT_STATUS.EXTRACTED,
-
       toolCallCount: currentToolCalls,
     };
   } catch (err) {
     await logError("extractResumeTextNode", err.message, err.stack);
-
     return {
       status: AGENT_STATUS.FAILED,
-
       errorInfo: {
         message: err.message,
         code: ERROR_CODES.EXTRACTION_ERROR,
@@ -234,7 +221,7 @@ const extractResumeTextNode = async (state) => {
 
 /**
  * 3. AI Structured Extraction Node
- * Sends system prompt + raw text directly to Gemini model with Zod schema validation & timeout.
+ * Uses dedicated structured Gemini model with Zod schema validation & timeout.
  */
 const aiStructuredExtractionNode = async (state) => {
   try {
@@ -246,17 +233,12 @@ const aiStructuredExtractionNode = async (state) => {
     }
 
     const currentAttempt = (state.attempts || 0) + 1;
-
     if (currentAttempt > MAX_ATTEMPTS) {
       const errorMsg = `AI extraction halted: Exceeded maximum attempts (${MAX_ATTEMPTS})`;
-
       await logError("aiStructuredExtractionNode", errorMsg);
-
       return {
         status: AGENT_STATUS.FAILED,
-
         attempts: currentAttempt,
-
         errorInfo: {
           message: errorMsg,
           code: ERROR_CODES.MAX_RETRY_EXCEEDED,
@@ -265,141 +247,21 @@ const aiStructuredExtractionNode = async (state) => {
       };
     }
 
-    /*
-     * ==========================================
-     * EXTRACTED RESUME DATA
-     * ==========================================
-     */
+    const evidence = state.extractedResumeData;
+    const promptText = buildResumeParsePrompt({
+      text: evidence.text,
+      candidateLinks: evidence.candidateLinks || evidence.resumeLinks || {},
+      projectLinks: evidence.projectLinks || [],
+      hyperlinks: evidence.hyperlinks || [],
+    });
 
-    const resumeData = state.extractedResumeData;
-
-    /*
-     * ==========================================
-     * FORMAT PDF HYPERLINKS
-     * ==========================================
-     */
-
-    const hyperlinkText = resumeData.hyperlinks
-      .map(
-        (link, index) =>
-          `${index + 1}. ` + `Text: "${link.text}"\n` + `   URL: ${link.url}`,
-      )
-      .join("\n\n");
-
-    /*
-     * ==========================================
-     * BUILD GEMINI INPUT
-     * ==========================================
-     */
-
-    const llmInput = `
-===== RESUME TEXT =====
-
-${resumeData.text}
-
-
-===== PDF HYPERLINKS =====
-
-${hyperlinkText}
-
-
-===== CLASSIFIED RESUME LINKS =====
-
-Email:
-${resumeData.resumeLinks.email}
-
-LinkedIn:
-${resumeData.resumeLinks.linkedin}
-
-GitHub:
-${resumeData.resumeLinks.github}
-
-Website:
-${resumeData.resumeLinks.website}
-
-
-===== EXTRACTION RULES =====
-
-1. Extract information only from the supplied resume data.
-
-2. Do not invent information.
-
-3. Do not infer missing information.
-
-4. PDF hyperlinks are authoritative source data.
-
-5. Preserve supplied URLs exactly.
-
-6. The candidate GitHub profile URL is:
-${resumeData.resumeLinks.github}
-
-7. The candidate LinkedIn URL is:
-${resumeData.resumeLinks.linkedin}
-
-8. The candidate website URL is:
-${resumeData.resumeLinks.website}
-
-9. The candidate email is:
-${resumeData.resumeLinks.email}
-
-10. Use these values for personalInfo when appropriate.
-
-11. Do not replace a project GitHub URL with the candidate's
-    GitHub profile URL.
-
-12. Do not replace a project Live Demo URL with the candidate's
-    portfolio URL.
-
-13. Match "Live Demo" and "GitHub" hyperlinks to the correct
-    project using the project title and their position in the
-    supplied resume.
-
-14. If a project does not have a corresponding URL, return
-    an empty string.
-
-15. Do not create URLs.
-
-16. Do not use external web search.
-
-17. Extract phone number, location, name, education,
-    experience, skills, projects and other fields directly
-    from the resume text.
-
-18. Return all information supported by the resume.
-`;
-
-    /*
-     * ==========================================
-     * DEBUG GEMINI INPUT
-     * ==========================================
-     *
-     * Keep this temporarily while debugging.
-     */
-
-    console.log("\n========== GEMINI INPUT ==========\n");
-
-    console.log(llmInput);
-
-    console.log("\n========== END GEMINI INPUT ==========\n");
-
-    /*
-     * ==========================================
-     * STRUCTURED MODEL
-     * ==========================================
-     */
-
-    const structuredLlm = geminiModel.withStructuredOutput(resumeSchema);
-
-    /*
-     * ==========================================
-     * LLM TIMEOUT
-     * ==========================================
-     */
+    // Use dedicated resume parser model configuration for determinism & stability
+    const parserModel = getResumeParserModel();
+    const structuredLlm = parserModel.withStructuredOutput(resumeSchema);
 
     const llmPromise = structuredLlm.invoke([
       new SystemMessage(RESUME_PARSER_SYSTEM_PROMPT),
-
-      new HumanMessage(llmInput),
+      new HumanMessage(promptText),
     ]);
 
     const timeoutPromise = new Promise((_, reject) => {
@@ -407,62 +269,48 @@ ${resumeData.resumeLinks.email}
         () =>
           reject(
             new Error(
-              `LLM invocation timed out after ${LLM_TIMEOUT_MS / 1000} seconds`,
-            ),
+              `LLM resume parsing timed out after ${RESUME_PARSER_TIMEOUT_MS / 1000} seconds`
+            )
           ),
-        LLM_TIMEOUT_MS,
+        RESUME_PARSER_TIMEOUT_MS
       );
     });
 
-    /*
-     * ==========================================
-     * CALL GEMINI
-     * ==========================================
-     */
-
     const parsedData = await Promise.race([llmPromise, timeoutPromise]);
 
-    /*
-     * ==========================================
-     * FINAL ZOD VALIDATION
-     * ==========================================
-     */
-
+    // Strictly validate against the canonical Zod schema
     const validatedResume = resumeSchema.parse(parsedData);
 
-    /*
-     * ==========================================
-     * LOG SUCCESS
-     * ==========================================
-     */
+    // Safeguard candidate contact links from evidence if model omitted them
+    if (evidence.candidateLinks?.email && !validatedResume.personalInfo.email) {
+      validatedResume.personalInfo.email = evidence.candidateLinks.email;
+    }
+    if (evidence.candidateLinks?.linkedin && !validatedResume.personalInfo.linkedin) {
+      validatedResume.personalInfo.linkedin = evidence.candidateLinks.linkedin;
+    }
+    if (evidence.candidateLinks?.github && !validatedResume.personalInfo.github) {
+      validatedResume.personalInfo.github = evidence.candidateLinks.github;
+    }
+    if (evidence.candidateLinks?.website && !validatedResume.personalInfo.website) {
+      validatedResume.personalInfo.website = evidence.candidateLinks.website;
+    }
 
     await logResumeEvent(
       state.filePath,
       "PARSED",
-      "Resume structured successfully",
+      `Resume structured successfully: ${validatedResume.workExperience.length} roles, ${validatedResume.projects.length} projects, ${validatedResume.education.length} degrees`
     );
-
-    /*
-     * ==========================================
-     * RETURN STATE UPDATE
-     * ==========================================
-     */
 
     return {
       parsedResume: validatedResume,
-
       status: AGENT_STATUS.COMPLETED,
-
       attempts: currentAttempt,
     };
   } catch (err) {
     await logError("aiStructuredExtractionNode", err.message, err.stack);
-
     return {
       status: AGENT_STATUS.FAILED,
-
       attempts: (state.attempts || 0) + 1,
-
       errorInfo: {
         message: err.message,
         code: ERROR_CODES.AI_EXTRACTION_ERROR,
@@ -484,14 +332,15 @@ const workflow = new StateGraph(ResumeStateAnnotation)
   .addConditionalEdges(
     "validate_file",
     (state) => {
-      if (state.status === AGENT_STATUS.FAILED || !state.fileValidated)
+      if (state.status === AGENT_STATUS.FAILED || !state.fileValidated) {
         return END;
+      }
       return "extract_text";
     },
     {
       extract_text: "extract_text",
       [END]: END,
-    },
+    }
   )
   .addConditionalEdges(
     "extract_text",
@@ -499,14 +348,15 @@ const workflow = new StateGraph(ResumeStateAnnotation)
       if (
         state.status === AGENT_STATUS.FAILED ||
         !state.extractedResumeData?.text
-      )
+      ) {
         return END;
+      }
       return "structure_resume";
     },
     {
       structure_resume: "structure_resume",
       [END]: END,
-    },
+    }
   )
   .addEdge("structure_resume", END);
 
@@ -515,7 +365,6 @@ export const resumeGraph = workflow.compile({ checkpointer: memorySaver });
 
 /**
  * Runner function to execute the resume processing pipeline
- * Generates a unique thread_id using crypto.randomUUID() to guarantee concurrent isolation
  */
 export const runResumePipeline = async (filePath, threadId) => {
   const activeThreadId =

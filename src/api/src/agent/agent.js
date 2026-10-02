@@ -3,6 +3,8 @@ import resumeGraph from './graph/resumeGraph.js';
 import { jobDiscoveryGraph } from './graph/jobDiscoveryGraph.js';
 import { jobApplicationGraph } from './graph/jobApplicationGraph.js';
 import { applicationGraph } from './graph/applicationGraph.js';
+import { deepDiveGraph } from './graph/deepDiveGraph.js';
+import { runDeepDiveAgentLoop } from './loop/deepDiveAgentLoop.js';
 import { logError, logResumeEvent } from '../utils/logger.js';
 import { appError } from '../utils/errors.js';
 
@@ -14,6 +16,7 @@ export const agents = Object.freeze({
   jobDiscovery: jobDiscoveryGraph,
   jobApplication: jobApplicationGraph,
   browserApplication: applicationGraph,
+  deepDive: deepDiveGraph,
 });
 
 /**
@@ -98,6 +101,10 @@ export const executeResumePipeline = async (filePath, options = {}) => {
   return runAgent('resume', { filePath }, options);
 };
 
+export const executeDeepDivePipeline = async (applicationId, userId, options = {}) => {
+  return runDeepDiveAgentLoop({ applicationId, userId, ...options });
+};
+
 export const retryResumePipeline = async (filePath, previousThreadId = null, options = {}) => {
   const userTag = options.userId ? `usr-${options.userId}` : 'anon';
   const newThreadId = `resume-retry-${userTag}-${Date.now()}-${crypto.randomUUID()}`;
@@ -109,5 +116,7 @@ export default {
   getAgent,
   runAgent,
   executeResumePipeline,
-  retryResumePipeline
+  executeDeepDivePipeline,
+  retryResumePipeline,
+  runDeepDiveAgentLoop,
 };

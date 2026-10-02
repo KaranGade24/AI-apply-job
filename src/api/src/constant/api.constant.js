@@ -13,12 +13,11 @@ export const TEMP_UPLOAD_DIR_NAME = 'resume_temp';
 
 export const ALLOWED_MIME_TYPES = [
   'application/pdf',
-  'application/msword',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   'text/plain'
 ];
 
-export const ALLOWED_EXTENSIONS = ['.pdf', '.doc', '.docx', '.txt'];
+export const ALLOWED_EXTENSIONS = ['.pdf', '.docx', '.txt'];
 
 // Session and Timeouts
 export const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours

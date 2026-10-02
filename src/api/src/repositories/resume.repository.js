@@ -69,10 +69,34 @@ export const getActiveResumeByUserId = async (userId) => {
   }
 };
 
+/**
+ * Finds a specific resume by Resume ID and User ID (verifies ownership)
+ */
+export const findResumeByIdAndUserId = async (resumeId, userId) => {
+  try {
+    return await Resume.findOne({ _id: resumeId, userId });
+  } catch (error) {
+    throw new appError(`Database error fetching resume: ${error.message}`, 500);
+  }
+};
+
+/**
+ * Deletes a specific resume by Resume ID and User ID (verifies ownership)
+ */
+export const deleteResumeByIdAndUserId = async (resumeId, userId) => {
+  try {
+    return await Resume.findOneAndDelete({ _id: resumeId, userId });
+  } catch (error) {
+    throw new appError(`Database error deleting resume: ${error.message}`, 500);
+  }
+};
+
 export default {
   createResume,
   findResumesByUserId,
   findResumeById,
+  findResumeByIdAndUserId,
+  deleteResumeByIdAndUserId,
   findOriginalResumeByUserId,
   getActiveResumeByUserId
 };

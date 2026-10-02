@@ -121,4 +121,43 @@ export const agentStepOutputSchema = z.object({
   actions: z.array(actionSchema).min(1).max(3).describe('1 to 3 structured actions to execute sequentially in this step'),
 });
 
+/**
+ * Generic Deep-Dive Action Schema
+ * Strict structured schema for LLM decisions:
+ * type, target, value, reason, confidence
+ */
+export const deepDiveActionSchema = z.object({
+  type: z.enum([
+    'navigate',
+    'click',
+    'type',
+    'select',
+    'check',
+    'uncheck',
+    'upload',
+    'scroll',
+    'wait',
+    'press',
+    'goBack',
+    'answerQuestion',
+    'submit',
+    'finish',
+    'humanIntervention',
+  ]).describe('Type of browser action to execute'),
+  target: z.string().optional().describe('Target selector, element index, or element description'),
+  value: z.string().optional().describe('Input text value, select option, file path, or question answer'),
+  reason: z.string().describe('Clear rationale why this action is chosen based on page analysis'),
+  confidence: z.number().min(0).max(1).default(1.0).describe('Confidence score between 0.0 and 1.0'),
+  interventionType: z.enum(['CAPTCHA', 'TWO_FACTOR', 'UNKNOWN_AUTH', 'LEGAL_CONSENT', 'SENSITIVE_DATA', 'UNEXPECTED_PAGE', 'LOW_CONFIDENCE']).optional().describe('Intervention category if type is humanIntervention'),
+});
+
+export const deepDiveDecisionSchema = z.object({
+  analysisSummary: z.string().describe('Brief assessment of current page and form state'),
+  pageState: z.string().describe('Semantic state: job_detail, application_form, question_form, review, submission_success, blocked'),
+  missingPrerequisites: z.array(z.string()).optional().describe('Prerequisites needed before final submit (e.g. required empty fields, terms, consent)'),
+  nextAction: deepDiveActionSchema.describe('Primary next action to execute'),
+  fallbackAction: deepDiveActionSchema.optional().describe('Alternative fallback action if primary action fails'),
+});
+
 export default actionSchema;
+

@@ -26,6 +26,7 @@
     "handlebars": "^4.7.9",
     "jsonwebtoken": "^9.0.3",
     "lucide-react": "^1.47.0",
+    "mammoth": "^1.13.0",
     "mongoose": "^9.10.1",
     "multer": "^2.4.0",
     "nodemailer": "^10.0.10",

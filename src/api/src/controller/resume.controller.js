@@ -3,7 +3,9 @@ import {
   processAndSaveResume,
   getUserResumes,
   getResumeById,
+  deleteResumeById,
 } from "../services/resume.service.js";
+import { resumeSchema } from "../agent/schema/resumeSchema.js";
 import { handleError, appError } from "../utils/errors.js";
 import { logError } from "../utils/logger.js";
 import { upload } from "../config/multer.config.js";
@@ -18,7 +20,7 @@ export const uploadResume = async (req, res) => {
   try {
     if (!req.file) {
       throw new appError(
-        "Please select a valid resume file (PDF or DOC/DOCX under 5MB) to upload.",
+        "Please select a valid resume file (PDF or DOCX under 5MB) to upload.",
         400,
       );
     }
@@ -87,12 +89,13 @@ export const getMyResumes = async (req, res) => {
 };
 
 /**
- * Get Resume Details By ID
+ * Get Resume Details By ID (with ownership check)
  */
 export const getSingleResume = async (req, res) => {
   try {
+    const userId = req.user?.userId;
     const { id } = req.params;
-    const resume = await getResumeById(id);
+    const resume = await getResumeById(id, userId);
     return res.status(200).json({
       success: true,
       data: resume,
@@ -103,22 +106,37 @@ export const getSingleResume = async (req, res) => {
 };
 
 /**
- * Save resume parsed data directly
+ * Save resume parsed data directly with strict Zod schema validation
  */
 export const saveResumeData = async (req, res) => {
   try {
     const userId = req.user?.userId;
+    if (!userId) {
+      throw new appError("User authentication context missing.", 401);
+    }
+
     const { resumeData } = req.body || {};
+    if (!resumeData || typeof resumeData !== "object") {
+      throw new appError("Valid resume data is required.", 400);
+    }
+
+    // Validate request payload strictly against canonical resume schema
+    let validatedData;
+    try {
+      validatedData = resumeSchema.parse(resumeData);
+    } catch (valErr) {
+      throw new appError(`Invalid resume schema: ${valErr.message}`, 400);
+    }
 
     const { Resume } = await import("../model/Resume.js");
     let resumeDoc = await Resume.findOne({ userId, type: "ORIGINAL" });
     if (resumeDoc) {
-      resumeDoc.parsedData = resumeData;
+      resumeDoc.parsedData = validatedData;
       await resumeDoc.save();
     } else {
       resumeDoc = await Resume.create({
         userId,
-        parsedData: resumeData,
+        parsedData: validatedData,
         type: "ORIGINAL",
       });
     }
@@ -159,16 +177,14 @@ export const generateResumePdfController = async (req, res) => {
 };
 
 /**
- * Delete Resume Controller
+ * Delete Resume Controller (verifies ownership)
  */
 export const deleteResumeController = async (req, res) => {
   try {
+    const userId = req.user?.userId;
     const { id } = req.params;
-    const { Resume } = await import("../model/Resume.js");
-    const result = await Resume.findByIdAndDelete(id);
-    if (!result) {
-      throw new appError("Resume not found", 404);
-    }
+    await deleteResumeById(id, userId);
+
     return res.status(200).json({
       success: true,
       message: "Resume deleted successfully",
@@ -179,16 +195,17 @@ export const deleteResumeController = async (req, res) => {
 };
 
 /**
- * Download Original Resume Controller
+ * Download Original Resume Controller (verifies ownership)
  */
 export const downloadOriginalResume = async (req, res) => {
   try {
+    const userId = req.user?.userId;
     const { id } = req.params;
     const { Resume } = await import("../model/Resume.js");
-    const resume = await Resume.findById(id);
+    const resume = await Resume.findOne({ _id: id, userId });
 
     if (!resume || !resume.filePath) {
-      throw new appError("Resume file not found", 404);
+      throw new appError("Resume not found or access denied", 404);
     }
 
     const fs = await import("fs");
@@ -207,6 +224,8 @@ export default {
   uploadResume,
   getMyResumes,
   getSingleResume,
+  saveResumeData,
+  generateResumePdfController,
   deleteResumeController,
   downloadOriginalResume,
 };

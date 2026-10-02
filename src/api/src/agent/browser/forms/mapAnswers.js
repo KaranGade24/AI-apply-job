@@ -19,64 +19,73 @@ const HIGH_RISK_CATEGORIES = new Set([
  * @returns {{ value: any, source: string }|null}
  */
 const mapDeterministicProfileField = (category, profile = {}, resume = {}) => {
+  const parsedData = resume.parsedData || {};
+  const pInfo = parsedData.personalInfo || {};
   const personal = profile.personal || {};
   const links = profile.links || {};
-  const parsedData = resume.parsedData || {};
 
   switch (category) {
     case 'first_name': {
-      const val = personal.firstName || parsedData.firstName || (profile.name ? profile.name.split(' ')[0] : '');
-      return val ? { value: val, source: 'profile' } : null;
+      const fromResume = pInfo.fullName ? pInfo.fullName.split(' ')[0] : '';
+      const val = fromResume || personal.firstName || parsedData.firstName || (profile.name ? profile.name.split(' ')[0] : '');
+      return val ? { value: val, source: fromResume ? 'resume' : 'profile' } : null;
     }
 
     case 'last_name': {
-      const val = personal.lastName || parsedData.lastName || (profile.name ? profile.name.split(' ').slice(1).join(' ') : '');
-      return val ? { value: val, source: 'profile' } : null;
+      const fromResume = pInfo.fullName ? pInfo.fullName.split(' ').slice(1).join(' ') : '';
+      const val = fromResume || personal.lastName || parsedData.lastName || (profile.name ? profile.name.split(' ').slice(1).join(' ') : '');
+      return val ? { value: val, source: fromResume ? 'resume' : 'profile' } : null;
     }
 
     case 'full_name': {
-      let val = profile.name || '';
-      if (!val && (personal.firstName || personal.lastName)) {
-        val = `${personal.firstName || ''} ${personal.lastName || ''}`.trim();
-      }
-      if (!val) val = parsedData.name || '';
-      return val ? { value: val, source: 'profile' } : null;
+      const val = pInfo.fullName || profile.name || `${personal.firstName || ''} ${personal.lastName || ''}`.trim() || parsedData.name || '';
+      return val ? { value: val, source: pInfo.fullName ? 'resume' : 'profile' } : null;
     }
 
     case 'email': {
-      const val = profile.email || personal.email || parsedData.email || '';
-      return val ? { value: val, source: 'profile' } : null;
+      const val = pInfo.email || profile.email || personal.email || parsedData.email || '';
+      return val ? { value: val, source: pInfo.email ? 'resume' : 'profile' } : null;
     }
 
     case 'phone': {
-      const val = personal.phone || parsedData.phone || '';
-      return val ? { value: val, source: 'profile' } : null;
+      const val = pInfo.phone || personal.phone || parsedData.phone || '';
+      return val ? { value: val, source: pInfo.phone ? 'resume' : 'profile' } : null;
     }
 
     case 'address': {
-      const val = personal.address || parsedData.location || parsedData.address || '';
-      return val ? { value: val, source: 'profile' } : null;
+      const val = pInfo.location || personal.address || parsedData.location || parsedData.address || '';
+      return val ? { value: val, source: pInfo.location ? 'resume' : 'profile' } : null;
     }
 
     case 'linkedin': {
-      const val = links.linkedin || parsedData.linkedin || '';
-      return val ? { value: val, source: 'profile' } : null;
+      const val = pInfo.linkedin || links.linkedin || parsedData.linkedin || '';
+      return val ? { value: val, source: pInfo.linkedin ? 'resume' : 'profile' } : null;
     }
 
     case 'github': {
-      const val = links.github || parsedData.github || '';
-      return val ? { value: val, source: 'profile' } : null;
+      const val = pInfo.github || links.github || parsedData.github || '';
+      return val ? { value: val, source: pInfo.github ? 'resume' : 'profile' } : null;
     }
 
     case 'portfolio': {
-      const val = links.portfolio || parsedData.portfolio || parsedData.website || '';
-      return val ? { value: val, source: 'profile' } : null;
+      const val = pInfo.website || links.portfolio || parsedData.portfolio || parsedData.website || '';
+      return val ? { value: val, source: pInfo.website ? 'resume' : 'profile' } : null;
     }
 
     case 'skills': {
-      const skills = profile.skills || parsedData.skills || [];
+      let resumeSkills = [];
+      if (Array.isArray(parsedData.skills)) {
+        resumeSkills = parsedData.skills;
+      } else if (parsedData.skills && typeof parsedData.skills === 'object') {
+        resumeSkills = [
+          ...(parsedData.skills.technicalSkills || []),
+          ...(parsedData.skills.softSkills || []),
+          ...(parsedData.skills.languages || [])
+        ];
+      }
+      const skills = resumeSkills.length > 0 ? resumeSkills : (profile.skills || []);
       if (Array.isArray(skills) && skills.length > 0) {
-        return { value: skills.join(', '), source: 'profile' };
+        return { value: skills.join(', '), source: resumeSkills.length > 0 ? 'resume' : 'profile' };
       }
       return null;
     }

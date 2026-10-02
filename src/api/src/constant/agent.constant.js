@@ -1,8 +1,13 @@
 /**
  * Agent Constants
  */
-export const MODEL_NAME = "gemini-3.5-flash";
+export const MODEL_NAME = "gemini-2.5-flash";
 export const MODEL_TEMPERATURE = 0.1;
+
+// Dedicated Structured Extraction Model for Resume Parsing
+export const RESUME_PARSER_MODEL_NAME = "gemini-2.5-flash";
+export const RESUME_PARSER_TEMPERATURE = 0.0;
+export const RESUME_PARSER_TIMEOUT_MS = 90000;
 
 export const AI_PROVIDERS = [
   { id: "googleGemini", name: "Google Gemini" },
@@ -207,3 +212,43 @@ export const ACTION_FAILURE_TYPES = Object.freeze({
   BLOCKED: "BLOCKED",
   UNKNOWN: "UNKNOWN",
 });
+
+export const DEEP_DIVE_ACTIONS = Object.freeze({
+  NAVIGATE: "navigate",
+  CLICK: "click",
+  TYPE: "type",
+  SELECT: "select",
+  CHECK: "check",
+  UNCHECK: "uncheck",
+  UPLOAD: "upload",
+  SCROLL: "scroll",
+  WAIT: "wait",
+  PRESS: "press",
+  GOBACK: "goBack",
+  ANSWER_QUESTION: "answerQuestion",
+  SUBMIT: "submit",
+  FINISH: "finish",
+  HUMAN_INTERVENTION: "humanIntervention",
+});
+
+export const HUMAN_INTERVENTION_REASONS = Object.freeze({
+  CAPTCHA: "CAPTCHA",
+  TWO_FACTOR: "TWO_FACTOR",
+  UNKNOWN_AUTH: "UNKNOWN_AUTH",
+  LEGAL_CONSENT: "LEGAL_CONSENT",
+  SENSITIVE_DATA: "SENSITIVE_DATA",
+  UNEXPECTED_PAGE: "UNEXPECTED_PAGE",
+  LOW_CONFIDENCE: "LOW_CONFIDENCE",
+});
+
+export const DISABLED_BUTTON_REASONS = Object.freeze({
+  REQUIRED_FIELD_EMPTY: "REQUIRED_FIELD_EMPTY",
+  TERMS_UNCHECKED: "TERMS_UNCHECKED",
+  LOGIN_REQUIRED: "LOGIN_REQUIRED",
+  LOCATION_UNSELECTED: "LOCATION_UNSELECTED",
+  RESUME_MISSING: "RESUME_MISSING",
+  VALIDATION_ERROR: "VALIDATION_ERROR",
+  PAGE_STILL_LOADING: "PAGE_STILL_LOADING",
+  PERMANENTLY_DISABLED: "PERMANENTLY_DISABLED",
+});
+

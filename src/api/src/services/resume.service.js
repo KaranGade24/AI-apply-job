@@ -1,5 +1,12 @@
 import { runAgent } from '../agent/agent.js';
-import { createResume, findResumesByUserId, findResumeById } from '../repositories/resume.repository.js';
+import {
+  createResume,
+  findResumesByUserId,
+  findResumeById,
+  findResumeByIdAndUserId,
+  deleteResumeByIdAndUserId,
+} from '../repositories/resume.repository.js';
+import { resumeSchema } from '../agent/schema/resumeSchema.js';
 import { appError } from '../utils/errors.js';
 import { ResumeType } from '../model/Resume.js';
 
@@ -22,6 +29,9 @@ export const processAndSaveResume = async ({ userId, filePath, originalFilename 
       throw new appError('AI resume parsing yielded no data', 500);
     }
 
+    // Ensure parsedData strictly adheres to canonical resume schema
+    const validatedData = resumeSchema.parse(parsedData);
+
     // 2. Persist to MongoDB (Upsert ORIGINAL resume)
     const { Resume } = await import('../model/Resume.js');
     let savedResume = await Resume.findOne({ userId, type: ResumeType.ORIGINAL });
@@ -29,7 +39,7 @@ export const processAndSaveResume = async ({ userId, filePath, originalFilename 
     if (savedResume) {
       savedResume.originalFile = originalFilename || filePath;
       savedResume.filePath = filePath;
-      savedResume.parsedData = parsedData;
+      savedResume.parsedData = validatedData;
       savedResume.version = (savedResume.version || 1) + 1;
       await savedResume.save();
     } else {
@@ -37,7 +47,7 @@ export const processAndSaveResume = async ({ userId, filePath, originalFilename 
         userId,
         originalFile: originalFilename || filePath,
         filePath,
-        parsedData,
+        parsedData: validatedData,
         type: ResumeType.ORIGINAL,
         version: 1
       });
@@ -65,13 +75,16 @@ export const getUserResumes = async (userId) => {
 };
 
 /**
- * Get resume details by ID
+ * Get resume details by ID with optional ownership verification
  */
-export const getResumeById = async (resumeId) => {
+export const getResumeById = async (resumeId, userId = null) => {
   try {
-    const resume = await findResumeById(resumeId);
+    const resume = userId
+      ? await findResumeByIdAndUserId(resumeId, userId)
+      : await findResumeById(resumeId);
+
     if (!resume) {
-      throw new appError('Resume not found', 404);
+      throw new appError('Resume not found or access denied', 404);
     }
     return resume;
   } catch (error) {
@@ -80,8 +93,28 @@ export const getResumeById = async (resumeId) => {
   }
 };
 
+/**
+ * Delete resume by ID verifying ownership
+ */
+export const deleteResumeById = async (resumeId, userId) => {
+  try {
+    if (!userId) {
+      throw new appError('User context required to delete resume', 401);
+    }
+    const result = await deleteResumeByIdAndUserId(resumeId, userId);
+    if (!result) {
+      throw new appError('Resume not found or access denied', 404);
+    }
+    return result;
+  } catch (error) {
+    if (error.isOperational) throw error;
+    throw new appError(`Failed to delete resume: ${error.message}`, 500);
+  }
+};
+
 export default {
   processAndSaveResume,
   getUserResumes,
-  getResumeById
+  getResumeById,
+  deleteResumeById,
 };
