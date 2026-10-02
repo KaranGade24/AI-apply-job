@@ -233,3 +233,10 @@ export const getBrowserFrameApi = async (id) => {
   return await fetchWithAuth(`/applications/${id}/agent/browser-frame`);
 };
 
+export const openPortalTabApi = async (id, url) => {
+  return await fetchWithAuth(`/applications/${id}/open-tab`, {
+    method: "POST",
+    body: JSON.stringify({ url }),
+  });
+};
+
