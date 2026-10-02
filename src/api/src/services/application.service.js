@@ -2026,7 +2026,7 @@ export const advanceEmployerPortalActionService = async (applicationId, userId, 
             }
 
             await tailorRoleOutreachService(applicationId, userId, {
-              roleTitle: specificRoleOverride?.title || job.title || "Fullstack Developer - MERN",
+              roleTitle: specificRoleOverride?.title || job.title || "Open Position",
               recipientEmail,
               referenceId: specificRoleOverride?.referenceId || analysis?.matchedRole?.referenceId || "",
             });
