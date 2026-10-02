@@ -1,8 +1,10 @@
 {
+  "name": "ai-apply-job",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "start": "concurrently \"node src/api/server.js\" \"vite\"",
-    "dev": "concurrently \"node src/api/server.js\" \"vite\"",
+    "start": "node src/api/server.js",
+    "dev": "node src/api/server.js",
     "server": "node src/api/server.js",
     "client": "vite",
     "build": "vite build",

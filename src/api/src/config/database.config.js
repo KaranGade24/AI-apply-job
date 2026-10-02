@@ -4,9 +4,10 @@ import { logError } from '../utils/logger.js';
 
 export const connectToDatabase = async () => {
   try {
-    // Set a short timeout so server startup isn't blocked indefinitely if MongoDB is unavailable
+    // Fail fast on queries if MongoDB is disconnected so requests do not hang
+    mongoose.set('bufferCommands', false);
     await mongoose.connect(config.mongoUri, {
-      serverSelectionTimeoutMS: 5000,
+      serverSelectionTimeoutMS: 3000,
     });
     console.log('✅ Successfully connected to MongoDB');
   } catch (error) {
