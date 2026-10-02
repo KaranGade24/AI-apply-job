@@ -2743,6 +2743,12 @@ export const openPortalTabService = async (applicationId, userId, url) => {
     const session = await SessionRegistry.createOrGetSession(appIdStr, userId);
     const context = session.context;
 
+    // Validate URL security against SSRF and private networks
+    const { isUrlSafe } = await import("../browser/urlValidator.js");
+    if (!isUrlSafe(url)) {
+      throw new appError("Navigation to this URL is blocked by security policies (SSRF / private IP protection).", 403);
+    }
+
     // Open new tab (page)
     const page = await context.newPage();
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 }).catch(async () => {

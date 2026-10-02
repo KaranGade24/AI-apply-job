@@ -157,6 +157,10 @@ export const inspectForm = async (page) => {
         const isNavOrHeader = el.closest('header, nav, [class*="navbar" i], [class*="nav" i], [class*="menu" i], [id*="nav" i], [id*="menu" i]');
         if (isNavOrHeader) return;
 
+        const tagName = el.tagName.toLowerCase();
+        const inputType = (el.getAttribute('type') || '').toLowerCase();
+        const autoId = el.getAttribute('data-automation-id') || '';
+
         // Ignore search boxes and listing filter inputs (e.g. "Search job title...")
         const isSearchOrFilter =
           inputType === 'search' ||
@@ -168,9 +172,6 @@ export const inspectForm = async (page) => {
           /search|keyword|filter/i.test(autoId);
         if (isSearchOrFilter) return;
 
-        const tagName = el.tagName.toLowerCase();
-        const inputType = (el.getAttribute('type') || '').toLowerCase();
-        const autoId = el.getAttribute('data-automation-id') || '';
         let detectedType = fieldTypes.TEXT;
 
         if (tagName === 'textarea') {
