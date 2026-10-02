@@ -265,11 +265,11 @@ const getUserResumeNode = async (state) => {
         activeResume = dbResume.parsedData || dbResume;
         sourceResumeId = dbResume._id ? dbResume._id.toString() : state.sourceResumeId;
       } else {
-        // Fallback candidate profile from User model
+        // Fallback candidate profile (never use account username like test1)
         const user = await User.findById(state.userId).catch(() => null);
         activeResume = {
           personalInfo: {
-            fullName: user?.username || "Candidate",
+            fullName: "Candidate",
             email: user?.email || "candidate@example.com",
             phone: "",
           },

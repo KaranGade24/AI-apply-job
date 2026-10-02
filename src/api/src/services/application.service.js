@@ -1670,9 +1670,7 @@ export const previewOrGenerateDraftService = async (userId, payload) => {
           ? `${uProfile.personal.firstName || ''} ${uProfile.personal.lastName || ''}`.trim()
           : uProfile?.fullName && uProfile.fullName !== "Candidate"
             ? uProfile.fullName
-            : uRecord?.username && uRecord.username !== "Candidate"
-              ? uRecord.username
-              : "Candidate";
+            : "Candidate";
 
       if (existing && !forceRegenerate && !payload?.triggerTailor) {
         return {
@@ -1739,7 +1737,7 @@ export const previewOrGenerateDraftService = async (userId, payload) => {
       (parsedData.personalInfo?.fullName && parsedData.personalInfo.fullName !== "Candidate" ? parsedData.personalInfo.fullName : null) ||
       (uProfile?.personal?.firstName || uProfile?.personal?.lastName ? `${uProfile.personal.firstName || ''} ${uProfile.personal.lastName || ''}`.trim() : null) ||
       (uProfile?.fullName && uProfile.fullName !== "Candidate" ? uProfile.fullName : null) ||
-      (uRecord?.username && uRecord.username !== "Candidate" ? uRecord.username : "Candidate");
+      "Candidate";
     const candidateEmail = parsedData.personalInfo?.email || uRecord?.email || "";
     const candidatePhone = parsedData.personalInfo?.phone || uProfile?.personal?.phone || "";
     let candidateSkills = [];

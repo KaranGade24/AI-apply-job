@@ -33,8 +33,8 @@ export const resolveFromProfile = (field, userProfile = {}, user = {}, userSetti
       path = 'userProfile.fullName';
     }
 
-    if (!name && (user?.fullName || user?.name || user?.username)) {
-      name = user.fullName || user.name || user.username || '';
+    if (!name && (user?.fullName || user?.name)) {
+      name = user.fullName || user.name || '';
       path = user.fullName ? 'user.fullName' : 'user.name';
     }
 

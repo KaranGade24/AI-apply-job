@@ -95,28 +95,25 @@ export const tailorResumeForJobDescription = async ({
     const basePersonal = baseResume.personalInfo || baseResume.personal || {};
     const tailoredPersonal = tailored.personalInfo || {};
 
-    // STRICT NAME RESOLUTION: Prioritize original resume data (e.g. "test1")
+    // STRICT NAME RESOLUTION: Prioritize original resume data strictly (NEVER use account username like test1)
     let resolvedFullName = basePersonal.fullName || basePersonal.name;
     
-    // Only if resume name is absolutely generic/missing, we look at the profile
+    // Only if resume name is absolutely generic/missing, we look at user profile (not account username)
     if (!resolvedFullName || resolvedFullName === "Candidate" || resolvedFullName === "Candidate Resume") {
       if (userId) {
-        const { findUserProfileByUserId, findUserById } = await import("../repositories/user.repository.js");
+        const { findUserProfileByUserId } = await import("../repositories/user.repository.js");
         const uProfile = await findUserProfileByUserId(userId).catch(() => null);
-        const uRecord = await findUserById(userId).catch(() => null);
         if (uProfile?.personal?.firstName || uProfile?.personal?.lastName) {
           resolvedFullName = `${uProfile.personal.firstName || ''} ${uProfile.personal.lastName || ''}`.trim();
         } else if (uProfile?.fullName && uProfile.fullName !== "Candidate") {
           resolvedFullName = uProfile.fullName;
-        } else if (uRecord?.username && uRecord.username !== "Candidate") {
-          resolvedFullName = uRecord.username;
         }
       }
     }
     
     // Final fallback
     if (!resolvedFullName || resolvedFullName === "Candidate") {
-        resolvedFullName = tailoredPersonal.fullName || "Candidate";
+        resolvedFullName = tailoredPersonal.fullName || basePersonal.fullName || "Candidate";
     }
 
     tailored.personalInfo = {

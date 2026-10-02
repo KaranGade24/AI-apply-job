@@ -24,22 +24,27 @@ const mapDeterministicProfileField = (category, profile = {}, resume = {}) => {
   const personal = profile.personal || {};
   const links = profile.links || {};
 
+  const isInvalid = (v) => !v || ['candidate', 'candidate resume', 'test1', 'test', 'user'].includes(String(v).toLowerCase());
+
   switch (category) {
     case 'first_name': {
-      const fromResume = pInfo.fullName ? pInfo.fullName.split(' ')[0] : '';
-      const val = fromResume || personal.firstName || parsedData.firstName || (profile.name ? profile.name.split(' ')[0] : '');
-      return val ? { value: val, source: fromResume ? 'resume' : 'profile' } : null;
+      const resumeName = pInfo.fullName || pInfo.name || parsedData.fullName || parsedData.name || '';
+      const fromResume = !isInvalid(resumeName) ? resumeName.split(' ')[0] : (parsedData.firstName || '');
+      const val = !isInvalid(fromResume) ? fromResume : (!isInvalid(personal.firstName) ? personal.firstName : '');
+      return val ? { value: val, source: 'resume' } : null;
     }
 
     case 'last_name': {
-      const fromResume = pInfo.fullName ? pInfo.fullName.split(' ').slice(1).join(' ') : '';
-      const val = fromResume || personal.lastName || parsedData.lastName || (profile.name ? profile.name.split(' ').slice(1).join(' ') : '');
-      return val ? { value: val, source: fromResume ? 'resume' : 'profile' } : null;
+      const resumeName = pInfo.fullName || pInfo.name || parsedData.fullName || parsedData.name || '';
+      const fromResume = !isInvalid(resumeName) ? resumeName.split(' ').slice(1).join(' ') : (parsedData.lastName || '');
+      const val = !isInvalid(fromResume) ? fromResume : (!isInvalid(personal.lastName) ? personal.lastName : '');
+      return val ? { value: val, source: 'resume' } : null;
     }
 
     case 'full_name': {
-      const val = pInfo.fullName || profile.name || `${personal.firstName || ''} ${personal.lastName || ''}`.trim() || parsedData.name || '';
-      return val ? { value: val, source: pInfo.fullName ? 'resume' : 'profile' } : null;
+      const resumeName = pInfo.fullName || pInfo.name || parsedData.fullName || parsedData.name || '';
+      const val = !isInvalid(resumeName) ? resumeName : (!isInvalid(parsedData.name) ? parsedData.name : '');
+      return val ? { value: val, source: 'resume' } : null;
     }
 
     case 'email': {

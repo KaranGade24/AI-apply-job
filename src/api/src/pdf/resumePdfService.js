@@ -73,8 +73,6 @@ export const generateResumePdf = async ({ resumeData, template = "ATS Modern", f
             personalInfo.fullName = `${profilePersonal.firstName || ''} ${profilePersonal.lastName || ''}`.trim();
           } else if (userProfile?.fullName && userProfile.fullName !== "Candidate") {
             personalInfo.fullName = userProfile.fullName;
-          } else if (userRecord?.username && userRecord.username !== "Candidate") {
-            personalInfo.fullName = userRecord.username;
           }
         }
 

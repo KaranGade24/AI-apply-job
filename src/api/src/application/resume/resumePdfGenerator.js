@@ -123,13 +123,11 @@ export const ensureEffectiveResumePdfOnDisk = async ({
         const uProfile = await findUserProfileByUserId(userId).catch(() => null);
         const uRecord = await findUserById(userId).catch(() => null);
         
-        // Priority: Profile names -> Username -> Default
+        // Priority: Profile names -> Default (never account username like test1)
         if (uProfile?.personal?.firstName || uProfile?.personal?.lastName) {
           candidateName = `${uProfile.personal.firstName || ''} ${uProfile.personal.lastName || ''}`.trim();
         } else if (uProfile?.fullName && uProfile.fullName !== 'Candidate') {
           candidateName = uProfile.fullName;
-        } else if (uRecord?.username && uRecord.username !== 'Candidate') {
-          candidateName = uRecord.username;
         }
         candidateEmail = uRecord?.email || uProfile?.email || '';
         candidatePhone = uProfile?.personal?.phone || '';
