@@ -731,6 +731,16 @@ export const cancelWorkflow = async (applicationId, userId) => {
   };
 };
 
+/**
+ * Stops any active background agent execution without closing the browser session
+ * @param {string} applicationId 
+ */
+export const stopAgentWorkflowOnly = (applicationId) => {
+  const appIdStr = String(applicationId);
+  activeRunners.delete(appIdStr);
+  SessionRegistry.clearHumanResponseTimer(appIdStr);
+};
+
 export default {
   startApplicationWorkflow,
   getWorkflowStatus,
@@ -741,4 +751,5 @@ export default {
   updateWorkflowReviewEdits,
   confirmWorkflowReview,
   cancelWorkflow,
+  stopAgentWorkflowOnly,
 };

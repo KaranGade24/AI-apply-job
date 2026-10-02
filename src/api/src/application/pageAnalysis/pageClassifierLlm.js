@@ -341,7 +341,8 @@ Return STRICT JSON ONLY:
 }`;
 
       const res = await model.invoke(openingsPrompt);
-      const content = (res.content || '').trim().replace(/^```json/i, '').replace(/^```/, '').replace(/```$/, '').trim();
+      const rawContent = res && res.content ? (typeof res.content === 'string' ? res.content : Array.isArray(res.content) ? res.content.map(p => p.text || '').join('') : JSON.stringify(res.content)) : '';
+      const content = (rawContent || '').trim().replace(/^```json/i, '').replace(/^```/, '').replace(/```$/, '').trim();
       const parsed = JSON.parse(content);
       if (Array.isArray(parsed.openings) && parsed.openings.length > 0) {
         finalOpeningsList = parsed.openings;

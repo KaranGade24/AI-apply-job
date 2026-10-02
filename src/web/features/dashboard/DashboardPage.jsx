@@ -17,15 +17,21 @@ import {
   ShieldCheck,
   AlertTriangle,
   RefreshCw,
-  ThumbsUp
+  ThumbsUp,
+  Mail,
+  Phone,
+  Compass,
+  Terminal,
+  ChevronRight
 } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
-import { getApplicationsApi } from '../../services/applicationService';
+import { getApplicationsApi, openPortalTabApi } from '../../services/applicationService';
 import { openProtectedFile } from '../../services/api';
 import { getDiscoveredJobsApi, deleteJobApi } from '../../services/jobService';
 import { useNaukri } from '../../context/NaukriContext';
+import { ApplicationReviewModal } from '../applications/ApplicationReviewModal';
 
 export const DashboardPage = () => {
   const { user } = useAuth();
@@ -39,6 +45,8 @@ export const DashboardPage = () => {
     successRate: '0.0%',
   });
 
+  const [applications, setApplications] = useState([]);
+  const [selectedApp, setSelectedApp] = useState(null);
   const [matchedJobs, setMatchedJobs] = useState([]);
   const [approvedJobs, setApprovedJobs] = useState(new Set());
   const [activities, setActivities] = useState([]);
@@ -58,6 +66,7 @@ export const DashboardPage = () => {
     ])
       .then(([appsRes, jobsRes]) => {
         const apps = appsRes.data || [];
+        setApplications(apps);
         const jobs = jobsRes.data || [];
         const interviews = apps.filter((a) => a.status === 'Interview').length;
         const totalSent = apps.length;
@@ -140,6 +149,42 @@ export const DashboardPage = () => {
   const isNaukriConnected = naukriStatus?.connected || naukriStatus?.status === 'connected';
   const isNaukriExpired = naukriStatus?.status === 'authenticationRequired';
 
+  // Identify active or most recently updated application
+  const activeApp = applications.find(
+    (a) =>
+      a.status &&
+      [
+        'processing',
+        'applying',
+        'analyzing_portal',
+        'session_loading',
+        'opening_job',
+        'apply_button_detected',
+        'form_detected',
+        'inspecting_form',
+        'resolving_answers',
+        'filling_form',
+        'waiting_for_user',
+        'waiting_for_confirmation',
+        'waiting_for_final_review',
+        'google_form_filling',
+        'google_login_required'
+      ].includes(a.status)
+  ) || applications[0];
+
+  const handleOpenGoogleFormTab = async (appId, url) => {
+    try {
+      showToast("Opening Google Form in active browser tab...");
+      const res = await openPortalTabApi(appId, url);
+      if (res?.data) {
+        showToast("Tab opened successfully! Switched to Google Form filling.", "success");
+        loadData();
+      }
+    } catch (err) {
+      showToast("Failed to open tab: " + (err.message || "Please retry"));
+    }
+  };
+
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-12">
       {/* Toast Notification */}
@@ -218,6 +263,232 @@ export const DashboardPage = () => {
           </div>
         </div>
       </Card>
+
+      {/* Active Application Live Control Center */}
+      {activeApp && (
+        <Card className="p-5 sm:p-6 border-indigo-100 bg-linear-to-br from-indigo-50/10 via-white to-slate-50 shadow-md">
+          <div className="flex flex-col gap-5">
+            {/* Header */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="relative flex h-3 w-3">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+                </div>
+                <div>
+                  <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                    <Terminal className="w-4 h-4 text-indigo-600" />
+                    Live AI Application Control Center
+                  </h2>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Real-time execution state & discovered recruiters/forms.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="px-2.5 py-1 bg-slate-100 border border-slate-200 text-slate-700 rounded-lg text-xs font-bold font-mono">
+                  Method: {activeApp.applicationMethod?.toUpperCase() || 'CAREER PORTAL'}
+                </span>
+                <span className={`px-2.5 py-1 rounded-lg text-xs font-bold ${
+                  ['processing', 'applying', 'analyzing_portal', 'google_form_filling'].includes(activeApp.status)
+                    ? 'bg-blue-100 text-blue-800 animate-pulse border border-blue-200'
+                    : ['waiting_for_user', 'waiting_for_confirmation', 'waiting_for_final_review'].includes(activeApp.status)
+                    ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                    : activeApp.status === 'Applied' || activeApp.status === 'sent' || activeApp.status === 'Applied'
+                    ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                    : 'bg-slate-100 text-slate-700 border border-slate-200'
+                }`}>
+                  Status: {activeApp.status?.toUpperCase() || 'PENDING'}
+                </span>
+              </div>
+            </div>
+
+            {/* Application and Job Information */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+              <div className="md:col-span-1 border-r border-slate-100 pr-4 space-y-2">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">
+                  Active Application Target
+                </span>
+                <h3 className="text-xs font-bold text-slate-900 leading-snug">
+                  {activeApp.jobTitle || activeApp.jobId?.title || 'Position'}
+                </h3>
+                <p className="text-xs font-semibold text-slate-600 flex items-center gap-1.5">
+                  <Building2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                  {activeApp.company || activeApp.jobId?.company || 'Company'}
+                </p>
+                <div className="flex items-center gap-2 text-slate-500 text-[11px] mt-1">
+                  <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                  <span>{activeApp.location || activeApp.jobId?.location || 'India'}</span>
+                </div>
+              </div>
+
+              {/* Real-time Discovered Application Methods Grid */}
+              <div className="md:col-span-2 space-y-3">
+                <span className="text-[10px] font-black text-indigo-500 uppercase tracking-wider block">
+                  🕵️ Real-Time Page Analysis: Discovered Methods
+                </span>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  {/* Recruiter Email Badge */}
+                  <div className={`p-2.5 rounded-xl border flex items-center justify-between gap-2 ${
+                    activeApp.pageAnalysis?.detectedEmails?.length > 0
+                      ? 'bg-emerald-50/40 border-emerald-200'
+                      : 'bg-slate-50/50 border-slate-100'
+                  }`}>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+                        activeApp.pageAnalysis?.detectedEmails?.length > 0
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : 'bg-slate-100 text-slate-400'
+                      }`}>
+                        <Mail className="w-4 h-4" />
+                      </div>
+                      <div className="min-w-0">
+                        <span className="text-[10px] font-bold text-slate-500 block leading-none">Recruiter Email</span>
+                        <span className="text-xs font-bold truncate block mt-0.5">
+                          {activeApp.pageAnalysis?.detectedEmails?.length > 0 
+                            ? activeApp.pageAnalysis.detectedEmails[0] 
+                            : 'Not found'
+                          }
+                        </span>
+                      </div>
+                    </div>
+                    {activeApp.pageAnalysis?.detectedEmails?.length > 0 && (
+                      <span className="px-1.5 py-0.5 bg-emerald-100 text-emerald-800 text-[9px] font-bold rounded-md">
+                        FOUND
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Recruiter Phone Badge */}
+                  <div className={`p-2.5 rounded-xl border flex items-center justify-between gap-2 ${
+                    activeApp.pageAnalysis?.detectedPhones?.length > 0
+                      ? 'bg-emerald-50/40 border-emerald-200'
+                      : 'bg-slate-50/50 border-slate-100'
+                  }`}>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+                        activeApp.pageAnalysis?.detectedPhones?.length > 0
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : 'bg-slate-100 text-slate-400'
+                      }`}>
+                        <Phone className="w-4 h-4" />
+                      </div>
+                      <div className="min-w-0">
+                        <span className="text-[10px] font-bold text-slate-500 block leading-none">Direct Phone</span>
+                        <span className="text-xs font-bold truncate block mt-0.5">
+                          {activeApp.pageAnalysis?.detectedPhones?.length > 0 
+                            ? activeApp.pageAnalysis.detectedPhones[0] 
+                            : 'Not found'
+                          }
+                        </span>
+                      </div>
+                    </div>
+                    {activeApp.pageAnalysis?.detectedPhones?.length > 0 && (
+                      <span className="px-1.5 py-0.5 bg-emerald-100 text-emerald-800 text-[9px] font-bold rounded-md">
+                        FOUND
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Google Form Badge */}
+                  <div className={`p-2.5 rounded-xl border flex items-center justify-between gap-2 ${
+                    activeApp.pageAnalysis?.detectedGoogleForms?.length > 0
+                      ? 'bg-purple-50/50 border-purple-200'
+                      : 'bg-slate-50/50 border-slate-100'
+                  }`}>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+                        activeApp.pageAnalysis?.detectedGoogleForms?.length > 0
+                          ? 'bg-purple-100 text-purple-800'
+                          : 'bg-slate-100 text-slate-400'
+                      }`}>
+                        <Compass className="w-4 h-4" />
+                      </div>
+                      <div className="min-w-0">
+                        <span className="text-[10px] font-bold text-slate-500 block leading-none">Google Form</span>
+                        <span className="text-xs font-bold truncate block mt-0.5">
+                          {activeApp.pageAnalysis?.detectedGoogleForms?.length > 0 
+                            ? 'Google Form Link' 
+                            : 'Not found'
+                          }
+                        </span>
+                      </div>
+                    </div>
+                    {activeApp.pageAnalysis?.detectedGoogleForms?.length > 0 && (
+                      <span className="px-1.5 py-0.5 bg-purple-100 text-purple-800 text-[9px] font-bold rounded-md">
+                        FOUND
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Careers Portal Form Badge */}
+                  <div className={`p-2.5 rounded-xl border flex items-center justify-between gap-2 ${
+                    activeApp.form?.fields?.length > 0 || activeApp.status === 'form_detected'
+                      ? 'bg-blue-50/50 border-blue-200'
+                      : 'bg-slate-50/50 border-slate-100'
+                  }`}>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+                        activeApp.form?.fields?.length > 0 || activeApp.status === 'form_detected'
+                          ? 'bg-blue-100 text-blue-800'
+                          : 'bg-slate-100 text-slate-400'
+                      }`}>
+                        <Building2 className="w-4 h-4" />
+                      </div>
+                      <div className="min-w-0">
+                        <span className="text-[10px] font-bold text-slate-500 block leading-none">Portal Form</span>
+                        <span className="text-xs font-bold truncate block mt-0.5">
+                          {activeApp.form?.fields?.length > 0 
+                            ? `${activeApp.form.fields.length} fields detected` 
+                            : 'Not loaded'
+                          }
+                        </span>
+                      </div>
+                    </div>
+                    {(activeApp.form?.fields?.length > 0 || activeApp.status === 'form_detected') && (
+                      <span className="px-1.5 py-0.5 bg-blue-100 text-blue-800 text-[9px] font-bold rounded-md">
+                        ACTIVE
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Quick Actions Panel */}
+            <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3">
+              <p className="text-xs text-slate-500 font-semibold flex items-center gap-1.5">
+                <ShieldCheck className="w-3.5 h-3.5 text-indigo-500" />
+                Select any detected method above or open Live Review Modal to customize and submit your application.
+              </p>
+
+              <div className="flex flex-wrap items-center gap-2">
+                {activeApp.pageAnalysis?.detectedGoogleForms?.length > 0 && (
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    onClick={() => handleOpenGoogleFormTab(activeApp._id, activeApp.pageAnalysis.detectedGoogleForms[0])}
+                    className="border-purple-300 text-purple-700 hover:bg-purple-50 font-bold text-xs"
+                  >
+                    🚀 Open Google Form Tab
+                  </Button>
+                )}
+
+                <Button
+                  size="xs"
+                  onClick={() => setSelectedApp(activeApp)}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs gap-1 cursor-pointer shadow-xs"
+                >
+                  <span>Review Answers & Explore ⚡</span>
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </Button>
+              </div>
+            </div>
+          </div>
+        </Card>
+      )}
 
       {/* 4 Grid Metric Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -489,6 +760,19 @@ export const DashboardPage = () => {
           )}
         </div>
       </Card>
+      
+      {selectedApp && (
+        <ApplicationReviewModal
+          application={selectedApp}
+          onClose={() => {
+            setSelectedApp(null);
+            loadData();
+          }}
+          onApplicationUpdated={() => {
+            loadData();
+          }}
+        />
+      )}
     </div>
   );
 };

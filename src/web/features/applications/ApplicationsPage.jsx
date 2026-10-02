@@ -436,10 +436,35 @@ export const ApplicationsPage = () => {
                       <td className="py-4 px-6 text-slate-700 font-medium">{company}</td>
 
                       {/* Channel / Method */}
-                      <td className="py-4 px-6">
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold bg-slate-100 text-slate-700 capitalize border border-slate-200">
-                          {method}
-                        </span>
+                      <td className="py-4 px-6" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex flex-col gap-1.5">
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold bg-blue-50 text-blue-700 capitalize border border-blue-200 w-fit">
+                            Active: {method}
+                          </span>
+                          {/* Real-time detected channels */}
+                          <div className="flex items-center gap-2">
+                            {app.pageAnalysis?.detectedEmails?.length > 0 && (
+                              <span className="text-xs inline-flex items-center" title={`Recruiter emails detected: ${app.pageAnalysis.detectedEmails.join(', ')}`}>
+                                ✉️ <span className="text-[9px] text-slate-400 ml-0.5 font-bold">Email</span>
+                              </span>
+                            )}
+                            {app.pageAnalysis?.detectedGoogleForms?.length > 0 && (
+                              <span className="text-xs inline-flex items-center" title={`${app.pageAnalysis.detectedGoogleForms.length} Google Form(s) detected`}>
+                                📝 <span className="text-[9px] text-slate-400 ml-0.5 font-bold">Forms</span>
+                              </span>
+                            )}
+                            {app.pageAnalysis?.detectedPhones?.length > 0 && (
+                              <span className="text-xs inline-flex items-center" title={`${app.pageAnalysis.detectedPhones.length} Phone contacts detected`}>
+                                📞 <span className="text-[9px] text-slate-400 ml-0.5 font-bold">Phone</span>
+                              </span>
+                            )}
+                            {((app.jobId?.applicationUrl || app.sourceUrl) && !app.jobId?.applicationUrl?.includes('naukri.com')) && (
+                              <span className="text-xs inline-flex items-center" title="Company site portal detected">
+                                🌐 <span className="text-[9px] text-slate-400 ml-0.5 font-bold">Portal</span>
+                              </span>
+                            )}
+                          </div>
+                        </div>
                       </td>
 
                       {/* Applied Date */}

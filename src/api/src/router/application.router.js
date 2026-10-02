@@ -557,4 +557,10 @@ applicationRouter.get(
   applicationController.downloadPdf,
 );
 
+applicationRouter.post(
+  "/:id/open-tab",
+  authMiddleware,
+  applicationController.openTab,
+);
+
 export default applicationRouter;

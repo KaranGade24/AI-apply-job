@@ -1785,6 +1785,49 @@ export const ApplicationReviewModal = ({
     }
   };
 
+  // Dynamically switch active application method and save in database
+  const handleSwitchMethod = async (newMethod) => {
+    if (!application?._id) {
+      showToast(`Method updated to ${newMethod}`);
+      return;
+    }
+    setActionLoading(true);
+    try {
+      showToast(`Switching method to ${newMethod}...`);
+      const res = await updateApplicationStatusApi(application._id, application.status, {
+        applicationMethod: newMethod
+      });
+      if (res?.data) {
+        setApplication(res.data);
+        showToast(`Application method successfully switched to ${newMethod}!`);
+      }
+      if (onApplicationUpdated) onApplicationUpdated();
+    } catch (err) {
+      showToast("Error switching method: " + (err.message || "Please retry"));
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // Open a Google Form or custom portal link in new browser tab
+  const handleOpenTabInBrowser = async (url) => {
+    if (!application?._id) return;
+    setActionLoading(true);
+    try {
+      showToast("Opening URL in active browser session...");
+      const res = await openPortalTabApi(application._id, url);
+      if (res?.data) {
+        setApplication(res.data);
+        showToast("Tab opened successfully! Switched to Form Filling.", "success");
+      }
+      if (onApplicationUpdated) onApplicationUpdated();
+    } catch (err) {
+      showToast("Failed to open tab: " + (err.message || "Please retry"));
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   const getCompanyInitial = (name) =>
     name ? name.charAt(0).toUpperCase() : "C";
 
@@ -2191,6 +2234,77 @@ export const ApplicationReviewModal = ({
                     </div>
                   </div>
 
+                  {/* Real-time Method Selection Bar */}
+                  {application?._id && (
+                    <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 space-y-2.5">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div>
+                          <span className="text-xs font-bold text-slate-800 uppercase tracking-wider block">
+                            Select Application Method
+                          </span>
+                          <p className="text-[11px] text-slate-500 mt-0.5">
+                            Change how you want to apply. Switching to Email drafts an outreach draft instantly; switching to Google Form or Portal runs the browser automation.
+                          </p>
+                        </div>
+                        <span className="px-2 py-0.5 bg-blue-100 text-blue-800 border border-blue-200 rounded font-semibold text-[10px] w-fit">
+                          Active Method: {detectedMethod?.toUpperCase()}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 p-1 bg-slate-100 rounded-lg">
+                        <button
+                          type="button"
+                          onClick={() => handleSwitchMethod("unknown")}
+                          className={`px-3 py-2 text-xs font-bold rounded-md transition-colors cursor-pointer text-center ${
+                            detectedMethod === "unknown" || detectedMethod === "company_site"
+                              ? "bg-white text-blue-600 shadow-xs"
+                              : "text-slate-600 hover:text-slate-900"
+                          }`}
+                        >
+                          🌐 Portal Form
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleSwitchMethod("email")}
+                          className={`px-3 py-2 text-xs font-bold rounded-md transition-colors cursor-pointer text-center ${
+                            detectedMethod === "email"
+                              ? "bg-white text-blue-600 shadow-xs"
+                              : "text-slate-600 hover:text-slate-900"
+                          }`}
+                        >
+                          ✉️ Direct Email
+                        </button>
+
+                        <button
+                          type="button"
+                          disabled={!application?.pageAnalysis?.detectedGoogleForms?.length && detectedMethod !== "googleForm"}
+                          onClick={() => handleSwitchMethod("googleForm")}
+                          className={`px-3 py-2 text-xs font-bold rounded-md transition-colors cursor-pointer text-center flex items-center justify-center gap-1 ${
+                            detectedMethod === "googleForm"
+                              ? "bg-white text-blue-600 shadow-xs"
+                              : "text-slate-600 hover:text-slate-900"
+                          } ${(!application?.pageAnalysis?.detectedGoogleForms?.length && detectedMethod !== "googleForm") ? "opacity-50 cursor-not-allowed" : ""}`}
+                          title={(!application?.pageAnalysis?.detectedGoogleForms?.length && detectedMethod !== "googleForm") ? "Google Form link not yet detected on page" : "Apply via Google Form link"}
+                        >
+                          📝 Google Form
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleSwitchMethod("phone")}
+                          className={`px-3 py-2 text-xs font-bold rounded-md transition-colors cursor-pointer text-center ${
+                            detectedMethod === "phone"
+                              ? "bg-white text-blue-600 shadow-xs"
+                              : "text-slate-600 hover:text-slate-900"
+                          }`}
+                        >
+                          📞 Phone Script
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
                   {/* 1. NAUKRI 1-CLICK APPLY CHANNEL */}
                   {isNaukriDirect && (
                     <div className="space-y-4">
@@ -2392,6 +2506,51 @@ export const ApplicationReviewModal = ({
 
                       {/* Checkpoint 1 & 2 Interactive Forms for Company Site (Workday / ATS) */}
                       {renderFormCheckpoints()}
+
+                      {/* Prominent Direct Email Option Banner if Recruiter Mail is Detected */}
+                      {!isAppliedState && (application.pageAnalysis?.detectedEmails?.length > 0 || application.pageAnalysis?.emailContact?.email) && (
+                        <div className="p-4 rounded-xl border border-blue-300 bg-linear-to-r from-blue-50/80 to-indigo-50/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm">
+                          <div className="flex items-start gap-3 min-w-0">
+                            <div className="w-10 h-10 rounded-xl bg-white border border-blue-200 flex items-center justify-center shrink-0 shadow-2xs mt-0.5">
+                              <Mail className="w-5 h-5 text-blue-600" />
+                            </div>
+                            <div>
+                              <h4 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                                Recruiter Contact Email Discovered! ✉️
+                              </h4>
+                              <p className="text-[11px] text-slate-600 leading-relaxed mt-0.5">
+                                Skip filling the website form and instead directly send a tailored recruiter email with your tailored ATS resume attached.
+                              </p>
+                              <div className="flex flex-wrap gap-1.5 mt-1.5">
+                                {Array.from(new Set([
+                                  application.pageAnalysis?.emailContact?.email,
+                                  ...(application.pageAnalysis?.detectedEmails || [])
+                                ].filter(Boolean))).map((email, i) => (
+                                  <span key={i} className="font-mono bg-white text-indigo-700 px-2 py-0.5 rounded border border-blue-200 font-bold text-[10px]">
+                                    {email}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                          
+                          <Button
+                            size="xs"
+                            onClick={() => {
+                              const targetEmail = application.pageAnalysis?.emailContact?.email || application.pageAnalysis?.detectedEmails?.[0];
+                              handleTailorRoleOutreach({
+                                title: job.title || "Software Developer",
+                                email: targetEmail,
+                                descriptionSnippet: job.description || job.title,
+                              });
+                            }}
+                            className="bg-blue-600 hover:bg-blue-700 text-white font-bold gap-1.5 shrink-0 shadow-2xs cursor-pointer text-xs"
+                          >
+                            <Sparkles className="w-3.5 h-3.5" />
+                            <span>Tailor & Draft Email Instead ⚡</span>
+                          </Button>
+                        </div>
+                      )}
 
                       {/* AI Page & Portal Intelligence Card */}
                       {!isAppliedState && (
@@ -2932,15 +3091,30 @@ export const ApplicationReviewModal = ({
                                   <div>
                                     <span className="font-bold text-slate-500 block mb-1">Detected Contact Emails</span>
                                     {application.pageAnalysis?.detectedEmails?.length > 0 ? (
-                                      <div className="flex flex-wrap gap-1.5">
+                                      <div className="flex flex-wrap gap-2">
                                         {application.pageAnalysis.detectedEmails.map((email, idx) => (
-                                          <a
-                                            key={idx}
-                                            href={`mailto:${email}`}
-                                            className="font-mono bg-white hover:bg-indigo-50 px-2 py-0.5 rounded-md border border-slate-200 text-indigo-700 transition-colors inline-block"
-                                          >
-                                            {email}
-                                          </a>
+                                          <div key={idx} className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-lg p-1 shadow-2xs">
+                                            <a
+                                              href={`mailto:${email}`}
+                                              className="font-mono text-indigo-700 hover:text-indigo-950 font-bold px-1"
+                                            >
+                                              {email}
+                                            </a>
+                                            <button
+                                              type="button"
+                                              onClick={() =>
+                                                handleTailorRoleOutreach({
+                                                  title: job.title || "Software Developer",
+                                                  email: email,
+                                                  descriptionSnippet: job.description || job.title,
+                                                })
+                                              }
+                                              className="px-2 py-0.5 text-[9px] font-bold bg-indigo-600 hover:bg-indigo-700 text-white rounded transition-colors cursor-pointer"
+                                              title="Draft application email with tailored resume PDF"
+                                            >
+                                              Draft Email ✉️
+                                            </button>
+                                          </div>
                                         ))}
                                       </div>
                                     ) : (
@@ -2972,18 +3146,27 @@ export const ApplicationReviewModal = ({
                                   <div className="md:col-span-2">
                                     <span className="font-bold text-slate-500 block mb-1">Detected Google / External Forms</span>
                                     {application.pageAnalysis?.detectedGoogleForms?.length > 0 ? (
-                                      <div className="space-y-1">
+                                      <div className="space-y-2">
                                         {application.pageAnalysis.detectedGoogleForms.map((url, idx) => (
-                                          <a
-                                            key={idx}
-                                            href={url}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="font-mono text-purple-700 hover:text-purple-900 bg-white hover:bg-purple-50 px-2 py-1 rounded-md border border-slate-200 block truncate transition-colors"
-                                            title={url}
-                                          >
-                                            🔗 {url}
-                                          </a>
+                                          <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-2 bg-white rounded-lg border border-slate-200">
+                                            <a
+                                              href={url}
+                                              target="_blank"
+                                              rel="noopener noreferrer"
+                                              className="font-mono text-xs text-purple-700 hover:text-purple-900 truncate max-w-[280px] sm:max-w-[450px]"
+                                              title={url}
+                                            >
+                                              🔗 {url}
+                                            </a>
+                                            <button
+                                              type="button"
+                                              onClick={() => handleOpenTabInBrowser(url)}
+                                              className="px-2.5 py-1 text-[10px] font-black bg-purple-600 hover:bg-purple-700 text-white rounded-md shadow-2xs transition-colors shrink-0 cursor-pointer text-center"
+                                              title="Stop current agent process and open Google Form in new browser tab to apply"
+                                            >
+                                              Apply in Browser Tab ⚡
+                                            </button>
+                                          </div>
                                         ))}
                                       </div>
                                     ) : (

@@ -191,3 +191,10 @@ export const cancelAgentWorkflowApi = async (id) => {
     method: "POST",
   });
 };
+
+export const openPortalTabApi = async (id, url) => {
+  return await fetchWithAuth(`/applications/${id}/open-tab`, {
+    method: "POST",
+    body: JSON.stringify({ url }),
+  });
+};

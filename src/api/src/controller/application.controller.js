@@ -75,7 +75,7 @@ export const createApplicationDirect = async (req, res, next) => {
 export const updateStatusDirect = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { status, triggerTailor } = req.body || {};
+    const { status, triggerTailor, applicationMethod } = req.body || {};
     const userId = req.user?.userId;
 
     if (triggerTailor || status === "waiting_for_review") {
@@ -95,7 +95,7 @@ export const updateStatusDirect = async (req, res, next) => {
     }
 
     const updated =
-      await applicationService.updateApplicationStatusDirectService(userId, id, status);
+      await applicationService.updateApplicationStatusDirectService(userId, id, status, applicationMethod);
     return res.status(200).json({
       success: true,
       message: "Application status updated successfully",
@@ -646,6 +646,31 @@ export const deleteApplication = async (req, res, next) => {
     return res.status(200).json({
       success: true,
       message: "Application deleted successfully",
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Stop agent workflow and open a custom tab (such as a Google Form)
+ */
+export const openTab = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { url } = req.body || {};
+    const userId = req.user?.userId;
+
+    if (!url) {
+      throw new appError("Target URL is required to open tab", 400);
+    }
+
+    const updated = await applicationService.openPortalTabService(id, userId, url);
+
+    return res.status(200).json({
+      success: true,
+      message: "Tab successfully opened in browser session",
+      data: updated,
     });
   } catch (error) {
     next(error);

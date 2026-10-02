@@ -1513,7 +1513,7 @@ export const tailorApplicationService = async (userId, applicationId) => {
 /**
  * Directly updates application status
  */
-export const updateApplicationStatusDirectService = async (userId, id, status) => {
+export const updateApplicationStatusDirectService = async (userId, id, status, applicationMethod = null) => {
   try {
     const app = await getApplicationById(id, userId);
     if (!app) {
@@ -1555,7 +1555,12 @@ export const updateApplicationStatusDirectService = async (userId, id, status) =
       );
     }
 
-    return await updateApplicationStatus(id, status, { logMessage: `Status manually updated to ${status}` });
+    const extraData = { logMessage: `Status manually updated to ${status}` };
+    if (applicationMethod) {
+      extraData.applicationMethod = applicationMethod;
+    }
+
+    return await updateApplicationStatus(id, status, extraData);
   } catch (error) {
     await logError("applicationService.updateApplicationStatusDirectService", error.message);
     throw error;
@@ -2054,6 +2059,40 @@ export const advanceEmployerPortalActionService = async (applicationId, userId, 
       const extracted = await extractPageContent(activePage);
       const analysis = await classifyPageWithLlm(extracted, job, userId);
       lastAnalysis = analysis;
+
+      // Automatically pre-tailor the resume & PDF for the best matched role at the very start of processing
+      if (analysis.matchedRole?.title) {
+        const currentTailoredTitle = application.resume?.tailoredResumeData?.personalInfo?.title || application.resume?.tailoredResumeData?.summary;
+        const isAlreadyTailored = currentTailoredTitle && currentTailoredTitle.toLowerCase().includes(analysis.matchedRole.title.toLowerCase());
+        
+        if (!isAlreadyTailored) {
+          await logJobEvent(
+            "advanceEmployerPortalActionService",
+            "AUTO_TAILOR_START",
+            `Pre-tailoring resume & PDF for best matched role: "${analysis.matchedRole.title}"...`
+          ).catch(() => {});
+          try {
+            const tailorResult = await tailorRoleOutreachService(applicationId, userId, {
+              roleTitle: analysis.matchedRole.title,
+              referenceId: analysis.matchedRole.referenceId,
+              experience: analysis.matchedRole.experience,
+              location: analysis.matchedRole.location,
+              recipientEmail: analysis.emailContact?.email,
+            });
+            if (tailorResult && tailorResult.resume) {
+              application.resume = tailorResult.resume;
+              application.email = tailorResult.email;
+              await logJobEvent(
+                "advanceEmployerPortalActionService",
+                "AUTO_TAILOR_SUCCESS",
+                `Successfully pre-tailored resume & PDF for "${analysis.matchedRole.title}". Ready for auto-fill.`
+              ).catch(() => {});
+            }
+          } catch (tailorErr) {
+            await logError("advanceEmployerPortalActionService.autoTailor", `Auto-tailoring failed (falling back to base resume): ${tailorErr.message}`);
+          }
+        }
+      }
 
       await logJobEvent(
         "advanceEmployerPortalActionService",
@@ -2598,6 +2637,59 @@ export const retryGoogleFormApplicationService = async (applicationId, userId) =
     };
   } catch (error) {
     await logError('applicationService.retryGoogleFormApplicationService', error.message);
+    throw error;
+  }
+};
+
+/**
+ * Opens a new URL/tab (such as a Google Form) in the active browser session,
+ * stopping any active background agent execution without closing the browser session.
+ */
+export const openPortalTabService = async (applicationId, userId, url) => {
+  try {
+    const appIdStr = String(applicationId);
+    const application = await getApplicationById(applicationId, userId);
+    if (!application) {
+      throw new appError("Application not found", 404);
+    }
+
+    await logJobEvent(
+      'openPortalTabService',
+      'OPEN_TAB_START',
+      `Stopping background agent and opening URL in new tab: ${url}`
+    );
+
+    // Stop background agent workflow if active
+    const { stopAgentWorkflowOnly } = await import("./agentRunner.service.js");
+    stopAgentWorkflowOnly(applicationId);
+
+    // Get or create browser session
+    const session = await SessionRegistry.createOrGetSession(appIdStr, userId);
+    const context = session.context;
+
+    // Open new tab (page)
+    const page = await context.newPage();
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 }).catch(async () => {
+      await page.evaluate(() => window.stop()).catch(() => {});
+    });
+
+    // Save active page state & set applicationMethod to googleForm (if google form) or company_site
+    const isGf = url.includes("docs.google.com/forms") || url.includes("forms.gle");
+    const method = isGf ? "googleForm" : "unknown";
+
+    await JobApplication.findByIdAndUpdate(applicationId, {
+      applicationMethod: method,
+      "workflow.agentState.currentPage.url": url,
+      "workflow.agentState.currentPage.pageType": isGf ? "google_form" : "unknown",
+      "pageAnalysis.currentUrl": url,
+    });
+
+    // Reset 3-minute inactivity timer unconditionally
+    SessionRegistry.startHumanResponseTimer(applicationId, userId);
+
+    return await findApplicationById(applicationId);
+  } catch (error) {
+    await logError('applicationService.openPortalTabService', error.message);
     throw error;
   }
 };
