@@ -217,7 +217,73 @@ export const approveAndSendApplication = async (applicationId, userId) => {
       );
     }
 
-    // Check if application is for a Google Form
+    // 1. Direct Email Application
+    const isEmailMethod =
+      application.applicationMethod === 'email' ||
+      (application.email?.recipient && application.email.recipient !== 'unknown' && Boolean(application.email?.subject));
+
+    if (isEmailMethod) {
+      const recipient = application.email?.recipient;
+      const subject = application.email?.subject;
+      const body = application.email?.body;
+      const pdfPath = application.resume?.pdfPath;
+
+      if (!recipient || recipient === "unknown") {
+        throw new appError(
+          "A valid recipient email address is required before sending",
+          400,
+        );
+      }
+
+      await updateApplicationStatus(applicationId, APPLICATION_STATUS.SENDING, {
+        logMessage: "User approved email. Dispatching to recipient...",
+      });
+
+      const sendResult = await sendApplicationEmail({
+        recipient,
+        subject,
+        body,
+        pdfPath,
+      });
+
+      await updateApplicationEmail(applicationId, {
+        recipient,
+        subject,
+        body,
+        approved: true,
+        approvedAt: new Date(),
+        sentAt: new Date(),
+      });
+
+      await updateApplicationStatus(applicationId, APPLICATION_STATUS.SENT, {
+        logMessage: `Email dispatched successfully. Message ID: ${sendResult.messageId}`,
+      });
+
+      await logJobEvent(
+        "approveAndSendApplication",
+        "SUCCESS",
+        `Application ${applicationId} approved and sent to ${recipient}`,
+      );
+
+      return await findApplicationById(applicationId);
+    }
+
+    // 2. Direct Phone Application
+    if (application.applicationMethod === 'phone') {
+      const phoneNum =
+        application.phoneApplication?.phoneNumber ||
+        application.pageAnalysis?.detectedPhones?.[0] ||
+        application.jobId?.phone ||
+        "Direct Phone Outreach";
+
+      await updateApplicationStatus(applicationId, APPLICATION_STATUS.APPLIED, {
+        logMessage: `Application completed via recruiter phone call: ${phoneNum}`,
+      });
+
+      return await findApplicationById(applicationId);
+    }
+
+    // 3. Google Form Application
     const isGoogleForm =
       application.applicationMethod === 'googleForm' ||
       application.jobId?.applicationUrl?.includes('docs.google.com/forms') ||
@@ -254,7 +320,21 @@ export const approveAndSendApplication = async (applicationId, userId) => {
       return await findApplicationById(applicationId);
     }
 
-    // Check if application is for a Naukri job
+    // 4. External Portal Application Check
+    const hasExternalPortal = Boolean(
+      (application.workflow?.agentState?.pendingHumanAction?.savedUrl &&
+        !application.workflow?.agentState?.pendingHumanAction?.savedUrl.includes('naukri.com')) ||
+      (application.pageAnalysis?.currentUrl &&
+        !application.pageAnalysis.currentUrl.includes('naukri.com')) ||
+      (application.form?.portalUrl &&
+        !application.form.portalUrl.includes('naukri.com'))
+    );
+
+    if (hasExternalPortal) {
+      return await submitFinalUnknownApplicationService(applicationId, userId);
+    }
+
+    // 5. Naukri 1-Click Browser Application
     const isNaukriJob = isNaukriApplication(application);
 
     if (isNaukriJob) {
@@ -274,50 +354,6 @@ export const approveAndSendApplication = async (applicationId, userId) => {
       const updatedApp = await findApplicationById(applicationId);
       return updatedApp || naukriResult;
     }
-
-    const recipient = application.email?.recipient;
-    const subject = application.email?.subject;
-    const body = application.email?.body;
-    const pdfPath = application.resume?.pdfPath;
-
-    if (!recipient || recipient === "unknown") {
-      throw new appError(
-        "A valid recipient email address is required before sending",
-        400,
-      );
-    }
-
-    await updateApplicationStatus(applicationId, APPLICATION_STATUS.SENDING, {
-      logMessage: "User approved email. Dispatching to recipient...",
-    });
-
-    const sendResult = await sendApplicationEmail({
-      recipient,
-      subject,
-      body,
-      pdfPath,
-    });
-
-    await updateApplicationEmail(applicationId, {
-      recipient,
-      subject,
-      body,
-      approved: true,
-      approvedAt: new Date(),
-      sentAt: new Date(),
-    });
-
-    await updateApplicationStatus(applicationId, APPLICATION_STATUS.SENT, {
-      logMessage: `Email dispatched successfully. Message ID: ${sendResult.messageId}`,
-    });
-
-    await logJobEvent(
-      "approveAndSendApplication",
-      "SUCCESS",
-      `Application ${applicationId} approved and sent to ${recipient}`,
-    );
-
-    return await findApplicationById(applicationId);
   } catch (error) {
     if (applicationId) {
       const currentApp = await findApplicationById(applicationId).catch(() => null);
@@ -564,6 +600,21 @@ export const confirmFinalApplicationService = async (applicationId, userId, payl
       });
     }
 
+    // 1b. Direct Phone Application
+    if (application.applicationMethod === 'phone') {
+      const phoneNum =
+        application.phoneApplication?.phoneNumber ||
+        application.pageAnalysis?.detectedPhones?.[0] ||
+        application.jobId?.phone ||
+        "Direct Phone Outreach";
+
+      await updateApplicationStatus(applicationId, APPLICATION_STATUS.APPLIED, {
+        logMessage: `Application completed via recruiter phone call: ${phoneNum}`,
+      });
+
+      return await findApplicationById(applicationId);
+    }
+
     if (
       application.applicationMethod === 'unknown' ||
       application.applicationMethod === 'google_form' ||
@@ -575,8 +626,12 @@ export const confirmFinalApplicationService = async (applicationId, userId, payl
     }
 
     const hasExternalPortal = Boolean(
-      application.workflow?.agentState?.pendingHumanAction?.savedUrl &&
-      !application.workflow?.agentState?.pendingHumanAction?.savedUrl.includes('naukri.com')
+      (application.workflow?.agentState?.pendingHumanAction?.savedUrl &&
+        !application.workflow?.agentState?.pendingHumanAction?.savedUrl.includes('naukri.com')) ||
+      (application.pageAnalysis?.currentUrl &&
+        !application.pageAnalysis.currentUrl.includes('naukri.com')) ||
+      (application.form?.portalUrl &&
+        !application.form.portalUrl.includes('naukri.com'))
     );
 
     if (hasExternalPortal) {

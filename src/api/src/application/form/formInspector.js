@@ -153,6 +153,21 @@ export const inspectForm = async (page) => {
         const isNewsletter = el.closest('footer, [class*="newsletter" i], [class*="subscribe" i], [id*="newsletter" i], [id*="subscribe" i], form[action*="newsletter" i], form[action*="subscribe" i], [class*="cookie" i]');
         if (isNewsletter) return;
 
+        // Ignore navigation, header, top-bar, menu inputs
+        const isNavOrHeader = el.closest('header, nav, [class*="navbar" i], [class*="nav" i], [class*="menu" i], [id*="nav" i], [id*="menu" i]');
+        if (isNavOrHeader) return;
+
+        // Ignore search boxes and listing filter inputs (e.g. "Search job title...")
+        const isSearchOrFilter =
+          inputType === 'search' ||
+          el.getAttribute('role') === 'searchbox' ||
+          el.closest('[role="search"], [class*="search" i], [id*="search" i], form[action*="search" i], [class*="filter" i], [id*="filter" i]') ||
+          /search|keyword|filter|find job|job title/i.test(el.placeholder || '') ||
+          /search|keyword|filter|findjob|jobtitle/i.test(el.name || '') ||
+          /search|keyword|filter|findjob|jobtitle/i.test(el.id || '') ||
+          /search|keyword|filter/i.test(autoId);
+        if (isSearchOrFilter) return;
+
         const tagName = el.tagName.toLowerCase();
         const inputType = (el.getAttribute('type') || '').toLowerCase();
         const autoId = el.getAttribute('data-automation-id') || '';
@@ -330,6 +345,18 @@ export const inspectForm = async (page) => {
         fields.some((f) => /verify|confirm/i.test(f.question))
       );
 
+      const hasApplicationField = fields.some((f) =>
+        f.type === fieldTypes.FILE ||
+        f.type === fieldTypes.PASSWORD ||
+        /name|email|phone|mobile|resume|cv|file|experience|salary|education|address|city|zip|gender|portfolio|github|linkedin|cover|notice|why|about/i.test(
+          `${f.question} ${f.name} ${f.placeholder}`
+        )
+      );
+
+      const isQuestionnairePresent =
+        fields.length >= 2 ||
+        (fields.length === 1 && (hasApplicationField || buttons.some((b) => b.type === 'submit')));
+
       return {
         isAlreadyApplied,
         hasCaptcha,
@@ -340,7 +367,7 @@ export const inspectForm = async (page) => {
         stepperState,
         fields,
         buttons,
-        isQuestionnairePresent: fields.length > 0,
+        isQuestionnairePresent,
       };
     }, FIELD_TYPES);
 

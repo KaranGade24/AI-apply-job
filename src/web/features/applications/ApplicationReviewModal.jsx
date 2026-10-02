@@ -1254,7 +1254,7 @@ export const ApplicationReviewModal = ({
                   <>
                     <CheckCircle2 className="w-3.5 h-3.5" />
                     <span>
-                      {isNaukri && !application.form?.portalUrl
+                      {isNaukriDirect && !isNavigatedToExternal && !application.form?.portalUrl && !(application?.pageAnalysis?.currentUrl && !application.pageAnalysis.currentUrl.includes("naukri.com"))
                         ? "Confirm & Apply on Naukri"
                         : "Confirm & Apply on Employer Portal"}
                     </span>
@@ -1491,20 +1491,30 @@ export const ApplicationReviewModal = ({
 
   // Submit / Confirm application action
   const handleConfirmApply = async () => {
-    // If on Checkpoint 2 (waiting for final review)
-    if (
-      application?.status === "waiting_for_final_review" ||
-      application?.form?.reviewFields?.length > 0
-    ) {
-      return await handleConfirmFinal();
-    }
+    const targetMethod = currentViewMethod || detectedMethod;
+    const isFormMethod =
+      targetMethod === "company_site" ||
+      targetMethod === "unknown" ||
+      targetMethod === "portal" ||
+      targetMethod === "naukri_direct";
 
-    // If on Checkpoint 1 (missing answers / credentials required)
-    if (
-      application?.status === "waiting_for_user" ||
-      application?.form?.missingQuestions?.length > 0
-    ) {
-      return await handleSubmitMissingAnswers();
+    // If on form-based method and Checkpoints are active, route through form handlers
+    if (isFormMethod) {
+      // If on Checkpoint 2 (waiting for final review)
+      if (
+        application?.status === "waiting_for_final_review" ||
+        application?.form?.reviewFields?.length > 0
+      ) {
+        return await handleConfirmFinal();
+      }
+
+      // If on Checkpoint 1 (missing answers / credentials required)
+      if (
+        application?.status === "waiting_for_user" ||
+        application?.form?.missingQuestions?.length > 0
+      ) {
+        return await handleSubmitMissingAnswers();
+      }
     }
 
     setActionLoading(true);
@@ -2294,7 +2304,17 @@ export const ApplicationReviewModal = ({
                             </div>
                             <div className="flex items-center gap-2">
                               <span className="px-2.5 py-1 bg-blue-100 text-blue-800 border border-blue-200 rounded font-bold text-[10px] w-fit">
-                                Active Method: {(currentViewMethod === "unknown" ? "PORTAL_FORM" : currentViewMethod)?.toUpperCase()}
+                                Active Method: {
+                                  currentViewMethod === "naukri_direct"
+                                    ? "NAUKRI_DIRECT"
+                                    : (currentViewMethod === "unknown" || currentViewMethod === "company_site" || currentViewMethod === "portal")
+                                      ? "PORTAL_FORM"
+                                      : currentViewMethod === "email"
+                                        ? "DIRECT_EMAIL"
+                                        : currentViewMethod === "phone"
+                                          ? "PHONE_SCRIPT"
+                                          : currentViewMethod?.toUpperCase()
+                                }
                               </span>
                               <button
                                 type="button"

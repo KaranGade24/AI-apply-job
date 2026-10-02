@@ -218,6 +218,8 @@ const jobApplicationSchema = new mongoose.Schema(
       detectedEmails: [{ type: String }],
       detectedPhones: [{ type: String }],
       detectedGoogleForms: [{ type: String }],
+      manualApplyRequired: { type: Boolean, default: false },
+      manualApplyMessage: { type: String, default: "" },
       analyzedAt: { type: Date, default: null },
     },
     /**

@@ -995,6 +995,18 @@ export const runNaukriApplication = async ({
             "email.subject": subj,
             "email.body": `Dear Hiring Team,\n\nI am applying for the ${job.title} position at ${job.company}.${refId ? ` (Reference ID: ${refId})` : ""} My tailored ATS resume is attached for your review.\n\nBest regards,\n${userDoc?.fullName || "Applicant"}`,
             status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
+            pageAnalysis: {
+              ...finalAnalysis,
+              pageTitle: finalExtracted.title,
+              currentUrl: activePage.url(),
+              analyzedAt: new Date(),
+              detectedEmails: finalExtracted.emails && finalExtracted.emails.length > 0 ? finalExtracted.emails : [detectedEmail],
+              detectedPhones: finalExtracted.phones || [],
+              detectedGoogleForms: finalExtracted.googleForms || [],
+            },
+            ...(finalExtracted.phones?.[0]
+              ? { "phoneApplication.phoneNumber": finalExtracted.phones[0] }
+              : {}),
           });
 
           await updateApplicationStatus(
@@ -1009,6 +1021,12 @@ export const runNaukriApplication = async ({
             status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
             isCompanySite: true,
             emailContact: { email: detectedEmail, referenceId: refId },
+            pageAnalysis: {
+              ...finalAnalysis,
+              currentUrl: activePage.url(),
+              detectedEmails: finalExtracted.emails || [detectedEmail],
+              detectedPhones: finalExtracted.phones || [],
+            },
             message: `No online form link found on button. Found employer contact email (${detectedEmail}). Prepared direct email outreach draft for your review.`,
           };
         }
@@ -1027,7 +1045,13 @@ export const runNaukriApplication = async ({
             analyzedAt: new Date(),
             manualApplyRequired: true,
             manualApplyMessage: manualMessage,
+            detectedEmails: finalExtracted.emails || [],
+            detectedPhones: finalExtracted.phones || [],
+            detectedGoogleForms: finalExtracted.googleForms || [],
           },
+          ...(finalExtracted.phones?.[0]
+            ? { "phoneApplication.phoneNumber": finalExtracted.phones[0] }
+            : {}),
         });
 
         await updateApplicationStatus(
