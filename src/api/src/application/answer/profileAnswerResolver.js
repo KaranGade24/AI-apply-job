@@ -208,6 +208,41 @@ export const resolveFromProfile = (field, userProfile = {}, user = {}, userSetti
     };
   }
 
+  // Work Authorization / Sponsorship
+  if (/sponsor|visa\s*sponsorship/i.test(q)) {
+    const val = userSetting?.requiresSponsorship ? 'Yes' : 'No';
+    return {
+      resolved: true,
+      value: val,
+      source: 'profile',
+      sourcePath: 'userSetting.requiresSponsorship',
+      confidence: 1.0,
+    };
+  }
+
+  if (/(?:authorized|authorization|eligible)\s*to\s*work|work\s*permit|legal.*work/i.test(q)) {
+    const val = userSetting?.workAuthorization || 'Yes';
+    return {
+      resolved: true,
+      value: val,
+      source: 'profile',
+      sourcePath: 'userSetting.workAuthorization',
+      confidence: 1.0,
+    };
+  }
+
+  // Relocation
+  if (/relocat|willing\s*to\s*move/i.test(q)) {
+    const val = userSetting?.willingToRelocate !== false ? 'Yes' : 'No';
+    return {
+      resolved: true,
+      value: val,
+      source: 'profile',
+      sourcePath: 'userSetting.willingToRelocate',
+      confidence: 1.0,
+    };
+  }
+
   // 5. LinkedIn
   if (/linkedin/i.test(q)) {
     const linkedin = userSetting?.linkedinUrl || userProfile?.links?.linkedin || '';

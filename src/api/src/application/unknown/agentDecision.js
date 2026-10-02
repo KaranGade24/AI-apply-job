@@ -77,8 +77,9 @@ const buildDecisionUserPrompt = (normalizedState, agentState, job, pageClassific
     `${i + 1}. ${a.type} → id: ${a.target?.elementId || 'N/A'} | fingerprint: ${a.target?.elementFingerprint || 'N/A'} | success=${a.success}`
   );
 
-  // Filter and map only observed, interactable elements for the LLM
-  const interactiveElements = (normalizedState.interactiveElements || normalizedState.buttons || []).map(el => ({
+  // Filter and map observed interactable elements for the LLM
+  // Prioritize apply/submit buttons and input form controls
+  const allElements = (normalizedState.interactiveElements || normalizedState.buttons || []).map(el => ({
     elementId: el.elementId || el.id || null,
     elementFingerprint: el.elementFingerprint || null,
     role: el.role || el.tagName || 'element',
@@ -93,7 +94,9 @@ const buildDecisionUserPrompt = (normalizedState, agentState, job, pageClassific
     },
     frameId: el.frameId || 'main',
     semanticHints: el.isApplyRelated ? ['apply_related'] : []
-  })).slice(0, 30); // limit to top 30 key elements to avoid prompt bloat
+  }));
+
+  const interactiveElements = allElements.slice(0, 80);
 
   return `TARGET JOB DETAILS:
 - Title: "${job.title || 'Software Developer'}"

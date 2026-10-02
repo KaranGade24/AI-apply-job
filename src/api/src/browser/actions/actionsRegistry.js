@@ -56,7 +56,7 @@ export const validateAction = (action, state) => {
       const text = (el.accessibleName || '').toLowerCase();
       const isInitialApplyButton = /apply\s*now|apply\s*for|start\s*application|^apply$/i.test(text);
       if (!isInitialApplyButton && /submit\s*application|confirm\s*application|send\s*application/i.test(text)) {
-        if (!action.approved) {
+        if (!action.approved && !state.autoApplyEnabled) {
           return { valid: false, reason: 'NEEDS_APPROVAL', message: 'Action blocked: Final submit button requires candidate review approval.' };
         }
       }

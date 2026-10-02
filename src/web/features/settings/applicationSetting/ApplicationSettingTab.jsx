@@ -61,16 +61,18 @@ export const ApplicationSettingTab = () => {
       )}
 
       <Card className="p-6 space-y-6 max-w-2xl">
-        <label className="flex items-center justify-between p-4 rounded-xl border border-slate-200 bg-slate-50/50 cursor-pointer">
+        <label className="flex items-center justify-between p-4 rounded-xl border border-blue-200 bg-blue-50/40 cursor-pointer">
           <div>
-            <p className="text-sm font-bold text-slate-900">Enable Automated Job Applications</p>
-            <p className="text-xs text-slate-500 mt-0.5">Allow AI agent to auto-submit applications for matching jobs</p>
+            <p className="text-sm font-bold text-slate-900">Autonomous Apply Mode (Do all tasks itself)</p>
+            <p className="text-xs text-slate-600 mt-0.5">
+              Allow LLM browser agent to navigate company portals, fill all form fields, upload resume, and complete application workflows autonomously without stopping for common questions.
+            </p>
           </div>
           <input
             type="checkbox"
             checked={autoApply}
             onChange={(e) => setAutoApply(e.target.checked)}
-            className="w-5 h-5 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+            className="w-5 h-5 rounded border-slate-300 text-blue-600 focus:ring-blue-500 ml-4 shrink-0"
           />
         </label>
 

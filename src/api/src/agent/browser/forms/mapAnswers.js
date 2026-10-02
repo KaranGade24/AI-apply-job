@@ -86,6 +86,36 @@ const mapDeterministicProfileField = (category, profile = {}, resume = {}) => {
       return filePath ? { value: filePath, source: 'resume' } : null;
     }
 
+    case 'city': {
+      const val = personal.city || profile.city || (personal.address ? personal.address.split(',')[0].trim() : '') || '';
+      return val ? { value: val, source: 'profile' } : null;
+    }
+
+    case 'state': {
+      const val = personal.state || profile.state || (personal.address && personal.address.split(',').length > 1 ? personal.address.split(',')[1].trim().split(' ')[0] : '') || '';
+      return val ? { value: val, source: 'profile' } : null;
+    }
+
+    case 'zip': {
+      const val = personal.zip || personal.postalCode || profile.zip || (personal.address ? (personal.address.match(/\b\d{5}(?:-\d{4})?\b/) || personal.address.match(/\b\d{6}\b/))?.[0] : '') || '';
+      return val ? { value: val, source: 'profile' } : null;
+    }
+
+    case 'country': {
+      const val = personal.country || profile.country || 'United States';
+      return { value: val, source: 'profile' };
+    }
+
+    case 'experience': {
+      const val = profile.totalExperienceYears || profile.experience || parsedData.experienceYears || '3';
+      return { value: String(val), source: 'profile' };
+    }
+
+    case 'education': {
+      const val = parsedData.education?.[0]?.degree || profile.education || 'Bachelor of Science';
+      return { value: String(val), source: 'resume' };
+    }
+
     default:
       return null;
   }
@@ -153,6 +183,7 @@ export const mapFormAnswers = async (fields = [], {
   resume = {},
   previousAnswers = [],
   model = null,
+  autoResolve = false,
 } = {}) => {
   const answers = [];
   const pendingHumanQuestions = [];
@@ -185,8 +216,54 @@ export const mapFormAnswers = async (fields = [], {
       continue;
     }
 
-    // 2. High-Risk Categories ALWAYS Require Human Input (unless previously approved above)
+    // 2. High-Risk Categories: check if autoResolve is enabled OR if profile provides answer
     if (HIGH_RISK_CATEGORIES.has(category)) {
+      if (autoResolve) {
+        let autoVal = null;
+        const qText = (field.label || field.name || '').toLowerCase();
+        const opts = (field.options || []).map((o) => o.text || o.value || '');
+
+        if (category === 'work_authorization') {
+          if (qText.includes('sponsor') || qText.includes('visa')) {
+            const noOpt = opts.find((o) => /^(no|will not require|not required)/i.test(o));
+            autoVal = noOpt || (profile.requiresSponsorship ? 'Yes' : 'No');
+          } else {
+            const yesOpt = opts.find((o) => /^(yes|authorized|eligible)/i.test(o));
+            autoVal = yesOpt || profile.workAuthorization || 'Yes';
+          }
+        } else if (category === 'salary') {
+          autoVal = profile.expectedSalary || profile.expectedCtc || 'Competitive';
+        } else if (category === 'notice_period') {
+          autoVal = profile.noticePeriod || 'Immediate';
+        } else if (category === 'relocation') {
+          const yesOpt = opts.find((o) => /^yes/i.test(o));
+          autoVal = yesOpt || 'Yes';
+        } else if (category === 'legal') {
+          if (field.type === 'checkbox' || /agree|consent|terms|policy/i.test(qText)) {
+            autoVal = 'true';
+          } else {
+            const noOpt = opts.find((o) => /^no/i.test(o));
+            autoVal = noOpt || 'No';
+          }
+        } else if (category === 'demographic') {
+          const declineOpt = opts.find((o) => /decline|prefer not|choose not|not wish/i.test(o));
+          autoVal = declineOpt || 'Prefer not to say';
+        }
+
+        if (autoVal !== null) {
+          answers.push({
+            questionId: qId,
+            fieldIndex: field.index,
+            label: field.label,
+            value: autoVal,
+            source: 'profile',
+            confidence: 0.9,
+            needsReview: false,
+          });
+          continue;
+        }
+      }
+
       const humanQuestion = {
         questionId: qId,
         question: field.label || field.name || 'Application Question',

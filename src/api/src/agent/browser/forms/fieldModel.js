@@ -132,28 +132,43 @@ export const detectFieldCategory = ({ label = '', name = '', type = '', tag = ''
     text.includes('criminal') ||
     text.includes('non-compete') ||
     text.includes('agreement') ||
+    text.includes('terms') ||
+    text.includes('privacy') ||
+    text.includes('consent') ||
     text.includes('acknowledge and agree')
   ) {
     return 'legal';
   }
 
   // Standard Deterministic Categories
-  if (text.includes('first name') || text.includes('given name') || text === 'first') {
+  if (text.includes('first name') || text.includes('given name') || text === 'first' || text.includes('fname')) {
     return 'first_name';
   }
-  if (text.includes('last name') || text.includes('surname') || text.includes('family name') || text === 'last') {
+  if (text.includes('last name') || text.includes('surname') || text.includes('family name') || text === 'last' || text.includes('lname')) {
     return 'last_name';
   }
-  if (text.includes('full name') || text === 'name' || text.includes('applicant name')) {
+  if (text.includes('full name') || text === 'name' || text.includes('applicant name') || text.includes('candidate name')) {
     return 'full_name';
   }
   if (type === 'email' || text.includes('email') || text.includes('e-mail')) {
     return 'email';
   }
-  if (type === 'tel' || text.includes('phone') || text.includes('mobile') || text.includes('contact number')) {
+  if (type === 'tel' || text.includes('phone') || text.includes('mobile') || text.includes('contact number') || text.includes('cell')) {
     return 'phone';
   }
-  if (text.includes('address') || text.includes('street') || text.includes('city') || text.includes('location') || text.includes('zip') || text.includes('postal')) {
+  if (text.includes('city') || text.includes('town')) {
+    return 'city';
+  }
+  if (text.includes('state') || text.includes('province') || text.includes('region')) {
+    return 'state';
+  }
+  if (text.includes('zip') || text.includes('postal code') || text.includes('pincode')) {
+    return 'zip';
+  }
+  if (text.includes('country') || text.includes('nationality')) {
+    return 'country';
+  }
+  if (text.includes('address') || text.includes('street') || text.includes('location')) {
     return 'address';
   }
   if (text.includes('linkedin')) {

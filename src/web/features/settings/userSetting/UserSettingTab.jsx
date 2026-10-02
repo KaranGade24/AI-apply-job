@@ -16,6 +16,10 @@ export const UserSettingTab = () => {
     portfolioUrl: settings.userSetting?.portfolioUrl || '',
     githubUrl: settings.userSetting?.githubUrl || '',
     linkedinUrl: settings.userSetting?.linkedinUrl || '',
+    workAuthorization: settings.userSetting?.workAuthorization || 'Yes',
+    requiresSponsorship: settings.userSetting?.requiresSponsorship ?? false,
+    noticePeriod: settings.userSetting?.noticePeriod || 'Immediate',
+    expectedSalary: settings.userSetting?.expectedSalary || 'Competitive',
   });
 
   React.useEffect(() => {
@@ -29,6 +33,10 @@ export const UserSettingTab = () => {
         portfolioUrl: settings.userSetting.portfolioUrl || '',
         githubUrl: settings.userSetting.githubUrl || '',
         linkedinUrl: settings.userSetting.linkedinUrl || '',
+        workAuthorization: settings.userSetting.workAuthorization || 'Yes',
+        requiresSponsorship: settings.userSetting.requiresSponsorship ?? false,
+        noticePeriod: settings.userSetting.noticePeriod || 'Immediate',
+        expectedSalary: settings.userSetting.expectedSalary || 'Competitive',
       });
     }
   }, [settings.userSetting]);
@@ -139,6 +147,59 @@ export const UserSettingTab = () => {
               onChange={handleChange}
               icon={<Link2 className="w-4 h-4 text-slate-400" />}
             />
+          </div>
+
+          <div className="pt-4 border-t border-slate-100">
+            <h3 className="text-sm font-bold text-slate-800 mb-1">Autonomous Application Defaults</h3>
+            <p className="text-xs text-slate-500 mb-4">
+              Answers used by the AI Browser Agent to automatically fill common job application questions across any site.
+            </p>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Input
+                label="Work Authorization Status"
+                name="workAuthorization"
+                value={formData.workAuthorization}
+                onChange={handleChange}
+                placeholder="Yes / Legally authorized to work"
+                helperText="Auto-filled for work eligibility questions"
+              />
+
+              <Input
+                label="Notice Period / Availability"
+                name="noticePeriod"
+                value={formData.noticePeriod}
+                onChange={handleChange}
+                placeholder="Immediate / 15 days"
+                helperText="Auto-filled for availability/start date"
+              />
+
+              <Input
+                label="Expected Salary / CTC"
+                name="expectedSalary"
+                value={formData.expectedSalary}
+                onChange={handleChange}
+                placeholder="Competitive / $120,000"
+                helperText="Auto-filled for compensation inquiries"
+              />
+
+              <div className="flex items-center gap-3 p-3 rounded-lg border border-slate-200 bg-slate-50/50 mt-5">
+                <input
+                  type="checkbox"
+                  id="requiresSponsorship"
+                  name="requiresSponsorship"
+                  checked={formData.requiresSponsorship}
+                  onChange={(e) => setFormData({ ...formData, requiresSponsorship: e.target.checked })}
+                  className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 border-slate-300"
+                />
+                <label htmlFor="requiresSponsorship" className="text-xs font-semibold text-slate-800 cursor-pointer">
+                  Require visa sponsorship now or in the future
+                  <span className="block text-[11px] font-normal text-slate-500">
+                    If unchecked, agent automatically answers "No" to sponsorship questions
+                  </span>
+                </label>
+              </div>
+            </div>
           </div>
         </form>
       </Card>

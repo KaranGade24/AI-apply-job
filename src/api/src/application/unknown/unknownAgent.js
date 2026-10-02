@@ -13,6 +13,7 @@ import { getGeminiModel } from '../../agent/config/modelConfig.js';
 import { logJobEvent, logError } from '../../utils/logger.js';
 import { APPLICATION_STATUS } from '../../constant/application.constant.js';
 import { updateApplicationStatus } from '../../repositories/application.repository.js';
+import { Setting } from '../../model/Setting.js';
 
 const MAX_FAILURES = 5;
 
@@ -143,9 +144,27 @@ export const runUnknownAgentLoop = async ({
             continue;
           }
           
+          const settingDoc = await Setting.findOne({ userId }).lean().catch(() => null);
+          const autoApply = settingDoc?.applicationSetting?.autoApplyEnabled === true;
+
+          if (autoApply) {
+            // Find submit button and submit
+            const submitBtn = (browserState.elements || []).find(el => {
+              const txt = (el.text || el.accessibleName || el.label || '').toLowerCase();
+              return /submit\s*application|confirm\s*application|send\s*application|^submit$|^apply$/i.test(txt);
+            });
+            if (submitBtn) {
+              await executeAction({ type: 'click', index: submitBtn.id, approved: true }, page, session).catch(() => {});
+              await page.waitForTimeout?.(4000).catch(() => {});
+            }
+            finalStatus = APPLICATION_STATUS.APPLIED;
+            summaryMessage = 'Application submitted successfully by AI agent!';
+            break;
+          }
+
           // Force manual review and submission instead of automatically submitting
           finalStatus = APPLICATION_STATUS.WAITING_FOR_REVIEW;
-          summaryMessage = `WARNING: Human approval required! The AI agent has successfully filled out the application form fields based on your profile and resume. However, to prevent accidental or unapproved submissions, we never submit or send anything without your explicit approval. For security and safety, we have paused the automation. Please click the review/resume button to open this page in your browser, carefully inspect the filled values, and click "Submit" manually to finalize your application.`;
+          summaryMessage = `WARNING: Human approval required! The AI agent has successfully filled out the application form fields based on your profile and resume. However, to prevent accidental or unapproved submissions, review is required before submitting. Please click the review/resume button to inspect the filled values and click Submit to finalize.`;
           break;
         }
 

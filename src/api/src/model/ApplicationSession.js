@@ -98,6 +98,14 @@ const applicationSessionSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    latestScreenshot: {
+      type: String,
+      default: "",
+    },
+    currentPlan: {
+      type: String,
+      default: "",
+    },
     expiresAt: {
       type: Date,
     },

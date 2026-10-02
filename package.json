@@ -8,6 +8,7 @@
     "server": "node src/api/server.js",
     "client": "vite",
     "build": "vite build",
+    "lint": "node --check src/api/server.js",
     "test": "node --import ./src/api/src/test/setup.js --test src/api/src/test/*.test.js",
     "migrate:session-encryption": "node src/api/src/scripts/migrateSessionEncryption.js"
   },

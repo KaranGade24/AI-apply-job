@@ -5,15 +5,10 @@ import { resolveFromHuman, persistMissingQuestionsForUser } from './humanAnswerR
 import { classifyQuestionCategory, normalizeQuestionText } from '../form/formNormalizer.js';
 import { FIELD_TYPES, QUESTION_CATEGORIES } from '../form/fieldTypes.js';
 
-// Sensitive/legal questions that must never be guessed or automated with generic defaults
+// Strictly confidential secrets that must never be guessed or automated
 const SENSITIVE_PATTERNS = [
-  /gender|sex/i,
-  /race|ethnicity|demographic/i,
-  /disability|handicap/i,
-  /veteran|military/i,
-  /citizenship|visa|sponsorship|work\s+authorization|authorized\s+to\s+work/i,
-  /background\s+check|drug\s+screen|convict/i,
-  /social\s+security|national\s+id|ssn/i
+  /social\s+security|national\s+id|ssn|aadhaar|passport\s+number/i,
+  /credit\s+card|cvv|bank\s+account/i
 ];
 
 /**
@@ -237,6 +232,57 @@ export const resolveAllFormAnswers = async (fields = [], context = {}) => {
       continue;
     }
 
+    // Work Authorization / Visa Sponsorship
+    if (/sponsor|visa\s*sponsorship/i.test(qText) || (field.name && /sponsor/i.test(field.name))) {
+      const val = userSetting?.requiresSponsorship ? 'Yes' : 'No';
+      resolvedAnswers.push({
+        questionId: qId,
+        fieldId: fId,
+        question: field.question,
+        type: field.type,
+        answer: val,
+        source: 'setting',
+        confidence: 0.95,
+        userConfirmed: false,
+        options: field.options || [],
+      });
+      continue;
+    }
+
+    if (/(?:authorized|authorization|eligible)\s*to\s*work|work\s*permit|legal.*work/i.test(qText) || (field.name && /authorized/i.test(field.name))) {
+      const val = userSetting?.workAuthorization || 'Yes';
+      resolvedAnswers.push({
+        questionId: qId,
+        fieldId: fId,
+        question: field.question,
+        type: field.type,
+        answer: val,
+        source: 'setting',
+        confidence: 0.95,
+        userConfirmed: false,
+        options: field.options || [],
+      });
+      continue;
+    }
+
+    // Demographics / EEO (select "Prefer not to say" or "Decline to self-identify")
+    if (/gender|race|ethnicity|veteran|disability|demographic/i.test(qText)) {
+      const opts = (field.options || []).map((o) => (typeof o === 'string' ? o : o.text || o.value || ''));
+      const declineOpt = opts.find((o) => /decline|prefer not|choose not|not wish/i.test(o)) || 'Prefer not to say';
+      resolvedAnswers.push({
+        questionId: qId,
+        fieldId: fId,
+        question: field.question,
+        type: field.type,
+        answer: declineOpt,
+        source: 'profile',
+        confidence: 0.9,
+        userConfirmed: false,
+        options: field.options || [],
+      });
+      continue;
+    }
+
     // Level 1: Deterministic Profile Answer
     const profileRes = await resolveFromProfile(field, userProfile, user, userSetting);
     if (profileRes.resolved) {
@@ -353,11 +399,7 @@ export const resolveAllFormAnswers = async (fields = [], context = {}) => {
 export const checkSensitiveQuestion = (questionText) => {
   const q = (questionText || '').toLowerCase();
   const sensitivePatterns = [
-    'sponsor', 'authorization', 'authorized', 'work in the', 'citizenship', 
-    'salary', 'ctc', 'compensation', 'notice period', 'relocat', 
-    'gender', 'race', 'ethnicity', 'disability', 'veteran', 'lgbt', 'demographic', 
-    'background check', 'convict', 'misdemeanor', 'felony', 'declaration', 
-    'terms', 'privacy', 'consent', 'newsletter', 'marketing', 'agree'
+    'social security', 'ssn', 'national id', 'aadhaar', 'passport number', 'credit card', 'bank account'
   ];
   return sensitivePatterns.some(p => q.includes(p));
 };
@@ -375,7 +417,7 @@ export const resolveFieldAnswer = (field, candidateInfo = {}, jobDetails = {}, a
       source: 'human',
       confidence: 0.0,
       needsReview: true,
-      reason: 'Question flagged as legally sensitive (relocation, authorization, CTC, terms, or EEO).'
+      reason: 'Question flagged as strictly confidential (SSN, national ID, or financial secret).'
     };
   }
 
@@ -397,7 +439,13 @@ export const resolveFieldAnswer = (field, candidateInfo = {}, jobDetails = {}, a
   let matchedValue = null;
   let source = 'resume';
 
-  if (/full\s*name|first\s*name|last\s*name|your\s*name/i.test(qLower)) {
+  if (/first\s*name|given\s*name/i.test(qLower)) {
+    matchedValue = personal.firstName || (personal.fullName || personal.name || '').split(' ')[0];
+    source = 'profile';
+  } else if (/last\s*name|family\s*name|surname/i.test(qLower)) {
+    matchedValue = personal.lastName || (personal.fullName || personal.name || '').split(' ').slice(1).join(' ');
+    source = 'profile';
+  } else if (/full\s*name|your\s*name/i.test(qLower) || qLower === 'name') {
     matchedValue = personal.fullName || personal.name || info.name;
     source = 'profile';
   } else if (/email|e-mail/i.test(qLower)) {
@@ -412,6 +460,24 @@ export const resolveFieldAnswer = (field, candidateInfo = {}, jobDetails = {}, a
     matchedValue = personal.github || personal.githubUrl;
   } else if (/website|portfolio/i.test(qLower)) {
     matchedValue = personal.website || personal.portfolio;
+  } else if (/sponsor|visa\s*sponsorship/i.test(qLower)) {
+    matchedValue = 'No';
+    source = 'profile';
+  } else if (/(?:authorized|authorization|eligible)\s*to\s*work|work\s*permit|legal.*work/i.test(qLower)) {
+    matchedValue = 'Yes';
+    source = 'profile';
+  } else if (/notice\s*period|availability|start\s*date/i.test(qLower)) {
+    matchedValue = personal.noticePeriod || info.noticePeriod || 'Immediate';
+    source = 'profile';
+  } else if (/salary|compensation|expected\s*ctc|current\s*ctc/i.test(qLower)) {
+    matchedValue = personal.expectedCtc || personal.expectedSalary || 'Competitive';
+    source = 'profile';
+  } else if (/terms|agree|privacy|consent|policy|acknowledge|accept/i.test(qLower)) {
+    matchedValue = 'true';
+    source = 'system';
+  } else if (/gender|race|ethnicity|veteran|disability/i.test(qLower)) {
+    matchedValue = 'Decline to self-identify';
+    source = 'profile';
   } else if (/skills/i.test(qLower)) {
     matchedValue = (info.skills || []).join(', ');
   } else if (/education|degree/i.test(qLower)) {

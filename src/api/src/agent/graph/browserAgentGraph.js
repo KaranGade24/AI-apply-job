@@ -35,6 +35,7 @@ import { ApplicationRepository } from "../../repositories/application.repository
 import { ApplicationQuestion } from "../../model/ApplicationQuestion.js";
 import { UserProfile } from "../../model/UserProfile.js";
 import { Resume } from "../../model/Resume.js";
+import { Setting } from "../../model/Setting.js";
 import {
   AGENT_STATUS,
   PERCEPTION_PAGE_TYPES,
@@ -254,11 +255,16 @@ const observeAndActNode = async (state) => {
       .sort({ createdAt: -1 })
       .lean()
       .catch(() => null);
+    const settingDoc = await Setting.findOne({ userId })
+      .lean()
+      .catch(() => null);
+    const autoApply = settingDoc?.applicationSetting?.autoApplyEnabled === true;
 
     const mappingResult = await mapFormAnswers(fields, {
       profile: profileDoc || {},
       resume: resumeDoc || {},
       previousAnswers: state.answers || [],
+      autoResolve: autoApply,
     });
 
     if (
@@ -291,8 +297,13 @@ const observeAndActNode = async (state) => {
               index: field.index,
             });
           } else if (field.type === "radio") {
-            if (ans.value)
+            const matchesChoice =
+              String(ans.value).toLowerCase() === String(field.currentValue || field.label || "").toLowerCase() ||
+              (ans.value === true && /yes|true/i.test(field.label || field.currentValue || '')) ||
+              (ans.value === false && /no|false/i.test(field.label || field.currentValue || ''));
+            if (matchesChoice) {
               actionsToExecute.push({ type: "check", index: field.index });
+            }
           } else if (field.type === "file") {
             actionsToExecute.push({
               type: "uploadFile",
@@ -328,10 +339,10 @@ const observeAndActNode = async (state) => {
       Boolean(submitButton) || pageType === PERCEPTION_PAGE_TYPES.REVIEW;
 
     if (isFinalSubmissionStep) {
-      // Execute any pending field fills first, but DO NOT click submit!
+      // Execute all pending field fills
       if (actionsToExecute.length > 0) {
         const batchValidation = validateActionBatch(
-          actionsToExecute.slice(0, 3),
+          actionsToExecute,
           observation,
         );
         if (batchValidation.ok) {
@@ -349,6 +360,22 @@ const observeAndActNode = async (state) => {
         attachments: state.attachments || [],
         generatedContent: state.generatedContent || [],
       });
+      const reviewHash = computeAnswersHash(mappingResult.answers);
+      finalReview.reviewHash = reviewHash;
+
+      // If user enabled auto-apply, approve automatically and advance to submission
+      if (autoApply) {
+        finalReview.approved = true;
+        finalReview.approvedAt = new Date().toISOString();
+        return {
+          stepCount: stepCount + 1,
+          currentUrl: page.url(),
+          pageType: PERCEPTION_PAGE_TYPES.REVIEW,
+          finalReview,
+          answers: mappingResult.answers,
+          status: AGENT_STATUS.SUBMITTING,
+        };
+      }
 
       return {
         stepCount: stepCount + 1,
@@ -533,6 +560,20 @@ const reviewGateNode = async (state) => {
 
   const hash =
     finalReview.reviewHash || finalReview.hash || computeAnswersHash(answers);
+
+  const settingDoc = await Setting.findOne({ userId }).lean().catch(() => null);
+  const autoApply = settingDoc?.applicationSetting?.autoApplyEnabled === true;
+
+  if (autoApply || finalReview.approved) {
+    return {
+      finalReview: {
+        ...finalReview,
+        approved: true,
+        reviewHash: hash,
+      },
+      status: AGENT_STATUS.SUBMITTING,
+    };
+  }
 
   if (
     !finalReview.approved ||

@@ -18,6 +18,11 @@ const settingSchema = new mongoose.Schema(
       githubUrl: { type: String },
       linkedinUrl: { type: String },
       headline: { type: String },
+      workAuthorization: { type: String, default: "Yes, legally authorized" },
+      requiresSponsorship: { type: Boolean, default: false },
+      noticePeriod: { type: String, default: "Immediate" },
+      expectedSalary: { type: String, default: "Competitive" },
+      currentSalary: { type: String, default: "" },
     },
     jobSetting: {
       defaultSources: { type: [String], default: ["jobViaReferral", "naukri"] },
