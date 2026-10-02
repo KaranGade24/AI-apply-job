@@ -98,8 +98,73 @@ export const waitForSettled = async (page, timeoutMs = 8000) => {
 };
 
 export class SessionRegistry {
+  static humanResponseTimers = new Map();
+
+  static clearHumanResponseTimer(applicationId) {
+    const appId = String(applicationId);
+    if (this.humanResponseTimers.has(appId)) {
+      clearTimeout(this.humanResponseTimers.get(appId));
+      this.humanResponseTimers.delete(appId);
+      logJobEvent("sessionRegistry", "HUMAN_TIMER_CLEARED", `[application:${appId}] 3-minute inactivity timer cancelled.`).catch(() => {});
+    }
+  }
+
+  static startHumanResponseTimer(applicationId, userId) {
+    const appId = String(applicationId);
+    this.clearHumanResponseTimer(appId);
+
+    logJobEvent("sessionRegistry", "HUMAN_TIMER_STARTED", `[application:${appId}] 3-minute inactivity timer started.`).catch(() => {});
+
+    const timeoutId = setTimeout(async () => {
+      try {
+        await logJobEvent(
+          "sessionRegistry",
+          "HUMAN_RESPONSE_TIMEOUT",
+          `[application:${appId}] No response received within 3 minutes. Saving storage state and suspending browser session.`,
+        );
+
+        const session = activeSessions.get(appId);
+        if (session && session.context) {
+          const rawState = await session.context.storageState().catch(() => null);
+          const currentUrl = session.currentUrl || (session.activePage && !session.activePage.isClosed() ? session.activePage.url() : "");
+
+          const updateData = {};
+          if (currentUrl) {
+            updateData['workflow.agentState.pendingHumanAction.savedUrl'] = currentUrl;
+          }
+          if (rawState) {
+            const stateToEncrypt = JSON.stringify(rawState);
+            updateData['workflow.agentState.pendingHumanAction.savedStorageState'] = encryptValue(stateToEncrypt);
+          }
+          updateData['workflow.agentState.pendingHumanAction.reason'] = "Inactivity timeout reached (3 minutes exceeded)";
+          updateData.updatedAt = new Date();
+
+          await JobApplication.findByIdAndUpdate(appId, { $set: updateData }).catch(() => {});
+        }
+
+        await this.closeSession(appId).catch((err) => {
+          logError("SessionRegistry.timeout.closeSession", err.message);
+        });
+
+        await ApplicationSessionRepository.updateSession(appId, userId, {
+          notes: "Browser session suspended due to 3 minutes of user inactivity.",
+        }).catch((err) => {
+          logError("SessionRegistry.timeout.updateSession", err.message);
+        });
+
+      } catch (err) {
+        logError("SessionRegistry.startHumanResponseTimer", err.message);
+      } finally {
+        this.humanResponseTimers.delete(appId);
+      }
+    }, 3 * 60 * 1000); // 3 minutes
+
+    this.humanResponseTimers.set(appId, timeoutId);
+  }
+
   static async createOrGetSession(applicationId, userId, options = {}) {
     const appId = String(applicationId);
+    this.clearHumanResponseTimer(appId);
     const existing = activeSessions.get(appId);
     if (existing) {
       existing.lastUsedAt = new Date();
@@ -164,6 +229,7 @@ export class SessionRegistry {
 
   static async closeSession(applicationId) {
     const appId = String(applicationId);
+    this.clearHumanResponseTimer(appId);
     const session = activeSessions.get(appId);
     if (!session) return;
     activeSessions.delete(appId);

@@ -170,29 +170,14 @@ export async function resolveElement(page, elementDescriptor) {
     const secondCandidate = viableCandidates[1];
     const scoreDiff = topCandidate.score - secondCandidate.score;
 
-    // Safety margin of 15 points to resolve ambiguity
-    if (scoreDiff >= 15) {
-      const finalLoc = topCandidate.locator;
-      finalLoc.resolved = true;
-      finalLoc.reason = 'SUCCESS';
-      finalLoc.score = topCandidate.score;
-      finalLoc.evidence = topCandidate.evidence;
-      finalLoc.candidates = viableCandidates;
-      return finalLoc;
-    }
-
-    // Ambiguous elements found
-    return {
-      resolved: false,
-      reason: 'TARGET_AMBIGUOUS',
-      candidates: viableCandidates.map(c => ({
-        score: c.score,
-        evidence: c.evidence,
-        visible: c.visible,
-        enabled: c.enabled,
-        traits: c.traits
-      }))
-    };
+    // Resolve top candidate safely even with close candidates
+    const finalLoc = topCandidate.locator;
+    finalLoc.resolved = true;
+    finalLoc.reason = scoreDiff >= 15 ? 'SUCCESS' : 'TOP_CANDIDATE_RESOLVED';
+    finalLoc.score = topCandidate.score;
+    finalLoc.evidence = topCandidate.evidence;
+    finalLoc.candidates = viableCandidates;
+    return finalLoc;
   } catch (error) {
     await logError('elementResolver.resolveElement', error.message);
     return {

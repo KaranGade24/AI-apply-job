@@ -150,6 +150,7 @@ export const startApplicationWorkflow = async (
   }
 
   activeRunners.add(appIdStr);
+  SessionRegistry.clearHumanResponseTimer(appIdStr);
 
   // Run graph asynchronously in background
   (async () => {
@@ -175,6 +176,16 @@ export const startApplicationWorkflow = async (
         ...threadConfig,
         recursionLimit: MAX_AGENT_STEPS * 8 + 10,
       });
+
+      // Post-invocation check: did it pause waiting for human?
+      const statusResult = await getWorkflowStatus(appIdStr, userId).catch(() => null);
+      if (
+        statusResult &&
+        (statusResult.status === AGENT_STATUS.WAITING_FOR_USER ||
+         statusResult.status === AGENT_STATUS.WAITING_FOR_CONFIRMATION)
+      ) {
+        SessionRegistry.startHumanResponseTimer(appIdStr, userId);
+      }
     } catch (err) {
       await logError("agentRunner.startWorkflow.invoke", err.message);
       const isRecursion =
@@ -375,6 +386,7 @@ export const submitWorkflowAnswers = async (
   }
 
   activeRunners.add(appIdStr);
+  SessionRegistry.clearHumanResponseTimer(appIdStr);
 
   // Resume graph asynchronously in background
   (async () => {
@@ -401,6 +413,16 @@ export const submitWorkflowAnswers = async (
           recursionLimit: MAX_AGENT_STEPS * 8 + 10,
         },
       );
+
+      // Post-invocation check: did it pause waiting for human again?
+      const statusResult = await getWorkflowStatus(appIdStr, userId).catch(() => null);
+      if (
+        statusResult &&
+        (statusResult.status === AGENT_STATUS.WAITING_FOR_USER ||
+         statusResult.status === AGENT_STATUS.WAITING_FOR_CONFIRMATION)
+      ) {
+        SessionRegistry.startHumanResponseTimer(appIdStr, userId);
+      }
     } catch (err) {
       await logError("agentRunner.resumeAnswers.invoke", err.message);
       const isRecursion =
@@ -597,6 +619,7 @@ export const confirmWorkflowReview = async (
   }
 
   activeRunners.add(appIdStr);
+  SessionRegistry.clearHumanResponseTimer(appIdStr);
 
   (async () => {
     try {
@@ -621,6 +644,16 @@ export const confirmWorkflowReview = async (
           recursionLimit: MAX_AGENT_STEPS * 8 + 10,
         },
       );
+
+      // Post-invocation check: did it pause waiting for human again?
+      const statusResult = await getWorkflowStatus(appIdStr, userId).catch(() => null);
+      if (
+        statusResult &&
+        (statusResult.status === AGENT_STATUS.WAITING_FOR_USER ||
+         statusResult.status === AGENT_STATUS.WAITING_FOR_CONFIRMATION)
+      ) {
+        SessionRegistry.startHumanResponseTimer(appIdStr, userId);
+      }
     } catch (err) {
       await logError("agentRunner.confirmReview.invoke", err.message);
       const isRecursion =
@@ -670,6 +703,8 @@ export const confirmWorkflowReview = async (
 export const cancelWorkflow = async (applicationId, userId) => {
   const appIdStr = String(applicationId);
   await assertOwnership(appIdStr, userId);
+
+  SessionRegistry.clearHumanResponseTimer(appIdStr);
 
   await SessionRegistry.closeSession(appIdStr).catch((err) => {
     logError("agentRunner.cancelWorkflow.closeSession", err.message);
