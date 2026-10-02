@@ -462,6 +462,9 @@ Return STRICT JSON ONLY:
       subject: `Application for ${bestMatch?.title || job.title || 'Position'}`,
       referenceId: bestMatch?.referenceId || extractedPageContent.referenceIds?.[0] || ''
     },
+    detectedEmails: extractedPageContent.emails || [],
+    detectedPhones: extractedPageContent.phones || [],
+    detectedGoogleForms: extractedPageContent.googleForms || [],
     nextRecommendedAction: legacyNextRecommendedAction,
     targetSelector: '',
     actionReason: pageStateResult.reason

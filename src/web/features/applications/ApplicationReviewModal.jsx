@@ -2913,6 +2913,86 @@ export const ApplicationReviewModal = ({
                                 </div>
                               )}
 
+                              {/* Real-time Extracted Details & Method Card */}
+                              <div className="p-4 bg-gradient-to-r from-slate-50 via-indigo-50/20 to-slate-100 rounded-xl border border-slate-200 space-y-3.5 shadow-2xs">
+                                <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                                  <div className="flex items-center gap-1.5">
+                                    <Sparkles className="w-4 h-4 text-purple-600 animate-pulse" />
+                                    <span className="text-xs font-black text-slate-800 uppercase tracking-wider">
+                                      Real-Time Detected Details
+                                    </span>
+                                  </div>
+                                  <span className="px-2 py-0.5 bg-indigo-100 text-indigo-800 rounded-md text-[10px] font-bold">
+                                    Method: {application.applicationMethod?.toUpperCase() || 'CAREER PORTAL'}
+                                  </span>
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                                  {/* Emails */}
+                                  <div>
+                                    <span className="font-bold text-slate-500 block mb-1">Detected Contact Emails</span>
+                                    {application.pageAnalysis?.detectedEmails?.length > 0 ? (
+                                      <div className="flex flex-wrap gap-1.5">
+                                        {application.pageAnalysis.detectedEmails.map((email, idx) => (
+                                          <a
+                                            key={idx}
+                                            href={`mailto:${email}`}
+                                            className="font-mono bg-white hover:bg-indigo-50 px-2 py-0.5 rounded-md border border-slate-200 text-indigo-700 transition-colors inline-block"
+                                          >
+                                            {email}
+                                          </a>
+                                        ))}
+                                      </div>
+                                    ) : (
+                                      <span className="text-slate-400 italic">None found on page</span>
+                                    )}
+                                  </div>
+
+                                  {/* Phones */}
+                                  <div>
+                                    <span className="font-bold text-slate-500 block mb-1">Detected Phone Numbers</span>
+                                    {application.pageAnalysis?.detectedPhones?.length > 0 ? (
+                                      <div className="flex flex-wrap gap-1.5">
+                                        {application.pageAnalysis.detectedPhones.map((phone, idx) => (
+                                          <a
+                                            key={idx}
+                                            href={`tel:${phone}`}
+                                            className="font-mono bg-white hover:bg-emerald-50 px-2 py-0.5 rounded-md border border-slate-200 text-emerald-700 transition-colors inline-block"
+                                          >
+                                            {phone}
+                                          </a>
+                                        ))}
+                                      </div>
+                                    ) : (
+                                      <span className="text-slate-400 italic">None found on page</span>
+                                    )}
+                                  </div>
+
+                                  {/* Google Forms */}
+                                  <div className="md:col-span-2">
+                                    <span className="font-bold text-slate-500 block mb-1">Detected Google / External Forms</span>
+                                    {application.pageAnalysis?.detectedGoogleForms?.length > 0 ? (
+                                      <div className="space-y-1">
+                                        {application.pageAnalysis.detectedGoogleForms.map((url, idx) => (
+                                          <a
+                                            key={idx}
+                                            href={url}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="font-mono text-purple-700 hover:text-purple-900 bg-white hover:bg-purple-50 px-2 py-1 rounded-md border border-slate-200 block truncate transition-colors"
+                                            title={url}
+                                          >
+                                            🔗 {url}
+                                          </a>
+                                        ))}
+                                      </div>
+                                    ) : (
+                                      <span className="text-slate-400 italic">No external forms detected on page</span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+
                               {/* Direct Application Email Instructions */}
                               {application.pageAnalysis.emailContact?.email && (
                                 <div className="p-3 bg-linear-to-r from-blue-50 to-indigo-50/60 rounded-xl border border-blue-200 space-y-2">

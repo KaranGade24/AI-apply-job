@@ -269,6 +269,19 @@ export const extractPageContent = async (page) => {
       const bodyText = (document.body ? document.body.innerText : '') + '\n' + extraIframeText;
       const textSnippet = bodyText.replace(/\s+/g, ' ').slice(0, 35000);
 
+      // Extract emails, phones, and google form links safely
+      const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
+      const phoneRegex = /(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/g;
+      const emails = Array.from(new Set(bodyText.match(emailRegex) || []));
+      const phones = Array.from(new Set(bodyText.match(phoneRegex) || []));
+
+      const googleForms = [];
+      document.querySelectorAll('a[href*="docs.google.com/forms"], a[href*="forms.gle"]').forEach(a => {
+        if (a.href && !googleForms.includes(a.href)) {
+          googleForms.push(a.href);
+        }
+      });
+
       // Accessibility general information
       const accessibilityInfo = {
         hasAriaModal: document.querySelectorAll('[aria-modal="true"]').length > 0,
@@ -299,7 +312,10 @@ export const extractPageContent = async (page) => {
         successEvidence,
         isFormClosed,
         openingsList,
-        textSnippet
+        textSnippet,
+        emails,
+        phones,
+        googleForms
       };
     }, iframeContent);
 

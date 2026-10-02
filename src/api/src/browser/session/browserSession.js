@@ -96,6 +96,13 @@ export class BrowserSession {
         this.currentUrl = newUrl;
         this.lastUsedAt = new Date();
 
+        try {
+          const { SessionRegistry } = await import("./sessionRegistry.js");
+          SessionRegistry.resetHumanResponseTimerIfActive(this.applicationId, this.userId);
+        } catch (timerErr) {
+          // non-blocking
+        }
+
         const tab = this.tabs.find(t => t.page === page);
         if (tab) {
           const oldDomain = tab.domain;

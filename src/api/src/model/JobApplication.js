@@ -215,6 +215,9 @@ const jobApplicationSchema = new mongoose.Schema(
       ],
       nextRecommendedAction: { type: String, default: "" },
       actionReason: { type: String, default: "" },
+      detectedEmails: [{ type: String }],
+      detectedPhones: [{ type: String }],
+      detectedGoogleForms: [{ type: String }],
       analyzedAt: { type: Date, default: null },
     },
     /**

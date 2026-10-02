@@ -109,6 +109,14 @@ export class SessionRegistry {
     }
   }
 
+  static resetHumanResponseTimerIfActive(applicationId, userId) {
+    const appId = String(applicationId);
+    if (this.humanResponseTimers.has(appId)) {
+      logJobEvent("sessionRegistry", "HUMAN_TIMER_RESET", `[application:${appId}] Page transition detected. Resetting 3-minute inactivity timer.`).catch(() => {});
+      this.startHumanResponseTimer(appId, userId);
+    }
+  }
+
   static startHumanResponseTimer(applicationId, userId) {
     const appId = String(applicationId);
     this.clearHumanResponseTimer(appId);
