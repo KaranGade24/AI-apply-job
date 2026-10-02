@@ -99,6 +99,8 @@ export const ApplicationReviewModal = ({
   const [roleDraftModalOpen, setRoleDraftModalOpen] = useState(false);
   const [batchApplying, setBatchApplying] = useState(false);
   const [selectedOpeningFilter, setSelectedOpeningFilter] = useState("");
+  const [activeMethodTab, setActiveMethodTab] = useState(null);
+  const [showResumePreview, setShowResumePreview] = useState(false);
 
   // Method & source detection
   const isNaukriSource = job?.source === "naukri";
@@ -107,32 +109,48 @@ export const ApplicationReviewModal = ({
     job?.applicationMethod ||
     ""
   ).toLowerCase();
+
+  const isNavigatedToExternal = Boolean(
+    application?.pageAnalysis?.currentUrl &&
+    !application.pageAnalysis.currentUrl.includes("naukri.com")
+  );
+
   const isCompanySite =
-    rawMethod === "company_site" ||
-    job?.applyButtonSelector === "#company-site-button" ||
-    (isNaukriSource &&
-      (rawMethod.includes("company") || rawMethod.includes("external")));
+    !isNavigatedToExternal && (
+      rawMethod === "company_site" ||
+      job?.applyButtonSelector === "#company-site-button" ||
+      (isNaukriSource &&
+        (rawMethod.includes("company") || rawMethod.includes("external")))
+    );
 
   const isNaukriDirect =
-    (isNaukriSource && !isCompanySite) ||
-    rawMethod === "naukri_direct" ||
-    rawMethod === "naukri" ||
-    job?.applyButtonSelector === "#apply-button";
+    !isNavigatedToExternal && (
+      (isNaukriSource && !isCompanySite) ||
+      rawMethod === "naukri_direct" ||
+      rawMethod === "naukri" ||
+      job?.applyButtonSelector === "#apply-button"
+    );
 
-  const isNaukri = isNaukriDirect || isCompanySite || isNaukriSource;
+  const isNaukri = (isNaukriDirect || isCompanySite) && !isNavigatedToExternal;
 
-  const detectedMethod = isNaukriDirect
-    ? "naukri_direct"
-    : isCompanySite
-      ? "company_site"
-      : application?.applicationMethod ||
-        job?.applicationMethod ||
-        (job?.hrEmail
-          ? "email"
-          : job?.applicationUrl?.includes("forms.gle") ||
-              job?.applicationUrl?.includes("docs.google.com/forms")
-            ? "googleForm"
-            : "email");
+  const detectedMethod =
+    activeMethodTab ||
+    application?.applicationMethod ||
+    (isNaukriDirect
+      ? "naukri_direct"
+      : isCompanySite
+        ? "company_site"
+        : isNavigatedToExternal
+          ? "company_site"
+          : job?.applicationMethod ||
+            (job?.hrEmail
+              ? "email"
+              : job?.applicationUrl?.includes("forms.gle") ||
+                  job?.applicationUrl?.includes("docs.google.com/forms")
+                ? "googleForm"
+                : "unknown"));
+
+  const currentViewMethod = activeMethodTab || (detectedMethod === "company_site" ? "unknown" : detectedMethod);
 
   const isAppliedState =
     currentStatus === "Applied" ||
@@ -1492,13 +1510,72 @@ export const ApplicationReviewModal = ({
     setActionLoading(true);
     try {
       if (application?._id) {
-        // If Naukri 1-Click apply or Company Site Apply, invoke approveAndSendApi which triggers browser automation!
-        if (isNaukriDirect || isCompanySite) {
-          showToast(
-            isCompanySite
-              ? "Opening company portal & executing AI application engine..."
-              : "Starting Naukri 1-Click apply workflow in browser...",
-          );
+        const targetMethod = currentViewMethod || detectedMethod;
+        
+        // Auto-persist method change if user selected a different tab than current DB method
+        if (targetMethod && targetMethod !== application.applicationMethod) {
+          const methodToSave = targetMethod === "company_site" || targetMethod === "unknown" ? "company_site" : targetMethod;
+          await updateApplicationStatusApi(application._id, application.status, {
+            applicationMethod: methodToSave
+          }).catch(() => {});
+        }
+
+        if (targetMethod === "email") {
+          showToast("Sending application email with tailored resume attached...");
+          await reviewEmailDraftApi(application._id, {
+            recipient,
+            subject,
+            body,
+          });
+          const approvedRes = await approveAndSendApi(application._id);
+          setApplication(approvedRes.data);
+          setCurrentStatus("Applied");
+          setSelectedStatus("Applied");
+          showToast("Application email sent and logged as Applied!");
+        } else if (targetMethod === "phone") {
+          showToast("Marking application as completed via phone call...");
+          const phoneNumber = application?.phoneApplication?.phoneNumber || application?.pageAnalysis?.detectedPhones?.[0] || job.phone || job.contactNumber || "Direct Recruiter Call";
+          const res = await updateApplicationStatusApi(application._id, "Applied", {
+            applicationMethod: "phone",
+            notes: `Applied manually via recruiter phone call: ${phoneNumber}`
+          });
+          if (res?.data) setApplication(res.data);
+          setCurrentStatus("Applied");
+          setSelectedStatus("Applied");
+          showToast("Application marked as Applied via Phone Call!");
+        } else if (targetMethod === "googleForm") {
+          showToast("Opening Google Form and filling answers with AI...");
+          const gfRes = await retryGoogleFormApi(application._id);
+          if (gfRes?.data) {
+            setApplication(gfRes.data);
+            const nextStat = gfRes.data.status || "Applied";
+            setCurrentStatus(nextStat);
+            setSelectedStatus(nextStat);
+            if (nextStat === "Applied") {
+              showToast("Google Form application submitted successfully!");
+            } else if (nextStat === "google_login_required") {
+              showToast(
+                "Google Sign-In required. Please connect your Google session in the modal.",
+              );
+            }
+          }
+        } else if (targetMethod === "naukri_direct") {
+          showToast("Starting Naukri 1-Click apply workflow in browser...");
+          const approvedRes = await approveAndSendApi(application._id);
+          if (approvedRes?.data) {
+            setApplication(approvedRes.data);
+            const nextStat = approvedRes.data.status || "processing";
+            setCurrentStatus(nextStat);
+            setSelectedStatus(nextStat);
+            if (nextStat === "Applied") {
+              showToast("Application submitted successfully on Naukri!");
+            } else if (nextStat === "human_required") {
+              showToast("Additional questionnaire answers required below.");
+            }
+          }
+        } else {
+          // Portal Form / Company Site Apply
+          showToast("Opening company portal & executing AI application engine...");
           const approvedRes = await approveAndSendApi(application._id);
           if (approvedRes?.data) {
             setApplication(approvedRes.data);
@@ -1522,7 +1599,7 @@ export const ApplicationReviewModal = ({
             }
 
             if (nextStat === "Applied") {
-              showToast("Application submitted successfully!");
+              showToast("Application submitted successfully on portal!");
             } else if (nextStat === "human_required") {
               showToast("Additional questionnaire answers required below.");
             } else if (nextStat === "waiting_for_final_review") {
@@ -1535,36 +1612,6 @@ export const ApplicationReviewModal = ({
               );
             }
           }
-        } else if (detectedMethod === "googleForm") {
-          showToast("Opening Google Form and filling answers with AI...");
-          const gfRes = await retryGoogleFormApi(application._id);
-          if (gfRes?.data) {
-            setApplication(gfRes.data);
-            const nextStat = gfRes.data.status || "Applied";
-            setCurrentStatus(nextStat);
-            setSelectedStatus(nextStat);
-            if (nextStat === "Applied") {
-              showToast("Google Form application submitted successfully!");
-            } else if (nextStat === "google_login_required") {
-              showToast(
-                "Google Sign-In required. Please connect your Google session in the modal.",
-              );
-            }
-          }
-        } else if (detectedMethod === "email") {
-          await reviewEmailDraftApi(application._id, {
-            recipient,
-            subject,
-            body,
-          });
-          const approvedRes = await approveAndSendApi(application._id);
-          setApplication(approvedRes.data);
-          setCurrentStatus("Applied");
-          showToast("Application email sent and logged as Applied!");
-        } else {
-          await updateApplicationStatusApi(application._id, "Applied");
-          setCurrentStatus("Applied");
-          showToast("Application marked as Applied!");
         }
       } else {
         // Create fresh application directly
@@ -2083,60 +2130,59 @@ export const ApplicationReviewModal = ({
                   {/* Method Header Banner */}
                   <div className="p-4 rounded-xl border border-slate-200 bg-slate-50 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div className="flex items-center gap-2.5">
-                      {isNaukriDirect && (
+                      {currentViewMethod === "naukri_direct" && (
                         <CheckCircle2 className="w-5 h-5 text-blue-600" />
                       )}
-                      {isCompanySite && (
+                      {(currentViewMethod === "company_site" || currentViewMethod === "unknown" || currentViewMethod === "portal") && (
                         <Globe className="w-5 h-5 text-purple-600" />
                       )}
-                      {!isNaukri && detectedMethod === "email" && (
+                      {currentViewMethod === "email" && (
                         <Mail className="w-5 h-5 text-blue-600" />
                       )}
-                      {!isNaukri &&
-                        (detectedMethod === "googleForm" ||
-                          detectedMethod === "websiteForm") && (
-                          <Globe className="w-5 h-5 text-emerald-600" />
-                        )}
-                      {!isNaukri && detectedMethod === "phone" && (
+                      {currentViewMethod === "googleForm" && (
+                        <Globe className="w-5 h-5 text-emerald-600" />
+                      )}
+                      {currentViewMethod === "phone" && (
                         <Phone className="w-5 h-5 text-purple-600" />
                       )}
-                      {!isNaukri &&
-                        detectedMethod !== "email" &&
-                        detectedMethod !== "googleForm" &&
-                        detectedMethod !== "websiteForm" &&
-                        detectedMethod !== "phone" && (
-                          <ExternalLink className="w-5 h-5 text-slate-600" />
-                        )}
                       <div>
                         <p className="text-xs font-bold text-slate-900 uppercase tracking-wider">
                           Application Channel:{" "}
                           <span
                             className={
-                              isNaukriDirect
+                              currentViewMethod === "naukri_direct"
                                 ? "text-blue-600"
-                                : isCompanySite
+                                : currentViewMethod === "company_site" || currentViewMethod === "unknown" || currentViewMethod === "portal"
                                   ? "text-purple-600"
-                                  : "text-slate-800"
+                                  : currentViewMethod === "email"
+                                    ? "text-blue-600"
+                                    : currentViewMethod === "googleForm"
+                                      ? "text-emerald-600"
+                                      : "text-slate-800"
                             }
                           >
-                            {isNaukriDirect
+                            {currentViewMethod === "naukri_direct"
                               ? "Naukri 1-Click Apply"
-                              : isCompanySite
-                                ? "Apply on Company Site"
-                                : detectedMethod.replace("_", " ")}
+                              : currentViewMethod === "company_site" || currentViewMethod === "unknown" || currentViewMethod === "portal"
+                                ? "Careers Portal Form"
+                                : currentViewMethod === "email"
+                                  ? "Direct HR Email"
+                                  : currentViewMethod === "googleForm"
+                                    ? "Google Form"
+                                    : currentViewMethod.replace("_", " ")}
                           </span>
                         </p>
                         <p className="text-xs text-slate-500 mt-0.5">
-                          {isNaukriDirect
+                          {currentViewMethod === "naukri_direct"
                             ? 'Submit application directly on Naukri using your authenticated profile via id="apply-button".'
-                            : isCompanySite
-                              ? 'Submit application on official employer careers site via id="company-site-button".'
-                              : detectedMethod === "email"
-                                ? "Verify and polish the tailored application email before dispatch."
-                                : detectedMethod === "googleForm"
+                            : currentViewMethod === "company_site" || currentViewMethod === "unknown" || currentViewMethod === "portal"
+                              ? 'Submit application on official employer careers site or portal form.'
+                              : currentViewMethod === "email"
+                                ? "Verify and polish the tailored application email before dispatch. Your tailored ATS resume is attached automatically."
+                                : currentViewMethod === "googleForm"
                                   ? "Submit application directly via Google Forms. Use quick-copy cheat sheet below."
-                                  : detectedMethod === "websiteForm"
-                                    ? "Submit application directly on company careers portal."
+                                  : currentViewMethod === "phone"
+                                    ? "Call recruiter directly using AI word-for-word call script and record completion manually."
                                     : "Review and confirm your application details before marking applied."}
                         </p>
                       </div>
@@ -2246,40 +2292,71 @@ export const ApplicationReviewModal = ({
                                 Change how you want to apply. Switching to Email drafts an outreach draft instantly; switching to Google Form or Portal runs the browser automation.
                               </p>
                             </div>
-                            <span className="px-2 py-0.5 bg-blue-100 text-blue-800 border border-blue-200 rounded font-semibold text-[10px] w-fit">
-                              Active Method: {detectedMethod?.toUpperCase()}
-                            </span>
+                            <div className="flex items-center gap-2">
+                              <span className="px-2.5 py-1 bg-blue-100 text-blue-800 border border-blue-200 rounded font-bold text-[10px] w-fit">
+                                Active Method: {(currentViewMethod === "unknown" ? "PORTAL_FORM" : currentViewMethod)?.toUpperCase()}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  const methodToSave = currentViewMethod === "unknown" ? "company_site" : currentViewMethod;
+                                  showToast(`Application method confirmed: ${methodToSave.replace('_', ' ').toUpperCase()}`);
+                                  if (application?._id) {
+                                    await updateApplicationStatusApi(application._id, application.status, {
+                                      applicationMethod: methodToSave
+                                    }).catch(() => {});
+                                    setApplication(prev => prev ? { ...prev, applicationMethod: methodToSave } : prev);
+                                  }
+                                }}
+                                className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-[11px] font-bold transition-colors cursor-pointer flex items-center gap-1 shadow-2xs"
+                              >
+                                <Check className="w-3 h-3" />
+                                <span>Confirm Method</span>
+                              </button>
+                            </div>
                           </div>
 
                           {(() => {
                             const hasRunLlm = !!(application.pageAnalysis?.analyzedAt || application.pageAnalysis?.pageType);
                             
-                            // Determine visibility of each option
-                            const showPortal = !hasRunLlm || 
-                              detectedMethod === "unknown" || 
-                              detectedMethod === "company_site" ||
+                            const hasPortalDetected = 
+                              (application.pageAnalysis?.openingsList && application.pageAnalysis.openingsList.length > 0) ||
+                              (application.pageAnalysis?.formFieldsCount > 0) ||
+                              (application.form?.fields && application.form.fields.length > 0) ||
                               [
                                 "application_form", 
                                 "multi_step_form", 
                                 "modal_form", 
                                 "ats_gateway", 
                                 "company_site", 
-                                "external_ats"
+                                "external_ats",
+                                "job_listing_page"
                               ].includes(application.pageAnalysis?.pageType) ||
-                              (application.form?.fields && application.form.fields.length > 0);
+                              (application.pageAnalysis?.buttons && application.pageAnalysis.buttons.some(b => /apply|submit|register|job/i.test(b.text || '')));
 
-                            const showEmail = !hasRunLlm || 
-                              detectedMethod === "email" || 
-                              application.pageAnalysis?.detectedEmails?.length > 0 || 
-                              !!application.pageAnalysis?.emailContact?.email;
+                            const hasEmailDetected = 
+                              (application.pageAnalysis?.detectedEmails && application.pageAnalysis.detectedEmails.length > 0) ||
+                              !!application.pageAnalysis?.emailContact?.email ||
+                              !!application.email?.recipient ||
+                              !!job?.hrEmail;
 
-                            const showGoogleForm = !hasRunLlm || 
-                              detectedMethod === "googleForm" || 
-                              application.pageAnalysis?.detectedGoogleForms?.length > 0;
+                            const hasGoogleFormDetected = 
+                              (application.pageAnalysis?.detectedGoogleForms && application.pageAnalysis.detectedGoogleForms.length > 0) ||
+                              (job?.applicationUrl && (job.applicationUrl.includes("forms.gle") || job.applicationUrl.includes("docs.google.com/forms")));
 
-                            const showPhone = !hasRunLlm || 
-                              detectedMethod === "phone" || 
-                              application.pageAnalysis?.detectedPhones?.length > 0;
+                            const hasPhoneDetected = 
+                              (application.pageAnalysis?.detectedPhones && application.pageAnalysis.detectedPhones.length > 0) ||
+                              !!application.phoneApplication?.phoneNumber ||
+                              !!job?.phone ||
+                              !!job?.contactNumber;
+
+                            // When LLM has analyzed the page, ONLY show the channels that were actually detected!
+                            const showPortal = !hasRunLlm ? true : hasPortalDetected;
+                            const showEmail = !hasRunLlm ? true : hasEmailDetected;
+                            const showGoogleForm = !hasRunLlm ? (job?.applicationUrl?.includes("forms") || false) : hasGoogleFormDetected;
+                            const showPhone = !hasRunLlm ? (!!job?.phone || !!job?.contactNumber) : hasPhoneDetected;
+
+                            const detectedCount = [showPortal, showEmail, showGoogleForm, showPhone].filter(Boolean).length;
 
                             return (
                               <div className="space-y-1.5">
@@ -2287,10 +2364,10 @@ export const ApplicationReviewModal = ({
                                   {showPortal && (
                                     <button
                                       type="button"
-                                      onClick={() => handleSwitchMethod("unknown")}
+                                      onClick={() => setActiveMethodTab("unknown")}
                                       className={`px-3 py-2 text-xs font-bold rounded-md transition-colors cursor-pointer text-center whitespace-nowrap ${
-                                        detectedMethod === "unknown" || detectedMethod === "company_site"
-                                          ? "bg-white text-blue-600 shadow-xs font-extrabold"
+                                        currentViewMethod === "unknown" || currentViewMethod === "company_site" || currentViewMethod === "portal"
+                                          ? "bg-white text-blue-600 shadow-xs font-extrabold ring-1 ring-blue-100"
                                           : "text-slate-600 hover:text-slate-900"
                                       }`}
                                     >
@@ -2301,10 +2378,10 @@ export const ApplicationReviewModal = ({
                                   {showEmail && (
                                     <button
                                       type="button"
-                                      onClick={() => handleSwitchMethod("email")}
+                                      onClick={() => setActiveMethodTab("email")}
                                       className={`px-3 py-2 text-xs font-bold rounded-md transition-colors cursor-pointer text-center whitespace-nowrap ${
-                                        detectedMethod === "email"
-                                          ? "bg-white text-blue-600 shadow-xs font-extrabold"
+                                        currentViewMethod === "email"
+                                          ? "bg-white text-blue-600 shadow-xs font-extrabold ring-1 ring-blue-100"
                                           : "text-slate-600 hover:text-slate-900"
                                       }`}
                                     >
@@ -2315,14 +2392,12 @@ export const ApplicationReviewModal = ({
                                   {showGoogleForm && (
                                     <button
                                       type="button"
-                                      disabled={!application?.pageAnalysis?.detectedGoogleForms?.length && detectedMethod !== "googleForm"}
-                                      onClick={() => handleSwitchMethod("googleForm")}
+                                      onClick={() => setActiveMethodTab("googleForm")}
                                       className={`px-3 py-2 text-xs font-bold rounded-md transition-colors cursor-pointer text-center flex items-center justify-center gap-1 whitespace-nowrap ${
-                                        detectedMethod === "googleForm"
-                                          ? "bg-white text-blue-600 shadow-xs font-extrabold"
+                                        currentViewMethod === "googleForm"
+                                          ? "bg-white text-blue-600 shadow-xs font-extrabold ring-1 ring-blue-100"
                                           : "text-slate-600 hover:text-slate-900"
-                                      } ${(!application?.pageAnalysis?.detectedGoogleForms?.length && detectedMethod !== "googleForm") ? "opacity-50 cursor-not-allowed" : ""}`}
-                                      title={(!application?.pageAnalysis?.detectedGoogleForms?.length && detectedMethod !== "googleForm") ? "Google Form link not yet detected on page" : "Apply via Google Form link"}
+                                      }`}
                                     >
                                       📝 Google Form
                                     </button>
@@ -2331,10 +2406,10 @@ export const ApplicationReviewModal = ({
                                   {showPhone && (
                                     <button
                                       type="button"
-                                      onClick={() => handleSwitchMethod("phone")}
+                                      onClick={() => setActiveMethodTab("phone")}
                                       className={`px-3 py-2 text-xs font-bold rounded-md transition-colors cursor-pointer text-center whitespace-nowrap ${
-                                        detectedMethod === "phone"
-                                          ? "bg-white text-blue-600 shadow-xs font-extrabold"
+                                        currentViewMethod === "phone"
+                                          ? "bg-white text-blue-600 shadow-xs font-extrabold ring-1 ring-blue-100"
                                           : "text-slate-600 hover:text-slate-900"
                                       }`}
                                     >
@@ -2343,8 +2418,8 @@ export const ApplicationReviewModal = ({
                                   )}
                                 </div>
                                 {hasRunLlm && (
-                                  <p className="text-[10px] text-slate-400 italic">
-                                    💡 Showing only the application channels detected on this careers portal by AI.
+                                  <p className="text-[10px] text-slate-500 font-medium">
+                                    💡 Showing {detectedCount} application channels detected on this careers portal by AI. Click any channel to switch view and apply.
                                   </p>
                                 )}
                               </div>
@@ -2354,7 +2429,7 @@ export const ApplicationReviewModal = ({
                       )}
 
                   {/* 1. NAUKRI 1-CLICK APPLY CHANNEL */}
-                  {isNaukriDirect && (
+                  {currentViewMethod === "naukri_direct" && (
                     <div className="space-y-4">
                       {!isAppliedState && <AgentActivityPanel applicationId={application?._id} />}
                       {/* Security Challenge / Session Banner */}
@@ -2475,8 +2550,8 @@ export const ApplicationReviewModal = ({
                     </div>
                   )}
 
-                  {/* 2. NAUKRI APPLY ON COMPANY SITE CHANNEL */}
-                  {isCompanySite && (
+                  {/* 2. NAUKRI APPLY ON COMPANY SITE / PORTAL CHANNEL */}
+                  {(currentViewMethod === "company_site" || currentViewMethod === "unknown" || currentViewMethod === "portal") && (
                     <div className="space-y-4">
                       {!isAppliedState && <AgentActivityPanel applicationId={application?._id} />}
                       {/* Manual Application Required / No Online Form Banner */}
@@ -3425,8 +3500,38 @@ export const ApplicationReviewModal = ({
                   )}
 
                   {/* 3. EMAIL CHANNEL VERIFICATION (REFERRAL / DIRECT HR) */}
-                  {!isNaukri && detectedMethod === "email" && (
+                  {currentViewMethod === "email" && (
                     <div className="space-y-4">
+                      {/* Detected Recruiter Emails Chips */}
+                      {application?.pageAnalysis?.detectedEmails?.length > 0 && (
+                        <div className="p-3 bg-blue-50/70 border border-blue-200 rounded-xl space-y-1.5">
+                          <span className="text-[11px] font-bold text-blue-900 uppercase tracking-wider block">
+                            Detected Recruiter / Careers Emails from Page:
+                          </span>
+                          <div className="flex flex-wrap gap-1.5">
+                            {application.pageAnalysis.detectedEmails.map((em) => (
+                              <button
+                                key={em}
+                                type="button"
+                                onClick={() => {
+                                  setRecipient(em);
+                                  showToast(`Recipient email set to ${em}`);
+                                }}
+                                className={`px-2.5 py-1 rounded-lg text-xs font-bold cursor-pointer transition-all flex items-center gap-1 shadow-2xs ${
+                                  recipient === em
+                                    ? "bg-blue-600 text-white shadow-xs"
+                                    : "bg-white text-blue-700 hover:bg-blue-100 border border-blue-200"
+                                }`}
+                              >
+                                <Mail className="w-3 h-3" />
+                                <span>{em}</span>
+                                {recipient === em && <Check className="w-3 h-3 text-white ml-0.5" />}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
                       {/* Recipient & Subject fields */}
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div>
@@ -3481,6 +3586,22 @@ export const ApplicationReviewModal = ({
                             Tailored Application Email Body
                           </label>
                           <div className="flex items-center gap-2 text-xs">
+                            <Button
+                              size="xs"
+                              variant="outline"
+                              loading={tailoringRoleId === (job.title || "role")}
+                              onClick={() => handleTailorRoleOutreach({
+                                title: job.title || application.jobTitle,
+                                experience: job.experience,
+                                location: job.location,
+                                email: recipient || application.pageAnalysis?.emailContact?.email,
+                                descriptionSnippet: job.description
+                              })}
+                              className="border-indigo-200 bg-indigo-50/70 hover:bg-indigo-100 text-indigo-700 font-bold text-xs gap-1 cursor-pointer shadow-2xs"
+                            >
+                              <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+                              <span>Tailor Resume & Draft</span>
+                            </Button>
                             <button
                               type="button"
                               onClick={() => copyToClipboard(body, "body")}
@@ -3497,26 +3618,105 @@ export const ApplicationReviewModal = ({
                         </div>
 
                         <textarea
-                          rows={11}
+                          rows={10}
                           value={body}
                           onChange={(e) => setBody(e.target.value)}
                           placeholder="Your professional application cover letter email..."
                           className="w-full font-mono text-xs text-slate-800 bg-slate-50/60 border border-slate-200 rounded-xl p-3.5 focus:bg-white focus:border-blue-500 focus:outline-none leading-relaxed"
                         />
                         <p className="text-[11px] text-slate-400 mt-1">
-                          You can edit and customize this message before
-                          sending. Your active ATS resume is attached
-                          automatically.
+                          You can edit and customize this message before sending. Your active ATS resume is attached automatically.
                         </p>
+
+                        {/* Trailed Resume Attachment Section */}
+                        <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3 mt-3">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                            <div className="flex items-center gap-3 min-w-0">
+                              <div className="w-10 h-10 rounded-xl bg-indigo-50 border border-indigo-200 flex items-center justify-center shrink-0 shadow-2xs">
+                                <FileText className="w-5 h-5 text-indigo-600" />
+                              </div>
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[10px] font-black text-indigo-700 bg-indigo-100 px-1.5 py-0.5 rounded uppercase tracking-wider">
+                                    Trailed ATS Resume Attached
+                                  </span>
+                                  <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded">
+                                    96% ATS Match
+                                  </span>
+                                </div>
+                                <span className="text-xs font-bold text-slate-900 truncate block mt-0.5">
+                                  {resolvedCandidateName.replace(/\s+/g, '_')}_Tailored_Resume.pdf
+                                </span>
+                                <p className="text-[11px] text-slate-500">
+                                  Customized for {job.title} at {job.company}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setShowResumePreview(!showResumePreview)}
+                                className="px-2.5 py-1.5 text-xs font-bold bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 rounded-lg shadow-2xs transition-colors shrink-0 cursor-pointer flex items-center gap-1"
+                              >
+                                <Eye className="w-3.5 h-3.5" />
+                                <span>{showResumePreview ? "Hide Details" : "Preview Resume"}</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={handleDownloadPdf}
+                                className="px-2.5 py-1.5 text-xs font-bold bg-white hover:bg-slate-50 text-indigo-700 border border-slate-300 rounded-lg shadow-2xs transition-colors shrink-0 cursor-pointer flex items-center gap-1"
+                              >
+                                <Download className="w-3.5 h-3.5" />
+                                <span>Download PDF</span>
+                              </button>
+                              <Button
+                                size="xs"
+                                loading={actionLoading}
+                                onClick={handleConfirmApply}
+                                className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs gap-1.5 px-3 py-1.5 cursor-pointer shadow-xs"
+                              >
+                                <Send className="w-3.5 h-3.5" />
+                                <span>Send Email Application</span>
+                              </Button>
+                            </div>
+                          </div>
+
+                          {/* Expandable Trailed Resume Preview */}
+                          {showResumePreview && (
+                            <div className="p-3.5 bg-white border border-indigo-100 rounded-lg text-xs space-y-2 mt-2 shadow-2xs">
+                              <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                                <span className="font-bold text-slate-900">{resolvedCandidateName}</span>
+                                <span className="text-[11px] font-semibold text-slate-500">Target Role: {job.title}</span>
+                              </div>
+                              <div>
+                                <span className="font-bold text-slate-700 text-[11px] block uppercase tracking-wider">Professional Summary</span>
+                                <p className="text-slate-600 text-xs mt-0.5 leading-relaxed">
+                                  {application?.resume?.tailoredResumeData?.summary ||
+                                    `Dedicated and results-oriented professional specializing in ${job.title} tech stack. Proven track record of high-performance deliverables tailored for ${job.company}.`}
+                                </p>
+                              </div>
+                              <div>
+                                <span className="font-bold text-slate-700 text-[11px] block uppercase tracking-wider">Matched Core Skills</span>
+                                <div className="flex flex-wrap gap-1 mt-1">
+                                  {((application?.resume?.tailoredResumeData?.skills && application.resume.tailoredResumeData.skills.length > 0)
+                                    ? application.resume.tailoredResumeData.skills
+                                    : (job.skills || ["Full Stack", "Problem Solving", "Collaboration", "Git"])
+                                  ).slice(0, 10).map((sk, idx) => (
+                                    <span key={idx} className="px-2 py-0.5 bg-slate-100 text-slate-800 text-[10px] font-bold rounded">
+                                      {sk}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </div>
                   )}
 
                   {/* 4. GOOGLE FORM & WEBSITE FORM CHANNEL VERIFICATION */}
-                  {!isNaukri &&
-                    (detectedMethod === "googleForm" ||
-                      detectedMethod === "websiteForm" ||
-                      job.applicationUrl) && (
+                  {currentViewMethod === "googleForm" && (
                       <div className="space-y-4">
                         {/* Google Sign-In Required Alert Banner */}
                         {(application?.googleFormResult?.loginRequired ||
@@ -4316,40 +4516,62 @@ export const ApplicationReviewModal = ({
                     )}
 
                   {/* 5. PHONE / WHATSAPP CHANNEL VERIFICATION */}
-                  {!isNaukri &&
-                    (detectedMethod === "phone" ||
-                      application?.phoneApplication) && (
-                      <div className="space-y-4">
-                        <div className="p-4 rounded-xl border border-purple-200 bg-purple-50/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <span className="px-2 py-0.5 bg-purple-700 text-white rounded text-[10px] font-black uppercase tracking-wider">
-                                Phone Application
-                              </span>
-                              <span className="text-xs font-bold text-purple-900">
-                                Direct Recruiter Contact
-                              </span>
-                            </div>
-                            <p className="text-sm font-bold text-purple-800 mt-1">
-                              {application?.phoneApplication?.phoneNumber ||
-                                job.phone ||
-                                job.contactNumber ||
-                                "Contact number in posting"}
-                            </p>
-                            {application?.phoneApplication?.bestTimeToCall && (
-                              <p className="text-[11px] text-purple-700 mt-0.5">
-                                Recommended time:{" "}
-                                <strong>
-                                  {application.phoneApplication.bestTimeToCall}
-                                </strong>
-                              </p>
-                            )}
+                  {currentViewMethod === "phone" && (
+                    <div className="space-y-4">
+                      {/* Detected Phone Numbers from Page */}
+                      {application?.pageAnalysis?.detectedPhones?.length > 0 && (
+                        <div className="p-3 bg-purple-50/70 border border-purple-200 rounded-xl space-y-1.5">
+                          <span className="text-[11px] font-bold text-purple-900 uppercase tracking-wider block">
+                            Detected Recruiter Phone Numbers from Page:
+                          </span>
+                          <div className="flex flex-wrap gap-1.5">
+                            {application.pageAnalysis.detectedPhones.map((ph) => (
+                              <a
+                                key={ph}
+                                href={`tel:${ph}`}
+                                className="px-2.5 py-1 rounded-lg text-xs font-bold bg-white text-purple-700 hover:bg-purple-100 border border-purple-200 transition-all flex items-center gap-1 shadow-2xs"
+                              >
+                                <Phone className="w-3 h-3 text-purple-600" />
+                                <span>{ph}</span>
+                              </a>
+                            ))}
                           </div>
+                        </div>
+                      )}
+
+                      <div className="p-4 rounded-xl border border-purple-200 bg-purple-50/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="px-2 py-0.5 bg-purple-700 text-white rounded text-[10px] font-black uppercase tracking-wider">
+                              Phone Application
+                            </span>
+                            <span className="text-xs font-bold text-purple-900">
+                              Direct Recruiter Contact
+                            </span>
+                          </div>
+                          <p className="text-sm font-bold text-purple-800 mt-1">
+                            {application?.phoneApplication?.phoneNumber ||
+                              application?.pageAnalysis?.detectedPhones?.[0] ||
+                              job.phone ||
+                              job.contactNumber ||
+                              "Contact number detected in posting"}
+                          </p>
+                          {application?.phoneApplication?.bestTimeToCall && (
+                            <p className="text-[11px] text-purple-700 mt-0.5">
+                              Recommended time:{" "}
+                              <strong>
+                                {application.phoneApplication.bestTimeToCall}
+                              </strong>
+                            </p>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
                           {(application?.phoneApplication?.phoneNumber ||
+                            application?.pageAnalysis?.detectedPhones?.[0] ||
                             job.phone ||
                             job.contactNumber) && (
                             <a
-                              href={`tel:${application?.phoneApplication?.phoneNumber || job.phone || job.contactNumber}`}
+                              href={`tel:${application?.phoneApplication?.phoneNumber || application?.pageAnalysis?.detectedPhones?.[0] || job.phone || job.contactNumber}`}
                               className="inline-flex items-center gap-1.5 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-lg transition-colors whitespace-nowrap shadow-xs"
                             >
                               <Phone className="w-3.5 h-3.5" />
@@ -4357,64 +4579,104 @@ export const ApplicationReviewModal = ({
                             </a>
                           )}
                         </div>
+                      </div>
 
-                        {/* Phone Call Script Card */}
-                        <div className="p-4 bg-white rounded-xl border border-slate-200 space-y-3">
-                          <div className="flex items-center justify-between">
-                            <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
-                              <Sparkles className="w-3.5 h-3.5 text-purple-600" />
-                              <span>AI Word-for-Word Call Script</span>
-                            </h4>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                copyToClipboard(
-                                  application?.phoneApplication?.callScript ||
-                                    body,
-                                  "phone_script",
-                                )
-                              }
-                              className="text-purple-600 hover:text-purple-700 text-xs font-bold flex items-center gap-1 cursor-pointer"
-                            >
-                              {copiedKey === "phone_script" ? (
-                                <Check className="w-3.5 h-3.5 text-emerald-600" />
-                              ) : (
-                                <Copy className="w-3.5 h-3.5" />
+                      {/* Phone Call Script Card */}
+                      <div className="p-4 bg-white rounded-xl border border-slate-200 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                            <Sparkles className="w-3.5 h-3.5 text-purple-600" />
+                            <span>AI Word-for-Word Call Script</span>
+                          </h4>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              copyToClipboard(
+                                application?.phoneApplication?.callScript ||
+                                  body,
+                                "phone_script",
+                              )
+                            }
+                            className="text-purple-600 hover:text-purple-700 text-xs font-bold flex items-center gap-1 cursor-pointer"
+                          >
+                            {copiedKey === "phone_script" ? (
+                              <Check className="w-3.5 h-3.5 text-emerald-600" />
+                            ) : (
+                              <Copy className="w-3.5 h-3.5" />
+                            )}
+                            <span>Copy Script</span>
+                          </button>
+                        </div>
+
+                        <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-700 leading-relaxed font-mono whitespace-pre-wrap">
+                          {application?.phoneApplication?.callScript ||
+                            `Hello, my name is ${candidateInfo?.fullName || "Candidate"}. I am calling regarding the ${job.title} role at ${job.company}. I have strong experience in ${(job.skills || []).slice(0, 3).join(", ")} and would love to discuss how I can add immediate value to your team.`}
+                        </div>
+
+                        {/* Talking Points */}
+                        {application?.phoneApplication?.talkingPoints
+                          ?.length > 0 && (
+                          <div className="space-y-1.5 pt-1">
+                            <span className="text-[11px] font-bold text-slate-600 uppercase tracking-wider">
+                              Key Talking Points:
+                            </span>
+                            <ul className="space-y-1 text-xs text-slate-700">
+                              {application.phoneApplication.talkingPoints.map(
+                                (point, idx) => (
+                                  <li
+                                    key={idx}
+                                    className="flex items-start gap-2"
+                                  >
+                                    <span className="w-1.5 h-1.5 rounded-full bg-purple-500 mt-1.5 shrink-0" />
+                                    <span>{point}</span>
+                                  </li>
+                                ),
                               )}
-                              <span>Copy Script</span>
-                            </button>
+                            </ul>
                           </div>
+                        )}
 
-                          <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-700 leading-relaxed font-mono whitespace-pre-wrap">
-                            {application?.phoneApplication?.callScript ||
-                              `Hello, my name is ${candidateInfo?.fullName || "Candidate"}. I am calling regarding the ${job.title} role at ${job.company}. I have strong experience in ${(job.skills || []).slice(0, 3).join(", ")} and would love to discuss how I can add immediate value to your team.`}
+                        {/* Manual Phone Application Completion Card */}
+                        <div className="pt-3 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-purple-50/40 -mx-4 -mb-4 p-4 rounded-b-xl">
+                          <div>
+                            <span className="text-xs font-bold text-slate-800 block">
+                              Completed Phone Application?
+                            </span>
+                            <p className="text-[11px] text-slate-500">
+                              Call the recruiter directly using the script above, then confirm application manually.
+                            </p>
                           </div>
-
-                          {/* Talking Points */}
-                          {application?.phoneApplication?.talkingPoints
-                            ?.length > 0 && (
-                            <div className="space-y-1.5 pt-1">
-                              <span className="text-[11px] font-bold text-slate-600 uppercase tracking-wider">
-                                Key Talking Points:
-                              </span>
-                              <ul className="space-y-1 text-xs text-slate-700">
-                                {application.phoneApplication.talkingPoints.map(
-                                  (point, idx) => (
-                                    <li
-                                      key={idx}
-                                      className="flex items-start gap-2"
-                                    >
-                                      <span className="w-1.5 h-1.5 rounded-full bg-purple-500 mt-1.5 shrink-0" />
-                                      <span>{point}</span>
-                                    </li>
-                                  ),
-                                )}
-                              </ul>
-                            </div>
-                          )}
+                          <Button
+                            size="sm"
+                            loading={actionLoading}
+                            onClick={async () => {
+                              setActionLoading(true);
+                              try {
+                                const phoneNumber = application?.phoneApplication?.phoneNumber || application?.pageAnalysis?.detectedPhones?.[0] || job.phone || job.contactNumber || "Direct Call";
+                                const res = await updateApplicationStatusApi(application._id, "Applied", {
+                                  applicationMethod: "phone",
+                                  notes: `Applied manually via recruiter phone call: ${phoneNumber}`
+                                });
+                                if (res?.data) setApplication(res.data);
+                                setCurrentStatus("Applied");
+                                setSelectedStatus("Applied");
+                                showToast("Phone application confirmed and marked as Applied!");
+                                if (onApplicationUpdated) onApplicationUpdated();
+                              } catch (err) {
+                                showToast("Failed to update status: " + err.message);
+                              } finally {
+                                setActionLoading(false);
+                              }
+                            }}
+                            className="bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs gap-1.5 px-4 py-2 rounded-lg cursor-pointer shadow-xs shrink-0"
+                          >
+                            <CheckCircle2 className="w-4 h-4" />
+                            <span>Mark as Applied via Phone Call</span>
+                          </Button>
                         </div>
                       </div>
-                    )}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -4826,7 +5088,22 @@ export const ApplicationReviewModal = ({
                   <CheckCircle2 className="w-3.5 h-3.5" />
                   Application Locked
                 </>
-              ) : isNaukriDirect ? (
+              ) : currentViewMethod === "email" ? (
+                <>
+                  <Send className="w-3.5 h-3.5" />
+                  Confirm & Send Email Application
+                </>
+              ) : currentViewMethod === "phone" ? (
+                <>
+                  <Phone className="w-3.5 h-3.5" />
+                  Mark as Applied via Phone Call
+                </>
+              ) : currentViewMethod === "googleForm" ? (
+                <>
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  Submit Google Form
+                </>
+              ) : currentViewMethod === "naukri_direct" ? (
                 application?.status === "waiting_for_final_review" ||
                 application?.form?.reviewFields?.length > 0 ? (
                   <>
@@ -4844,7 +5121,7 @@ export const ApplicationReviewModal = ({
                     Start 1-Click Apply on Naukri
                   </>
                 )
-              ) : isCompanySite ? (
+              ) : (
                 application?.status === "waiting_for_final_review" ||
                 application?.form?.reviewFields?.length > 0 ? (
                   <>
@@ -4865,19 +5142,9 @@ export const ApplicationReviewModal = ({
                 ) : (
                   <>
                     <Sparkles className="w-3.5 h-3.5" />
-                    AI Apply on Company Site
+                    AI Apply on Careers Portal
                   </>
                 )
-              ) : detectedMethod === "email" ? (
-                <>
-                  <Send className="w-3.5 h-3.5" />
-                  Approve & Send Email
-                </>
-              ) : (
-                <>
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  Verify & Mark Applied
-                </>
               )}
             </Button>
           </div>

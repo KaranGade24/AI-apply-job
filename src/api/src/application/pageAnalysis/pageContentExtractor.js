@@ -270,15 +270,39 @@ export const extractPageContent = async (page) => {
       const textSnippet = bodyText.replace(/\s+/g, ' ').slice(0, 35000);
 
       // Extract emails, phones, and google form links safely
+      const mailtoLinks = Array.from(document.querySelectorAll('a[href^="mailto:"]'))
+        .map(a => a.href.replace(/^mailto:/i, '').split('?')[0].trim().toLowerCase())
+        .filter(Boolean);
       const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
-      const phoneRegex = /(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/g;
-      const emails = Array.from(new Set(bodyText.match(emailRegex) || []));
-      const phones = Array.from(new Set(bodyText.match(phoneRegex) || []));
+      const bodyEmails = (bodyText.match(emailRegex) || []).map(e => e.trim().toLowerCase());
+      const emails = Array.from(new Set([...mailtoLinks, ...bodyEmails])).filter(e => {
+        if (/\.(png|jpg|jpeg|gif|svg|webp|css|js|woff|woff2|ttf)$/i.test(e)) return false;
+        if (/example\.com|domain\.com|yourcompany\.com|email\.com/i.test(e)) return false;
+        return e.length > 5 && e.includes('@') && e.includes('.');
+      });
+
+      const telLinks = Array.from(document.querySelectorAll('a[href^="tel:"]'))
+        .map(a => a.href.replace(/^tel:/i, '').split('?')[0].trim())
+        .filter(Boolean);
+      const phoneRegex = /(?:\+?\d{1,3}[-.\s]?)?\(?\d{2,4}\)?[-.\s]?\d{3,4}[-.\s]?\d{3,4}/g;
+      const rawPhones = Array.from(new Set([...telLinks, ...(bodyText.match(phoneRegex) || [])]));
+      const phones = rawPhones.filter(p => {
+        const cleaned = p.replace(/[^\d+]/g, '');
+        const digitsOnly = cleaned.replace(/\D/g, '');
+        if (digitsOnly.length < 8 || digitsOnly.length > 15) return false;
+        // Exclude dates like 2026-10-02 or 2024-2026
+        if (/^(19|20)\d{2}[-/.](0[1-9]|1[0-2])[-/.](0[1-9]|[12]\d|3[01])$/.test(p.trim())) return false;
+        if (/^(19|20)\d{2}[-/.](19|20)\d{2}$/.test(p.trim())) return false;
+        // Exclude repeating single digit
+        if (/^(\d)\1+$/.test(digitsOnly)) return false;
+        return true;
+      });
 
       const googleForms = [];
-      document.querySelectorAll('a[href*="docs.google.com/forms"], a[href*="forms.gle"]').forEach(a => {
-        if (a.href && !googleForms.includes(a.href)) {
-          googleForms.push(a.href);
+      document.querySelectorAll('a[href*="docs.google.com/forms"], a[href*="forms.gle"], iframe[src*="docs.google.com/forms"]').forEach(el => {
+        const formUrl = el.href || el.src;
+        if (formUrl && !googleForms.includes(formUrl)) {
+          googleForms.push(formUrl);
         }
       });
 
