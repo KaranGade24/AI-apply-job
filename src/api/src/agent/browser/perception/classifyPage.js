@@ -264,6 +264,22 @@ export const classifyPageDeterministic = (observation) => {
     };
   }
 
+  // 11. Job Listing Page (Multiple Job Titles/Apply Buttons)
+  const jobListKeywords = ['careers', 'jobs', 'openings', 'vacancies', 'current openings', 'career opportunities'];
+  const hasMultipleApplyButtons = buttonTexts.filter((b) => applyButtonKeywords.some((kw) => b.includes(kw))).length >= 2 ||
+    elements.filter((e) => e.tag === 'a' && applyButtonKeywords.some((kw) => (e.text || e.label || '').toLowerCase().includes(kw))).length >= 2;
+
+  const hasJobGridKeywords = ['filter', 'search', 'department', 'location', 'all departments'].filter(kw => lowerText.includes(kw)).length >= 2;
+
+  if (hasMultipleApplyButtons || (hasJobGridKeywords && jobListKeywords.some(kw => lowerUrl.includes(kw) || lowerTitle.includes(kw)))) {
+    signals.push('multiple_job_titles_or_apply_buttons_detected');
+    return {
+      pageType: PERCEPTION_PAGE_TYPES.JOB_LIST,
+      confidence: 0.88,
+      signals,
+    };
+  }
+
   return {
     pageType: PERCEPTION_PAGE_TYPES.UNKNOWN,
     confidence: 0.4,

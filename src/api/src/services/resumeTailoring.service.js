@@ -95,7 +95,10 @@ export const tailorResumeForJobDescription = async ({
     const basePersonal = baseResume.personalInfo || baseResume.personal || {};
     const tailoredPersonal = tailored.personalInfo || {};
 
-    let resolvedFullName = basePersonal.fullName || basePersonal.name || tailoredPersonal.fullName;
+    // STRICT NAME RESOLUTION: Prioritize original resume data (e.g. "test1")
+    let resolvedFullName = basePersonal.fullName || basePersonal.name;
+    
+    // Only if resume name is absolutely generic/missing, we look at the profile
     if (!resolvedFullName || resolvedFullName === "Candidate" || resolvedFullName === "Candidate Resume") {
       if (userId) {
         const { findUserProfileByUserId, findUserById } = await import("../repositories/user.repository.js");
@@ -110,7 +113,11 @@ export const tailorResumeForJobDescription = async ({
         }
       }
     }
-    if (!resolvedFullName) resolvedFullName = "Candidate";
+    
+    // Final fallback
+    if (!resolvedFullName || resolvedFullName === "Candidate") {
+        resolvedFullName = tailoredPersonal.fullName || "Candidate";
+    }
 
     tailored.personalInfo = {
       ...tailoredPersonal,
@@ -138,6 +145,15 @@ export const tailorResumeForJobDescription = async ({
         tailoredPersonal.portfolio ||
         "",
     };
+
+    // STRICT SKILLS RESOLUTION: Ensure we only use skills from base resume
+    const baseSkills = Array.isArray(baseResume.skills) ? baseResume.skills : [];
+    const tailoredSkills = Array.isArray(tailored.skills) ? tailored.skills : [];
+    
+    // Filter tailored skills to only include those present in base resume (or just use base resume skills if preferred)
+    // The user said "no need to add external info only add the info from original info"
+    tailored.skills = baseSkills; // Forced override to be safe as per user's request
+
 
     // Merge & preserve project links from base resume
     const baseProjects = Array.isArray(baseResume.projects) ? baseResume.projects : [];

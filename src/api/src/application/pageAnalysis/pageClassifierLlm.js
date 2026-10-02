@@ -4,6 +4,7 @@ import { logJobEvent, logError } from '../../utils/logger.js';
 // Explicit application page states
 export const PAGE_STATES = {
   JOB_PAGE: 'JOB_PAGE',
+  JOB_LISTING_PAGE: 'JOB_LISTING_PAGE',
   APPLICATION_ENTRY: 'APPLICATION_ENTRY',
   APPLICATION_FORM: 'APPLICATION_FORM',
   FORM_STEP: 'FORM_STEP',
@@ -34,7 +35,8 @@ Analyze the following normalized browser state and determine which EXPLICIT PAGE
 ${screenshotBase64 ? 'Inspect the attached visual screenshot of the page to verify layout, headings, buttons, and state indicators with high precision.' : ''}
 
 EXPLICIT PAGE STATES:
-- "JOB_PAGE": A job posting, job description, or list of jobs.
+- "JOB_PAGE": A page dedicated to ONE specific job posting/description.
+- "JOB_LISTING_PAGE": A career portal listing MULTIPLE job titles, usually with search/filter bars and multiple "Apply" or "View" buttons.
 - "APPLICATION_ENTRY": The entry gateway or landing page of an application (e.g. contains "Apply Now", "Apply Manually", "Autofill with Resume" buttons).
 - "APPLICATION_FORM": A single-page job application form containing text inputs, textareas, file uploads, etc.
 - "FORM_STEP": One specific page/step of a multi-step wizard form (e.g. contact info, questions, resume upload).
@@ -44,7 +46,7 @@ EXPLICIT PAGE STATES:
 - "MFA_REQUIRED": Multi-Factor Authentication gate screen (security questions, code app verification).
 - "CAPTCHA_REQUIRED": Active CAPTCHA challenges, bot protection grids, or click-shields.
 - "SUCCESS": An explicit submission confirmation page (Level 2, 3, or 4 success markers like thank you message, receipt, or submission confirmation).
-- "ERROR": The page indicates a fatal or operational error blocking normal application progress.
+- "ERROR": The page indicates a fatal or operational error (e.g. 404, 500, "Job No Longer Available").
 - "UNKNOWN": Cannot be identified from active indicators.
 
 NORMALIZED STATE BLUEPRINT:
@@ -52,6 +54,7 @@ NORMALIZED STATE BLUEPRINT:
 - Title: "${normalizedState.title}"
 - Headings: ${JSON.stringify(normalizedState.headings || [])}
 - Forms Present: ${JSON.stringify(normalizedState.forms || [])}
+- Openings Detected: ${normalizedState.openingsCount || 0}
 - Active Modal: ${JSON.stringify(normalizedState.modal || { isOpen: false })}
 - Stepper: ${JSON.stringify(normalizedState.stepper || { hasStepper: false })}
 - Validation Errors Visible: ${JSON.stringify(normalizedState.validationErrors || [])}
@@ -66,7 +69,7 @@ ${(normalizedState.textSnippet || '').slice(0, 2000)}
 RETURN STRICT JSON ONLY MATCHING THE FOLLOWING SCHEMA. Do NOT include markdown blocks, notes, or explanations outside the JSON block.
 
 {
-  "state": "JOB_PAGE | APPLICATION_ENTRY | APPLICATION_FORM | FORM_STEP | REVIEW | LOGIN_REQUIRED | OTP_REQUIRED | MFA_REQUIRED | CAPTCHA_REQUIRED | SUCCESS | ERROR | UNKNOWN",
+  "state": "JOB_PAGE | JOB_LISTING_PAGE | APPLICATION_ENTRY | APPLICATION_FORM | FORM_STEP | REVIEW | LOGIN_REQUIRED | OTP_REQUIRED | MFA_REQUIRED | CAPTCHA_REQUIRED | SUCCESS | ERROR | UNKNOWN",
   "confidence": <float between 0.0 and 1.0>,
   "hasStepper": <boolean>,
   "currentStep": <number>,
@@ -75,6 +78,7 @@ RETURN STRICT JSON ONLY MATCHING THE FOLLOWING SCHEMA. Do NOT include markdown b
   "isFormClosed": <boolean>,
   "reason": "<clear semantic reasoning of your state selection>"
 }`;
+
 
     const model = await getGeminiModel(userId);
     const userContent = screenshotBase64
@@ -172,6 +176,10 @@ export const classifyPageWithLlm = async (extractedPageContent, job = {}, userId
     case PAGE_STATES.JOB_PAGE:
       legacyPageType = 'job_description_page';
       legacyNextRecommendedAction = 'click_opening_apply';
+      break;
+    case PAGE_STATES.JOB_LISTING_PAGE:
+      legacyPageType = 'job_listing_page';
+      legacyNextRecommendedAction = 'select_job_from_list';
       break;
     case PAGE_STATES.APPLICATION_ENTRY: {
       const isAlreadyInApplyFunnel =

@@ -1943,40 +1943,86 @@ export const advanceEmployerPortalActionService = async (applicationId, userId, 
       activePage = openPages.length > 0 ? openPages[openPages.length - 1] : page;
     }
 
-    // If still on Naukri job page with company site button
-    const isNaukriListingPage = activePage.url().includes("naukri.com/job-listings");
-    if (isNaukriListingPage) {
-      const companySiteBtn = activePage
-        .locator(
-          '#company-site-button, button:has-text("Apply on company site"), a:has-text("Apply on company site")'
-        )
-        .first();
-      if (await companySiteBtn.isVisible().catch(() => false)) {
-        latestPopupPage = null;
-        await companySiteBtn.click().catch(() => {});
-        await activePage.waitForTimeout(3000);
+    // --- DEEP ANALYSIS LOOP START ---
+    let loopCount = 0;
+    const MAX_LOOP = 3;
+    let reachedForm = false;
+    let lastAnalysis = null;
 
-        if (latestPopupPage && !latestPopupPage.isClosed()) {
-          await latestPopupPage.waitForLoadState("domcontentloaded").catch(() => {});
-          activePage = latestPopupPage;
-        } else {
-          const openPages = context.pages().filter(p => !p.isClosed());
-          if (openPages.length > 1) {
-            activePage = openPages[openPages.length - 1];
+    while (loopCount < MAX_LOOP) {
+      loopCount++;
+      await logJobEvent("analyzeEmployerPortalService", "LOOP_START", `Iteration ${loopCount}/${MAX_LOOP} on ${activePage.url()}`);
+
+      // 1. Extract and Classify current page
+      const extracted = await extractPageContent(activePage);
+      const analysis = await classifyPageWithLlm(extracted, job, userId);
+      lastAnalysis = analysis;
+
+      // 2. Check if we reached a state that indicates we are done or need human help
+      const isFormReached = 
+        extracted.formFieldsCount > 0 || 
+        analysis.pageType === 'application_form' || 
+        analysis.pageType === 'modal_application_form' ||
+        analysis.pageType === 'multi_step_wizard';
+
+      if (isFormReached || analysis.pageType === 'ats_account_gateway' || analysis.pageType === 'form_closed') {
+        reachedForm = true;
+        break;
+      }
+
+      // 3. Decide and execute navigation if it's a listing or description page
+      if (analysis.pageType === 'job_listing_page' || analysis.pageType === 'job_description_page' || analysis.pageType === 'external_ats') {
+        const navResult = await navigatePortalWithAiDecision(activePage, analysis, context, specificRoleOverride);
+        
+        if (navResult.navigated) {
+          if (navResult.newPage) activePage = navResult.newPage;
+          await activePage.waitForTimeout(3000);
+          
+          if (navResult.isMailto || navResult.mailtoUrl) {
+            // Special handling for email applications
+            let recipientEmail = "careers@innowise.us";
+            let mailSubject = `Application for ${job.title || "Position"}`;
+            try {
+              const rawMailto = (navResult.mailtoUrl || "").replace(/^mailto:/i, "");
+              const [emailPart, queryPart] = rawMailto.split("?");
+              if (emailPart) recipientEmail = decodeURIComponent(emailPart);
+              if (queryPart) {
+                const params = new URLSearchParams(queryPart);
+                if (params.get("subject")) mailSubject = params.get("subject");
+              }
+            } catch {
+              // fallback
+            }
+
+            await tailorRoleOutreachService(applicationId, userId, {
+              roleTitle: specificRoleOverride?.title || job.title || "Fullstack Developer - MERN",
+              recipientEmail,
+              referenceId: specificRoleOverride?.referenceId || analysis?.matchedRole?.referenceId || "",
+            });
+
+            await JobApplication.findByIdAndUpdate(applicationId, {
+              applicationMethod: "email",
+              status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
+            });
+
+            await updateApplicationStatus(applicationId, APPLICATION_STATUS.WAITING_FOR_REVIEW, {
+              logMessage: `Employer specifies email application for ${specificRoleOverride?.title || job.title} (${recipientEmail}). Tailored resume and outreach draft prepared.`,
+            });
+
+            return await findApplicationById(applicationId);
           }
+          continue; // Loop again on the new page
+        } else {
+          break; // No more navigation possible
         }
-        await activePage.waitForTimeout(2500);
+      } else {
+        break; // Unknown or unhandled page type
       }
     }
 
-    // Execute navigation for specific role or AI matched role
-    const currentAnalysis = application.pageAnalysis || {};
-    const navResult = await navigatePortalWithAiDecision(activePage, currentAnalysis, context, specificRoleOverride);
-    if (navResult.newPage) {
-      activePage = navResult.newPage;
-    }
-    await activePage.waitForTimeout(2500);
-
+    // Use last analysis results for the final part of the service
+    const postExtracted = await extractPageContent(activePage);
+    const postAnalysis = lastAnalysis || (await classifyPageWithLlm(postExtracted, job, userId));
     const actualApplicationUrl = activePage.url();
 
     // Permanently save the resolved actual application link in Job record
@@ -1992,43 +2038,6 @@ export const advanceEmployerPortalActionService = async (applicationId, userId, 
       }).catch(() => {});
     }
 
-    // Check if mailto application link was clicked
-    if (navResult.isMailto || navResult.mailtoUrl) {
-      let recipientEmail = "careers@innowise.us";
-      let subject = `Application for ${job.title || "Position"}`;
-      try {
-        const rawMailto = (navResult.mailtoUrl || "").replace(/^mailto:/i, "");
-        const [emailPart, queryPart] = rawMailto.split("?");
-        if (emailPart) recipientEmail = decodeURIComponent(emailPart);
-        if (queryPart) {
-          const params = new URLSearchParams(queryPart);
-          if (params.get("subject")) subject = params.get("subject");
-        }
-      } catch {
-        // fallback
-      }
-
-      await tailorRoleOutreachService(applicationId, userId, {
-        roleTitle: specificRoleOverride?.title || job.title || "Fullstack Developer - MERN",
-        recipientEmail,
-        referenceId: specificRoleOverride?.referenceId || currentAnalysis?.matchedRole?.referenceId || "",
-      });
-
-      await JobApplication.findByIdAndUpdate(applicationId, {
-        applicationMethod: "email",
-        status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
-      });
-
-      await updateApplicationStatus(applicationId, APPLICATION_STATUS.WAITING_FOR_REVIEW, {
-        logMessage: `Employer specifies email application for ${specificRoleOverride?.title || job.title} (${recipientEmail}). Tailored resume and outreach draft prepared.`,
-      });
-
-      return await findApplicationById(applicationId);
-    }
-
-    const postExtracted = await extractPageContent(activePage);
-    const postAnalysis = await classifyPageWithLlm(postExtracted, job, userId);
-
     const isFormReady =
       postExtracted.formFieldsCount > 0 ||
       postAnalysis.pageType === 'modal_application_form' ||
@@ -2039,6 +2048,7 @@ export const advanceEmployerPortalActionService = async (applicationId, userId, 
     // If application form / modal was reached, automatically inspect, fill, and verify
     if (isFormReady) {
       await activePage.waitForTimeout(1000);
+
       const formInspection = await inspectForm(activePage);
 
       if (formInspection.fields && formInspection.fields.length > 0) {

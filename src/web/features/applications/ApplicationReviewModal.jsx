@@ -140,14 +140,15 @@ export const ApplicationReviewModal = ({
     currentStatus === "applied";
 
   const resolvedCandidateName =
-    (candidateInfo?.fullName && candidateInfo.fullName !== "Candidate" ? candidateInfo.fullName : null) ||
-    (candidateInfo?.name && candidateInfo.name !== "Candidate" ? candidateInfo.name : null) ||
-    application?.resume?.tailoredResumeData?.personalInfo?.fullName ||
-    application?.resume?.parsedData?.personalInfo?.fullName ||
+    (candidateInfo?.fullName && candidateInfo.fullName !== "Candidate" && candidateInfo.fullName !== "Candidate Resume" ? candidateInfo.fullName : null) ||
+    (candidateInfo?.name && candidateInfo.name !== "Candidate" && candidateInfo.name !== "Candidate Resume" ? candidateInfo.name : null) ||
+    (application?.resume?.tailoredResumeData?.personalInfo?.fullName && application.resume.tailoredResumeData.personalInfo.fullName !== "Candidate" ? application.resume.tailoredResumeData.personalInfo.fullName : null) ||
+    (application?.resume?.parsedData?.personalInfo?.fullName && application.resume.parsedData.personalInfo.fullName !== "Candidate" ? application.resume.parsedData.personalInfo.fullName : null) ||
     (candidateInfo?.personal?.firstName ? `${candidateInfo.personal.firstName} ${candidateInfo.personal.lastName || ''}`.trim() : null) ||
     (application?.userProfile?.fullName && application.userProfile.fullName !== "Candidate" ? application.userProfile.fullName : null) ||
     (application?.userProfile?.personal?.firstName ? `${application.userProfile.personal.firstName} ${application.userProfile.personal.lastName || ''}`.trim() : null) ||
     "Candidate";
+
 
   // Compute robust effective review fields from form.reviewFields, form.fields, or form.answers
   const baseReviewFields =
@@ -419,8 +420,23 @@ export const ApplicationReviewModal = ({
 
   const showToast = (msg, type = "info") => {
     let determined = type;
-    if (type === "info") {
-      const lower = (msg || "").toLowerCase();
+    let sanitizedMsg = msg;
+
+    // Sanitize technical errors for user understanding (Quota, Session, etc.)
+    const lowerMsg = (String(msg) || "").toLowerCase();
+    if (lowerMsg.includes("quota exceeded") || lowerMsg.includes("429")) {
+      sanitizedMsg = "AI service is currently busy due to high demand. Please wait a few seconds and try again.";
+      determined = "error";
+    } else if (lowerMsg.includes("no stored google session") || lowerMsg.includes("googlesessionservice")) {
+      sanitizedMsg = "Google session not found or expired. Please connect your Google account in the review panel.";
+      determined = "error";
+    } else if (lowerMsg.includes("error fetching from") && lowerMsg.includes("generativelanguage")) {
+      sanitizedMsg = "Technical connectivity issue with AI service. Please retry in a moment.";
+      determined = "error";
+    }
+
+    if (determined === "info") {
+      const lower = sanitizedMsg.toLowerCase();
       if (
         lower.includes("error") ||
         lower.includes("failed") ||
@@ -435,7 +451,7 @@ export const ApplicationReviewModal = ({
         determined = "success";
       }
     }
-    setToastMsg(msg);
+    setToastMsg(sanitizedMsg);
     setToastType(determined);
     setTimeout(() => {
       setToastMsg("");

@@ -182,6 +182,59 @@ const observeAndActNode = async (state) => {
     };
   }
 
+  if (pageType === PERCEPTION_PAGE_TYPES.ERROR) {
+    const errorMsg = classification.reasoning || classification.signals?.join("; ") || "The job posting appears to be closed or unavailable.";
+    return {
+      pageType,
+      currentUrl: url,
+      status: AGENT_STATUS.FAILED,
+      errors: [errorMsg],
+    };
+  }
+
+  if (pageType === PERCEPTION_PAGE_TYPES.JOB_LIST) {
+    // Attempt to find the most relevant "Apply" button or job link
+    const applyButtons = observation.elements.filter((e) => {
+      const text = (e.text || e.label || "").toLowerCase();
+      return (
+        text.includes("apply") ||
+        text.includes("view job") ||
+        text.includes("details") ||
+        text.includes("openings")
+      );
+    });
+
+    if (applyButtons.length > 0) {
+      // If there's only one or we're on a loop, pick the first one
+      const bestButton = applyButtons[0];
+      await logJobEvent(
+        "browserAgentGraph",
+        "JOB_LIST_AUTO_CLICK",
+        `[application:${appIdStr}] Job list detected. Auto-clicking first relevant opening: "${bestButton.text || "Apply"}"`,
+      );
+      await executeAction(
+        page,
+        { type: "click", index: bestButton.index },
+        observation,
+      );
+      await waitForPageSettle(page);
+      
+      return {
+        stepCount: stepCount + 1,
+        currentUrl: page.url(),
+        pageType,
+        status: AGENT_STATUS.NAVIGATING,
+      };
+    }
+
+    return {
+      pageType,
+      currentUrl: url,
+      status: AGENT_STATUS.FAILED,
+      errors: ["JOB_LIST_DETECTED_BUT_NO_ACTIONABLE_BUTTONS"],
+    };
+  }
+
   if (pageType === PERCEPTION_PAGE_TYPES.REVIEW) {
     return {
       pageType,

@@ -122,11 +122,13 @@ export const ensureEffectiveResumePdfOnDisk = async ({
         const { findUserProfileByUserId, findUserById } = await import('../../repositories/user.repository.js');
         const uProfile = await findUserProfileByUserId(userId).catch(() => null);
         const uRecord = await findUserById(userId).catch(() => null);
+        
+        // Priority: Profile names -> Username -> Default
         if (uProfile?.personal?.firstName || uProfile?.personal?.lastName) {
           candidateName = `${uProfile.personal.firstName || ''} ${uProfile.personal.lastName || ''}`.trim();
-        } else if (uProfile?.fullName) {
+        } else if (uProfile?.fullName && uProfile.fullName !== 'Candidate') {
           candidateName = uProfile.fullName;
-        } else if (uRecord?.username) {
+        } else if (uRecord?.username && uRecord.username !== 'Candidate') {
           candidateName = uRecord.username;
         }
         candidateEmail = uRecord?.email || uProfile?.email || '';
@@ -134,10 +136,11 @@ export const ensureEffectiveResumePdfOnDisk = async ({
       }
       effectiveData = {
         personalInfo: { fullName: candidateName, email: candidateEmail, phone: candidatePhone },
-        summary: 'Experienced Full Stack Engineer with strong expertise in building scalable web applications.',
-        skills: ['JavaScript', 'React', 'Node.js', 'Express', 'MongoDB'],
+        summary: 'Experienced professional with a strong track record of achievements.',
+        skills: ['Professional Expertise'],
       };
     }
+
 
     const generatedPath = await generateResumePdf({
       resumeData: effectiveData,
