@@ -71,12 +71,18 @@ RETURN STRICT JSON ONLY MATCHING THE FOLLOWING SCHEMA. Do NOT include markdown b
 {
   "state": "JOB_PAGE | JOB_LISTING_PAGE | APPLICATION_ENTRY | APPLICATION_FORM | FORM_STEP | REVIEW | LOGIN_REQUIRED | OTP_REQUIRED | MFA_REQUIRED | CAPTCHA_REQUIRED | SUCCESS | ERROR | UNKNOWN",
   "confidence": <float between 0.0 and 1.0>,
+  "shouldContinueDeepDive": <boolean: true if autonomous agent should continue navigating deeper to reach/complete application, false if already at form, in terminal state, or requires human>,
+  "isTerminalState": <boolean: true if application is completed, blocked, closed, or requires human intervention>,
+  "nextAction": {
+    "type": "NAVIGATE_TO_ROLE | CLICK_APPLY | FILL_FORM | NEXT_STEP | SUBMIT_FORM | REQUIRE_HUMAN | FINISH",
+    "reason": "<explanation of action>"
+  },
   "hasStepper": <boolean>,
   "currentStep": <number>,
   "totalSteps": <number>,
   "activeStepName": "<string>",
   "isFormClosed": <boolean>,
-  "reason": "<clear semantic reasoning of your state selection>"
+  "reason": "<clear semantic reasoning of your state selection and depth decision>"
 }`;
 
 
@@ -95,16 +101,21 @@ RETURN STRICT JSON ONLY MATCHING THE FOLLOWING SCHEMA. Do NOT include markdown b
     const parsed = JSON.parse(cleaned);
 
     const mappedState = PAGE_STATES[parsed.state] ? parsed.state : PAGE_STATES.UNKNOWN;
+    const isTerminal = parsed.isTerminalState ?? (mappedState === PAGE_STATES.SUCCESS || mappedState === PAGE_STATES.LOGIN_REQUIRED || mappedState === PAGE_STATES.CAPTCHA_REQUIRED || parsed.isFormClosed);
+    const shouldContinue = parsed.shouldContinueDeepDive ?? (!isTerminal && mappedState !== PAGE_STATES.APPLICATION_FORM && mappedState !== PAGE_STATES.REVIEW);
 
     await logJobEvent(
       'pageClassifierLlm',
       'STATE_CLASSIFIED',
-      `State: ${mappedState} | Confidence: ${parsed.confidence} | Has Stepper: ${parsed.hasStepper} | Step: ${parsed.currentStep}/${parsed.totalSteps}`
+      `State: ${mappedState} | Should Continue: ${shouldContinue} | Terminal: ${isTerminal} | Next: ${parsed.nextAction?.type || 'N/A'}`
     );
 
     return {
       state: mappedState,
       confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0.5,
+      shouldContinueDeepDive: Boolean(shouldContinue),
+      isTerminalState: Boolean(isTerminal),
+      nextAction: parsed.nextAction || { type: 'ANALYZE_FURTHER', reason: parsed.reason || '' },
       hasStepper: Boolean(parsed.hasStepper || normalizedState.stepper?.hasStepper),
       currentStep: parsed.currentStep || normalizedState.stepper?.currentStep || 1,
       totalSteps: parsed.totalSteps || normalizedState.stepper?.totalSteps || 1,
@@ -443,6 +454,9 @@ Return STRICT JSON ONLY:
     },
     detectedOpenings: finalOpeningsList.map(o => o.title),
     openingsList: finalOpeningsList,
+    shouldContinueDeepDive: pageStateResult.shouldContinueDeepDive,
+    isTerminalState: pageStateResult.isTerminalState,
+    nextAction: pageStateResult.nextAction,
     emailContact: {
       email: extractedPageContent.emails?.[0] || '',
       subject: `Application for ${bestMatch?.title || job.title || 'Position'}`,

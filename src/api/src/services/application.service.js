@@ -1965,89 +1965,124 @@ export const advanceEmployerPortalActionService = async (applicationId, userId, 
       activePage = openPages.length > 0 ? openPages[openPages.length - 1] : page;
     }
 
-    // --- DEEP ANALYSIS LOOP START ---
+    // If on Naukri job page with #company-site-button, click it to reach the actual company portal
+    const isNaukriListingPage = activePage.url().includes("naukri.com/job-listings");
+    if (isNaukriListingPage) {
+      const companySiteBtn = activePage
+        .locator(
+          '#company-site-button, button:has-text("Apply on company site"), a:has-text("Apply on company site")'
+        )
+        .first();
+      const hasCompanySiteBtn = await companySiteBtn.isVisible().catch(() => false);
+
+      if (hasCompanySiteBtn) {
+        await logJobEvent(
+          "advanceEmployerPortalActionService",
+          "NAVIGATE_EXTERNAL",
+          "Clicking #company-site-button to navigate to employer careers site"
+        );
+        latestPopupPage = null;
+        await companySiteBtn.click().catch(() => {});
+        await activePage.waitForTimeout(3000);
+
+        if (latestPopupPage && !latestPopupPage.isClosed()) {
+          await latestPopupPage.waitForLoadState("domcontentloaded").catch(() => {});
+          activePage = latestPopupPage;
+        } else {
+          const openPages = context.pages().filter(p => !p.isClosed());
+          if (openPages.length > 1) {
+            activePage = openPages[openPages.length - 1];
+          }
+        }
+        await activePage.waitForTimeout(2500);
+      }
+    }
+
+    // --- DYNAMIC LLM-DRIVEN DEEP ANALYSIS LOOP ---
     let loopCount = 0;
-    const MAX_LOOP = 3;
+    const SAFETY_CEILING = 10;
     let reachedForm = false;
     let lastAnalysis = null;
     let lastNavResult = { success: true, navigated: true, message: 'Advanced portal navigation' };
 
-    while (loopCount < MAX_LOOP) {
+    while (loopCount < SAFETY_CEILING) {
       loopCount++;
-      await logJobEvent("analyzeEmployerPortalService", "LOOP_START", `Iteration ${loopCount}/${MAX_LOOP} on ${activePage.url()}`);
+      await logJobEvent("advanceEmployerPortalActionService", "LOOP_START", `Dynamic LLM Step ${loopCount} on ${activePage.url()}`);
 
-      // 1. Extract and Classify current page
+      // 1. Extract and Classify current page with LLM
       const extracted = await extractPageContent(activePage);
       const analysis = await classifyPageWithLlm(extracted, job, userId);
       lastAnalysis = analysis;
 
-      // 2. Check if we reached a state that indicates we are done or need human help
+      await logJobEvent(
+        "advanceEmployerPortalActionService",
+        "LLM_DEPTH_DECISION",
+        `Page: ${analysis.pageType} | Should Continue Deeper: ${analysis.shouldContinueDeepDive} | Terminal: ${analysis.isTerminalState} | Next: ${analysis.nextAction?.type || analysis.nextRecommendedAction}`
+      );
+
+      // 2. Check if LLM determined this is a terminal state or form is ready
       const isFormReached = 
         extracted.formFieldsCount > 0 || 
         analysis.pageType === 'application_form' || 
         analysis.pageType === 'modal_application_form' ||
         analysis.pageType === 'multi_step_wizard';
 
-      if (isFormReached || analysis.pageType === 'ats_account_gateway' || analysis.pageType === 'form_closed') {
-        reachedForm = true;
+      if (
+        isFormReached || 
+        analysis.isTerminalState || 
+        analysis.pageType === 'ats_account_gateway' || 
+        analysis.pageType === 'form_closed' ||
+        analysis.shouldContinueDeepDive === false
+      ) {
+        reachedForm = isFormReached;
         break;
       }
 
-      // 3. Decide and execute navigation if it's a listing or description page
-      if (
-        analysis.pageType === 'job_listing_page' ||
-        analysis.pageType === 'job_listings_accordion' ||
-        analysis.pageType === 'job_description_page' ||
-        analysis.pageType === 'external_ats' ||
-        specificRoleOverride ||
-        (analysis.openingsList && analysis.openingsList.length > 0)
-      ) {
-        const navResult = await navigatePortalWithAiDecision(activePage, analysis, context, specificRoleOverride);
-        lastNavResult = navResult;
+      // 3. LLM decided we need to go deeper: execute navigation to the next level
+      const navResult = await navigatePortalWithAiDecision(activePage, analysis, context, specificRoleOverride);
+      lastNavResult = navResult;
+      
+      if (navResult.navigated) {
+        if (navResult.newPage) activePage = navResult.newPage;
+        await activePage.waitForTimeout(3000);
         
-        if (navResult.navigated) {
-          if (navResult.newPage) activePage = navResult.newPage;
-          await activePage.waitForTimeout(3000);
-          
-          if (navResult.isMailto || navResult.mailtoUrl) {
-            // Special handling for email applications
-            let recipientEmail = "careers@innowise.us";
-            let mailSubject = `Application for ${job.title || "Position"}`;
-            try {
-              const rawMailto = (navResult.mailtoUrl || "").replace(/^mailto:/i, "");
-              const [emailPart, queryPart] = rawMailto.split("?");
-              if (emailPart) recipientEmail = decodeURIComponent(emailPart);
-              if (queryPart) {
-                const params = new URLSearchParams(queryPart);
-                if (params.get("subject")) mailSubject = params.get("subject");
-              }
-            } catch {
-              // fallback
+        if (navResult.isMailto || navResult.mailtoUrl) {
+          // Special handling for email applications
+          let recipientEmail = "careers@innowise.us";
+          let mailSubject = `Application for ${job.title || "Position"}`;
+          try {
+            const rawMailto = (navResult.mailtoUrl || "").replace(/^mailto:/i, "");
+            const [emailPart, queryPart] = rawMailto.split("?");
+            if (emailPart) recipientEmail = decodeURIComponent(emailPart);
+            if (queryPart) {
+              const params = new URLSearchParams(queryPart);
+              if (params.get("subject")) mailSubject = params.get("subject");
             }
-
-            await tailorRoleOutreachService(applicationId, userId, {
-              roleTitle: specificRoleOverride?.title || job.title || "Open Position",
-              recipientEmail,
-              referenceId: specificRoleOverride?.referenceId || analysis?.matchedRole?.referenceId || "",
-            });
-
-            await JobApplication.findByIdAndUpdate(applicationId, {
-              applicationMethod: "email",
-              status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
-            });
-
-            await updateApplicationStatus(applicationId, APPLICATION_STATUS.WAITING_FOR_REVIEW, {
-              logMessage: `Employer specifies email application for ${specificRoleOverride?.title || job.title} (${recipientEmail}). Tailored resume and outreach draft prepared.`,
-            });
-
-            return await findApplicationById(applicationId);
+          } catch {
+            // fallback
           }
-          continue; // Loop again on the new page
-        } else {
-          break; // No more navigation possible
+
+          await tailorRoleOutreachService(applicationId, userId, {
+            roleTitle: specificRoleOverride?.title || job.title || "Open Position",
+            recipientEmail,
+            referenceId: specificRoleOverride?.referenceId || analysis?.matchedRole?.referenceId || "",
+          });
+
+          await JobApplication.findByIdAndUpdate(applicationId, {
+            applicationMethod: "email",
+            status: APPLICATION_STATUS.WAITING_FOR_REVIEW,
+          });
+
+          await updateApplicationStatus(applicationId, APPLICATION_STATUS.WAITING_FOR_REVIEW, {
+            logMessage: `Employer specifies email application for ${specificRoleOverride?.title || job.title} (${recipientEmail}). Tailored resume and outreach draft prepared.`,
+          });
+
+          return await findApplicationById(applicationId);
         }
+        continue; // Continue loop to analyze updated page dynamically
       } else {
-        break; // Unknown or unhandled page type
+        // Navigation could not advance further; break to evaluate current page
+        break;
       }
     }
 

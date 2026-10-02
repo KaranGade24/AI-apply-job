@@ -136,7 +136,8 @@ export const ApplicationsPage = () => {
   const handleDeepDivePortal = async (app) => {
     const appId = app._id;
     setDeepDivingId(appId);
-    showToast(`AI Browser Agent deep diving into ${app.pageAnalysis?.matchedRole?.title || 'matched opening'}...`);
+    const targetTitle = app.pageAnalysis?.matchedRole?.title || app.jobId?.title || 'position';
+    showToast(`AI Deep Dive starting autonomous analysis for ${targetTitle}...`);
     try {
       const res = await advancePortalActionApi(appId, app.pageAnalysis?.matchedRole || null);
       const updatedDoc = res.data || app;
@@ -144,10 +145,10 @@ export const ApplicationsPage = () => {
         prev.map((a) => (a._id === appId ? updatedDoc : a))
       );
       setSelectedApp(updatedDoc);
-      showToast('Deep dive executed! Form inspected & filled.');
+      showToast('Deep dive executed! Form inspected, matched & updated.');
     } catch (err) {
       setSelectedApp(app);
-      showToast('Deep dive error: ' + (err.message || 'Please review in modal'));
+      showToast('Deep dive notice: ' + (err.message || 'Please review application details'));
     } finally {
       setDeepDivingId(null);
     }
@@ -556,14 +557,14 @@ export const ApplicationsPage = () => {
                           </button>
                         )}
 
-                        {/* Direct Deep Dive Button if portal openings or matched role detected */}
-                        {!isLocked && app.pageAnalysis?.matchedRole?.title && (
+                        {/* Autonomous Deep Dive Button */}
+                        {!isLocked && (
                           <button
                             type="button"
                             onClick={() => handleDeepDivePortal(app)}
                             disabled={deepDivingId === app._id}
                             className="inline-flex items-center gap-1 text-xs font-bold text-amber-900 bg-amber-100 hover:bg-amber-200 border border-amber-300 px-3 py-1.5 rounded-lg transition-colors cursor-pointer shadow-2xs"
-                            title={`AI Deep Dive into ${app.pageAnalysis.matchedRole.title}`}
+                            title={`Autonomous Deep Dive: analyze page, match role, fill form & advance`}
                           >
                             {deepDivingId === app._id ? (
                               <RefreshCw className="w-3 h-3 animate-spin text-amber-700" />
