@@ -2234,76 +2234,124 @@ export const ApplicationReviewModal = ({
                     </div>
                   </div>
 
-                  {/* Real-time Method Selection Bar */}
-                  {application?._id && (
-                    <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 space-y-2.5">
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                        <div>
-                          <span className="text-xs font-bold text-slate-800 uppercase tracking-wider block">
-                            Select Application Method
-                          </span>
-                          <p className="text-[11px] text-slate-500 mt-0.5">
-                            Change how you want to apply. Switching to Email drafts an outreach draft instantly; switching to Google Form or Portal runs the browser automation.
-                          </p>
+                      {/* Real-time Method Selection Bar */}
+                      {application?._id && (
+                        <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 space-y-2.5">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                            <div>
+                              <span className="text-xs font-bold text-slate-800 uppercase tracking-wider block">
+                                Select Application Method
+                              </span>
+                              <p className="text-[11px] text-slate-500 mt-0.5">
+                                Change how you want to apply. Switching to Email drafts an outreach draft instantly; switching to Google Form or Portal runs the browser automation.
+                              </p>
+                            </div>
+                            <span className="px-2 py-0.5 bg-blue-100 text-blue-800 border border-blue-200 rounded font-semibold text-[10px] w-fit">
+                              Active Method: {detectedMethod?.toUpperCase()}
+                            </span>
+                          </div>
+
+                          {(() => {
+                            const hasRunLlm = !!(application.pageAnalysis?.analyzedAt || application.pageAnalysis?.pageType);
+                            
+                            // Determine visibility of each option
+                            const showPortal = !hasRunLlm || 
+                              detectedMethod === "unknown" || 
+                              detectedMethod === "company_site" ||
+                              [
+                                "application_form", 
+                                "multi_step_form", 
+                                "modal_form", 
+                                "ats_gateway", 
+                                "company_site", 
+                                "external_ats"
+                              ].includes(application.pageAnalysis?.pageType) ||
+                              (application.form?.fields && application.form.fields.length > 0);
+
+                            const showEmail = !hasRunLlm || 
+                              detectedMethod === "email" || 
+                              application.pageAnalysis?.detectedEmails?.length > 0 || 
+                              !!application.pageAnalysis?.emailContact?.email;
+
+                            const showGoogleForm = !hasRunLlm || 
+                              detectedMethod === "googleForm" || 
+                              application.pageAnalysis?.detectedGoogleForms?.length > 0;
+
+                            const showPhone = !hasRunLlm || 
+                              detectedMethod === "phone" || 
+                              application.pageAnalysis?.detectedPhones?.length > 0;
+
+                            return (
+                              <div className="space-y-1.5">
+                                <div className="flex flex-wrap gap-1.5 p-1 bg-slate-100 rounded-lg w-fit">
+                                  {showPortal && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleSwitchMethod("unknown")}
+                                      className={`px-3 py-2 text-xs font-bold rounded-md transition-colors cursor-pointer text-center whitespace-nowrap ${
+                                        detectedMethod === "unknown" || detectedMethod === "company_site"
+                                          ? "bg-white text-blue-600 shadow-xs font-extrabold"
+                                          : "text-slate-600 hover:text-slate-900"
+                                      }`}
+                                    >
+                                      🌐 Portal Form
+                                    </button>
+                                  )}
+
+                                  {showEmail && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleSwitchMethod("email")}
+                                      className={`px-3 py-2 text-xs font-bold rounded-md transition-colors cursor-pointer text-center whitespace-nowrap ${
+                                        detectedMethod === "email"
+                                          ? "bg-white text-blue-600 shadow-xs font-extrabold"
+                                          : "text-slate-600 hover:text-slate-900"
+                                      }`}
+                                    >
+                                      ✉️ Direct Email
+                                    </button>
+                                  )}
+
+                                  {showGoogleForm && (
+                                    <button
+                                      type="button"
+                                      disabled={!application?.pageAnalysis?.detectedGoogleForms?.length && detectedMethod !== "googleForm"}
+                                      onClick={() => handleSwitchMethod("googleForm")}
+                                      className={`px-3 py-2 text-xs font-bold rounded-md transition-colors cursor-pointer text-center flex items-center justify-center gap-1 whitespace-nowrap ${
+                                        detectedMethod === "googleForm"
+                                          ? "bg-white text-blue-600 shadow-xs font-extrabold"
+                                          : "text-slate-600 hover:text-slate-900"
+                                      } ${(!application?.pageAnalysis?.detectedGoogleForms?.length && detectedMethod !== "googleForm") ? "opacity-50 cursor-not-allowed" : ""}`}
+                                      title={(!application?.pageAnalysis?.detectedGoogleForms?.length && detectedMethod !== "googleForm") ? "Google Form link not yet detected on page" : "Apply via Google Form link"}
+                                    >
+                                      📝 Google Form
+                                    </button>
+                                  )}
+
+                                  {showPhone && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleSwitchMethod("phone")}
+                                      className={`px-3 py-2 text-xs font-bold rounded-md transition-colors cursor-pointer text-center whitespace-nowrap ${
+                                        detectedMethod === "phone"
+                                          ? "bg-white text-blue-600 shadow-xs font-extrabold"
+                                          : "text-slate-600 hover:text-slate-900"
+                                      }`}
+                                    >
+                                      📞 Phone Script
+                                    </button>
+                                  )}
+                                </div>
+                                {hasRunLlm && (
+                                  <p className="text-[10px] text-slate-400 italic">
+                                    💡 Showing only the application channels detected on this careers portal by AI.
+                                  </p>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </div>
-                        <span className="px-2 py-0.5 bg-blue-100 text-blue-800 border border-blue-200 rounded font-semibold text-[10px] w-fit">
-                          Active Method: {detectedMethod?.toUpperCase()}
-                        </span>
-                      </div>
-
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 p-1 bg-slate-100 rounded-lg">
-                        <button
-                          type="button"
-                          onClick={() => handleSwitchMethod("unknown")}
-                          className={`px-3 py-2 text-xs font-bold rounded-md transition-colors cursor-pointer text-center ${
-                            detectedMethod === "unknown" || detectedMethod === "company_site"
-                              ? "bg-white text-blue-600 shadow-xs"
-                              : "text-slate-600 hover:text-slate-900"
-                          }`}
-                        >
-                          🌐 Portal Form
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => handleSwitchMethod("email")}
-                          className={`px-3 py-2 text-xs font-bold rounded-md transition-colors cursor-pointer text-center ${
-                            detectedMethod === "email"
-                              ? "bg-white text-blue-600 shadow-xs"
-                              : "text-slate-600 hover:text-slate-900"
-                          }`}
-                        >
-                          ✉️ Direct Email
-                        </button>
-
-                        <button
-                          type="button"
-                          disabled={!application?.pageAnalysis?.detectedGoogleForms?.length && detectedMethod !== "googleForm"}
-                          onClick={() => handleSwitchMethod("googleForm")}
-                          className={`px-3 py-2 text-xs font-bold rounded-md transition-colors cursor-pointer text-center flex items-center justify-center gap-1 ${
-                            detectedMethod === "googleForm"
-                              ? "bg-white text-blue-600 shadow-xs"
-                              : "text-slate-600 hover:text-slate-900"
-                          } ${(!application?.pageAnalysis?.detectedGoogleForms?.length && detectedMethod !== "googleForm") ? "opacity-50 cursor-not-allowed" : ""}`}
-                          title={(!application?.pageAnalysis?.detectedGoogleForms?.length && detectedMethod !== "googleForm") ? "Google Form link not yet detected on page" : "Apply via Google Form link"}
-                        >
-                          📝 Google Form
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => handleSwitchMethod("phone")}
-                          className={`px-3 py-2 text-xs font-bold rounded-md transition-colors cursor-pointer text-center ${
-                            detectedMethod === "phone"
-                              ? "bg-white text-blue-600 shadow-xs"
-                              : "text-slate-600 hover:text-slate-900"
-                          }`}
-                        >
-                          📞 Phone Script
-                        </button>
-                      </div>
-                    </div>
-                  )}
+                      )}
 
                   {/* 1. NAUKRI 1-CLICK APPLY CHANNEL */}
                   {isNaukriDirect && (
