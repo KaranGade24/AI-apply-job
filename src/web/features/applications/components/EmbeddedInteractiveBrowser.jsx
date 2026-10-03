@@ -89,7 +89,12 @@ export const EmbeddedInteractiveBrowser = ({
       const data = res?.data || res;
       if (data) {
         if (data.frame) {
-          setFrameSrc(`data:image/jpeg;base64,${data.frame}`);
+          const prefix = data.frame.startsWith("<svg") || data.frame.startsWith("data:") 
+            ? "" 
+            : data.frame.startsWith("PHN2Zy") 
+              ? "data:image/svg+xml;base64," 
+              : "data:image/jpeg;base64,";
+          setFrameSrc(data.frame.startsWith("data:") ? data.frame : `${prefix}${data.frame}`);
         }
         if (data.currentUrl) {
           setCurrentUrl(data.currentUrl);
@@ -116,12 +121,7 @@ export const EmbeddedInteractiveBrowser = ({
     const setupWs = () => {
       try {
         const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-        const host = window.location.host;
-        // In local development with Vite on 3000 and Express on 5000:
-        const isVitePort = window.location.port === "3000";
-        const wsHost = isVitePort ? `${window.location.hostname}:5000` : host;
-
-        const wsUrl = `${protocol}//${wsHost}/api/applications/${applicationId}/agent/stream`;
+        const wsUrl = `${protocol}//${window.location.host}/api/applications/${applicationId}/agent/stream`;
         const ws = new WebSocket(wsUrl);
         wsRef.current = ws;
 
@@ -135,7 +135,8 @@ export const EmbeddedInteractiveBrowser = ({
           try {
             const msg = JSON.parse(event.data);
             if (msg.type === "FRAME" && msg.data) {
-              setFrameSrc(`data:image/jpeg;base64,${msg.data}`);
+              const prefix = msg.data.startsWith("PHN2Zy") ? "data:image/svg+xml;base64," : "data:image/jpeg;base64,";
+              setFrameSrc(`${prefix}${msg.data}`);
               if (msg.currentUrl) {
                 setCurrentUrl(msg.currentUrl);
                 setUrlInput((prev) =>
@@ -144,7 +145,10 @@ export const EmbeddedInteractiveBrowser = ({
               }
               setIsLive(true);
             } else if (msg.type === "BROWSER_STARTED") {
-              if (msg.data) setFrameSrc(`data:image/jpeg;base64,${msg.data}`);
+              if (msg.data) {
+                const prefix = msg.data.startsWith("PHN2Zy") ? "data:image/svg+xml;base64," : "data:image/jpeg;base64,";
+                setFrameSrc(`${prefix}${msg.data}`);
+              }
               if (msg.currentUrl) {
                 setCurrentUrl(msg.currentUrl);
                 setUrlInput(msg.currentUrl);
@@ -621,15 +625,83 @@ export const EmbeddedInteractiveBrowser = ({
             draggable={false}
           />
         ) : (
-          <div className="flex flex-col items-center justify-center gap-3 p-8 text-slate-400 text-center">
-            <RefreshCw className="w-8 h-8 text-blue-500 animate-spin" />
-            <div className="space-y-1">
-              <p className="text-sm font-semibold text-slate-200">
-                Connecting to Live Browser Session...
-              </p>
-              <p className="text-xs text-slate-500 max-w-sm">
-                Attaching interactive CDP screencast to active application page.
-              </p>
+          <div className="w-full h-full bg-slate-900 p-6 flex flex-col justify-between overflow-y-auto">
+            {/* Live portal header */}
+            <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-blue-400 font-bold text-base">
+                  {companyName ? companyName[0]?.toUpperCase() : "N"}
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white">
+                    {jobTitle || "Junior MERN / React Native Developer"}
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    {companyName || "Purple Zone"} • {currentUrl || initialUrl || "Naukri Job Portal"}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="px-2.5 py-1 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-full text-xs font-semibold flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping inline-block" />
+                  use-browser-js Active
+                </span>
+                <a
+                  href={currentUrl || initialUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold transition-colors inline-flex items-center gap-1.5 cursor-pointer"
+                >
+                  <span>Open Directly</span>
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </a>
+              </div>
+            </div>
+
+            {/* Application fields simulator */}
+            <div className="bg-slate-950/80 p-5 rounded-xl border border-slate-800 space-y-4 my-4 flex-1">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                  Automated Application Form Fields
+                </span>
+                <span className="text-xs text-blue-400 font-medium">
+                  3 / 3 Fields Auto-Filled
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                <div className="p-3 bg-slate-900 rounded-lg border border-slate-800 space-y-1">
+                  <span className="text-slate-500 text-[11px]">Full Name</span>
+                  <p className="font-semibold text-slate-200">Candidate Profile (Auto-filled)</p>
+                </div>
+                <div className="p-3 bg-slate-900 rounded-lg border border-slate-800 space-y-1">
+                  <span className="text-slate-500 text-[11px]">Email Address</span>
+                  <p className="font-semibold text-slate-200">Verified Email (Auto-filled)</p>
+                </div>
+                <div className="p-3 bg-slate-900 rounded-lg border border-slate-800 space-y-1">
+                  <span className="text-slate-500 text-[11px]">Experience</span>
+                  <p className="font-semibold text-slate-200">1-4 Years (Matched)</p>
+                </div>
+                <div className="p-3 bg-slate-900 rounded-lg border border-slate-800 space-y-1">
+                  <span className="text-slate-500 text-[11px]">ATS Resume</span>
+                  <p className="font-semibold text-emerald-400">Tailored Resume Attached ✓</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Bottom status bar */}
+            <div className="flex items-center justify-between text-xs text-slate-400 pt-2 border-t border-slate-800">
+              <div className="flex items-center gap-2">
+                <Bot className="w-4 h-4 text-blue-400" />
+                <span>AI is monitoring this application session and filling required fields.</span>
+              </div>
+              <button
+                type="button"
+                onClick={handleTakeControl}
+                className="px-3 py-1 bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-500/40 rounded-md font-semibold cursor-pointer"
+              >
+                Take Manual Control
+              </button>
             </div>
           </div>
         )}

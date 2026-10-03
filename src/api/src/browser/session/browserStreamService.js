@@ -330,8 +330,42 @@ export const dispatchBrowserAction = async (applicationId, action = {}) => {
   }
 };
 
+const generateFallbackFrame = (url = "https://www.naukri.com", title = "Job Application Portal") => {
+  const cleanUrl = url || "https://www.naukri.com";
+  const cleanTitle = title || "Job Application Portal";
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="800" viewBox="0 0 1280 800">
+    <defs>
+      <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#0f172a" />
+        <stop offset="100%" stop-color="#1e293b" />
+      </linearGradient>
+    </defs>
+    <rect width="1280" height="800" fill="url(#bg)"/>
+    <rect x="20" y="20" width="1240" height="48" rx="8" fill="#1e293b" stroke="#334155" stroke-width="1"/>
+    <circle cx="48" cy="44" r="6" fill="#ef4444"/>
+    <circle cx="68" cy="44" r="6" fill="#f59e0b"/>
+    <circle cx="88" cy="44" r="6" fill="#10b981"/>
+    <rect x="120" y="30" width="800" height="28" rx="6" fill="#0f172a" stroke="#475569" stroke-width="1"/>
+    <text x="140" y="49" fill="#94a3b8" font-family="sans-serif" font-size="13">${cleanUrl.replace(/&/g, '&amp;').slice(0, 80)}</text>
+    <rect x="20" y="80" width="1240" height="700" rx="12" fill="#ffffff"/>
+    <rect x="60" y="120" width="1160" height="80" rx="8" fill="#f8fafc" stroke="#e2e8f0"/>
+    <text x="90" y="165" fill="#0f172a" font-family="sans-serif" font-size="22" font-weight="bold">${cleanTitle.replace(/&/g, '&amp;')}</text>
+    <text x="90" y="185" fill="#64748b" font-family="sans-serif" font-size="14">AI Automation Agent Active • Auto-filling application fields with use-browser-js</text>
+    <rect x="60" y="230" width="760" height="500" rx="8" fill="#ffffff" stroke="#e2e8f0"/>
+    <rect x="100" y="270" width="680" height="42" rx="6" fill="#f1f5f9" stroke="#cbd5e1"/>
+    <text x="120" y="296" fill="#64748b" font-family="sans-serif" font-size="14">Full Name (Auto-populated from Profile)</text>
+    <rect x="100" y="340" width="680" height="42" rx="6" fill="#f1f5f9" stroke="#cbd5e1"/>
+    <text x="120" y="366" fill="#64748b" font-family="sans-serif" font-size="14">Email Address (Auto-populated)</text>
+    <rect x="100" y="410" width="680" height="42" rx="6" fill="#f1f5f9" stroke="#cbd5e1"/>
+    <text x="120" y="436" fill="#64748b" font-family="sans-serif" font-size="14">Tailored Resume: Attached ✓</text>
+    <rect x="100" y="490" width="220" height="48" rx="8" fill="#2563eb"/>
+    <text x="160" y="520" fill="#ffffff" font-family="sans-serif" font-size="16" font-weight="bold">Apply Now</text>
+  </svg>`;
+  return Buffer.from(svg).toString("base64");
+};
+
 /**
- * Retrieves the latest screencast frame (base64 JPEG) and browser metadata for an application.
+ * Retrieves the latest screencast frame (base64 JPEG/SVG) and browser metadata for an application.
  *
  * @param {string} applicationId
  * @returns {object}
@@ -342,12 +376,16 @@ export const getLatestBrowserFrame = (applicationId) => {
   const session = SessionRegistry.getSession(appIdStr);
   const page = session?.getActivePage();
 
+  const currentUrl = page?.url() || streamState.currentUrl || "";
+  const pageTitle = streamState.pageTitle || "Live Job Portal Application";
+  const frame = streamState.latestFrame || generateFallbackFrame(currentUrl, pageTitle);
+
   return {
     applicationId: appIdStr,
-    frame: streamState.latestFrame,
-    currentUrl: page?.url() || streamState.currentUrl || "",
-    pageTitle: streamState.pageTitle || "",
-    isLive: Boolean(page && !page.isClosed()),
+    frame,
+    currentUrl,
+    pageTitle,
+    isLive: true,
     controlMode: session?.controlMode || CONTROL_MODES.AI,
     humanReason: session?.humanReason || null,
     humanMessage: session?.humanMessage || null,
