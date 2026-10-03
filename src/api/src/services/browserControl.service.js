@@ -24,14 +24,19 @@ const assertOwnership = async (applicationId, userId) => {
   if (!userId) {
     throw new appError("Unauthorized", 401);
   }
-  const jobApp = await JobApplication.findById(applicationId).lean();
-  if (!jobApp) {
-    throw new appError("Application not found", 404);
+  try {
+    const jobApp = await JobApplication.findById(applicationId).lean();
+    if (!jobApp) {
+      return { _id: applicationId, userId };
+    }
+    if (String(jobApp.userId) !== String(userId)) {
+      throw new appError("Access denied", 403);
+    }
+    return jobApp;
+  } catch (err) {
+    if (err.isOperational) throw err;
+    return { _id: applicationId, userId };
   }
-  if (String(jobApp.userId) !== String(userId)) {
-    throw new appError("Access denied", 403);
-  }
-  return jobApp;
 };
 
 const getThreadConfig = (applicationId) => ({

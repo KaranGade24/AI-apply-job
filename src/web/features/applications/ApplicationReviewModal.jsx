@@ -2498,6 +2498,12 @@ export const ApplicationReviewModal = ({
                             initialUrl={application?.pageAnalysis?.currentUrl || job?.applicationUrl || ""}
                             jobTitle={job?.title || ""}
                             companyName={job?.company || ""}
+                            candidateInfo={candidateInfo}
+                            application={application}
+                            onFieldChange={(field, val) => {
+                              setCandidateInfo((prev) => ({ ...(prev || {}), [field]: val }));
+                              if (onApplicationUpdated) onApplicationUpdated();
+                            }}
                             onStatusChange={() => {
                               if (onApplicationUpdated) onApplicationUpdated();
                             }}
@@ -2829,6 +2835,12 @@ export const ApplicationReviewModal = ({
                               }
                               jobTitle={job?.title || ""}
                               companyName={job?.company || ""}
+                              candidateInfo={candidateInfo}
+                              application={application}
+                              onFieldChange={(field, val) => {
+                                setCandidateInfo((prev) => ({ ...(prev || {}), [field]: val }));
+                                if (onApplicationUpdated) onApplicationUpdated();
+                              }}
                               onStatusChange={() => {
                                 if (onApplicationUpdated) onApplicationUpdated();
                               }}

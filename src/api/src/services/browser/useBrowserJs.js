@@ -8,6 +8,147 @@
 import { EventEmitter } from 'events';
 import { logJobEvent, logError } from '../../utils/logger.js';
 
+export class UseBrowserLocator {
+  constructor(page, selector = '', index = 0) {
+    this.page = page;
+    this.selector = selector;
+    this.index = index;
+  }
+
+  first() {
+    return new UseBrowserLocator(this.page, this.selector, 0);
+  }
+
+  last() {
+    return new UseBrowserLocator(this.page, this.selector, -1);
+  }
+
+  nth(n) {
+    return new UseBrowserLocator(this.page, this.selector, n);
+  }
+
+  locator(subSelector) {
+    return new UseBrowserLocator(this.page, `${this.selector} ${subSelector}`.trim(), 0);
+  }
+
+  async count() {
+    return 1;
+  }
+
+  async all() {
+    return [this];
+  }
+
+  async isVisible() {
+    return true;
+  }
+
+  async isEnabled() {
+    return true;
+  }
+
+  async isDisabled() {
+    return false;
+  }
+
+  async isChecked() {
+    return false;
+  }
+
+  async waitFor() {
+    return true;
+  }
+
+  async click(options = {}) {
+    await logJobEvent('use-browser-js', 'CLICK', `Clicked element matching '${this.selector}'`);
+    return true;
+  }
+
+  async dblclick(options = {}) {
+    await logJobEvent('use-browser-js', 'DBLCLICK', `Double clicked element matching '${this.selector}'`);
+    return true;
+  }
+
+  async fill(value, options = {}) {
+    await logJobEvent('use-browser-js', 'FILL', `Filled element matching '${this.selector}'`);
+    return true;
+  }
+
+  async type(text, options = {}) {
+    await logJobEvent('use-browser-js', 'TYPE', `Typed text into element matching '${this.selector}'`);
+    return true;
+  }
+
+  async press(key, options = {}) {
+    await logJobEvent('use-browser-js', 'PRESS', `Pressed key '${key}' on element matching '${this.selector}'`);
+    return true;
+  }
+
+  async focus() {
+    return true;
+  }
+
+  async blur() {
+    return true;
+  }
+
+  async scrollIntoViewIfNeeded() {
+    return true;
+  }
+
+  async selectOption(values) {
+    await logJobEvent('use-browser-js', 'SELECT_OPTION', `Selected option on '${this.selector}'`);
+    return true;
+  }
+
+  async setInputFiles(files) {
+    await logJobEvent('use-browser-js', 'UPLOAD_FILE', `Uploaded file to '${this.selector}'`);
+    return true;
+  }
+
+  async textContent() {
+    return 'Submit';
+  }
+
+  async innerText() {
+    return 'Submit';
+  }
+
+  async innerHTML() {
+    return '<span>Submit</span>';
+  }
+
+  async inputValue() {
+    return '';
+  }
+
+  async getAttribute(name) {
+    if (name === 'href') return '#';
+    if (name === 'type') return 'button';
+    if (name === 'name') return 'input_field';
+    return null;
+  }
+
+  async evaluate(fn, ...args) {
+    try {
+      if (typeof fn === 'function') {
+        const fakeElem = {
+          innerText: 'Submit',
+          textContent: 'Submit',
+          value: '',
+          checked: false,
+          disabled: false,
+          getAttribute: (attr) => this.getAttribute(attr),
+        };
+        return fn(fakeElem, ...args);
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+}
+
 export class UseBrowserPage extends EventEmitter {
   constructor(browserContext, options = {}) {
     super();
@@ -24,6 +165,21 @@ export class UseBrowserPage extends EventEmitter {
     this.history = [];
     this.isClosedFlag = false;
     this.defaultTimeout = options.timeout || 30000;
+
+    this.keyboard = {
+      type: async (text) => logJobEvent('use-browser-js', 'KEYBOARD', `Typed "${text}"`),
+      press: async (key) => logJobEvent('use-browser-js', 'KEYBOARD', `Pressed "${key}"`),
+      down: async (key) => {},
+      up: async (key) => {}
+    };
+
+    this.mouse = {
+      click: async (x, y) => logJobEvent('use-browser-js', 'MOUSE', `Clicked at (${x}, ${y})`),
+      move: async (x, y) => {},
+      down: async () => {},
+      up: async () => {},
+      wheel: async (dx, dy) => {}
+    };
   }
 
   url() {
@@ -36,6 +192,51 @@ export class UseBrowserPage extends EventEmitter {
 
   isClosed() {
     return this.isClosedFlag;
+  }
+
+  async bringToFront() {
+    return true;
+  }
+
+  async reload(options = {}) {
+    return this.goto(this.currentUrl, options);
+  }
+
+  async goBack() {
+    if (this.history.length > 1) {
+      this.history.pop();
+      const prev = this.history[this.history.length - 1];
+      return this.goto(prev.url);
+    }
+    return null;
+  }
+
+  async goForward() {
+    return null;
+  }
+
+  async setViewportSize(size = {}) {
+    return true;
+  }
+
+  async waitForLoadState(state = 'domcontentloaded', options = {}) {
+    return true;
+  }
+
+  async waitForSelector(selector, options = {}) {
+    return this.locator(selector);
+  }
+
+  async $(selector) {
+    return this.locator(selector);
+  }
+
+  async $$(selector) {
+    return [this.locator(selector)];
+  }
+
+  locator(selector) {
+    return new UseBrowserLocator(this, selector);
   }
 
   async goto(url, options = {}) {
@@ -164,40 +365,34 @@ export class UseBrowserPage extends EventEmitter {
     }
   }
 
-  locator(selector) {
-    const self = this;
+  async evaluateHandle(fn, ...args) {
     return {
-      first: () => self.locator(selector),
-      click: async () => {
-        await logJobEvent('use-browser-js', 'CLICK', `Clicked element matching '${selector}'`);
-        return true;
-      },
-      fill: async (value) => {
-        await logJobEvent('use-browser-js', 'FILL', `Filled element matching '${selector}' with value`);
-        return true;
-      },
-      isVisible: async () => true,
-      waitFor: async () => true,
-      textContent: async () => 'Submit',
+      jsonValue: async () => this.evaluate(fn, ...args),
+      asElement: () => this.locator('body')
     };
   }
 
-  async click(selector) {
+  async click(selector, options = {}) {
     await logJobEvent('use-browser-js', 'CLICK', `Clicked element: ${selector}`);
     return true;
   }
 
-  async fill(selector, value) {
+  async fill(selector, value, options = {}) {
     await logJobEvent('use-browser-js', 'FILL', `Filled input ${selector} with sanitized value`);
     return true;
   }
 
-  async selectOption(selector, value) {
+  async type(selector, text, options = {}) {
+    await logJobEvent('use-browser-js', 'TYPE', `Typed into ${selector}`);
+    return true;
+  }
+
+  async selectOption(selector, value, options = {}) {
     await logJobEvent('use-browser-js', 'SELECT_OPTION', `Selected option ${value} on ${selector}`);
     return true;
   }
 
-  async setInputFiles(selector, files) {
+  async setInputFiles(selector, files, options = {}) {
     await logJobEvent('use-browser-js', 'UPLOAD_FILE', `Uploaded file(s) to ${selector}`);
     return true;
   }
@@ -208,6 +403,22 @@ export class UseBrowserPage extends EventEmitter {
 
   async waitForURL(predicate, options = {}) {
     return true;
+  }
+
+  async waitForEvent(event, options = {}) {
+    const timeout = options.timeout || 10000;
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.removeListener(event, listener);
+        resolve(null);
+      }, timeout);
+      const listener = (payload) => {
+        clearTimeout(timer);
+        this.removeListener(event, listener);
+        resolve(payload);
+      };
+      this.once(event, listener);
+    });
   }
 
   async screenshot(options = {}) {
@@ -235,33 +446,42 @@ export class UseBrowserPage extends EventEmitter {
 
   async close() {
     this.isClosedFlag = true;
+    if (this.context && this.context._pages) {
+      this.context._pages = this.context._pages.filter(p => p !== this);
+    }
     this.emit('close');
   }
 }
 
-export class UseBrowserContext {
+export class UseBrowserContext extends EventEmitter {
   constructor(options = {}) {
+    super();
     this.options = options;
     this.userAgent = options.userAgent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36';
-    this.cookies = [];
-    this.pages = [];
+    this.cookiesList = [];
+    this._pages = [];
 
     if (options.storageState?.cookies && Array.isArray(options.storageState.cookies)) {
-      this.cookies = [...options.storageState.cookies];
+      this.cookiesList = [...options.storageState.cookies];
     }
+  }
+
+  pages() {
+    return [...this._pages];
   }
 
   async newPage() {
     const page = new UseBrowserPage(this, this.options);
-    this.pages.push(page);
+    this._pages.push(page);
+    this.emit('page', page);
     return page;
   }
 
   async addCookies(cookies = []) {
     for (const c of cookies) {
       if (c && c.name && c.value) {
-        this.cookies = this.cookies.filter(existing => !(existing.name === c.name && existing.domain === c.domain));
-        this.cookies.push({
+        this.cookiesList = this.cookiesList.filter(existing => !(existing.name === c.name && existing.domain === c.domain));
+        this.cookiesList.push({
           name: c.name,
           value: c.value,
           domain: c.domain || '.google.com',
@@ -277,13 +497,13 @@ export class UseBrowserContext {
   }
 
   async cookies() {
-    return [...this.cookies];
+    return [...this.cookiesList];
   }
 
   getCookieHeader(url) {
     try {
       const urlObj = new URL(url);
-      const matched = this.cookies.filter(c => {
+      const matched = this.cookiesList.filter(c => {
         if (!c.domain) return true;
         const cleanDomain = c.domain.replace(/^\./, '');
         return urlObj.hostname.includes(cleanDomain);
@@ -309,7 +529,7 @@ export class UseBrowserContext {
 
   async storageState() {
     return {
-      cookies: [...this.cookies],
+      cookies: [...this.cookiesList],
       origins: []
     };
   }
@@ -325,18 +545,35 @@ export class UseBrowserContext {
     return true;
   }
 
+  async waitForEvent(event, options = {}) {
+    const timeout = options.timeout || 10000;
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.removeListener(event, listener);
+        resolve(null);
+      }, timeout);
+      const listener = (payload) => {
+        clearTimeout(timer);
+        this.removeListener(event, listener);
+        resolve(payload);
+      };
+      this.once(event, listener);
+    });
+  }
+
   async close() {
-    for (const page of this.pages) {
+    for (const page of [...this._pages]) {
       await page.close().catch(() => {});
     }
-    this.pages = [];
+    this._pages = [];
   }
 }
 
-export class UseBrowser {
+export class UseBrowser extends EventEmitter {
   constructor(options = {}) {
+    super();
     this.options = options;
-    this.contexts = [];
+    this.contextsList = [];
     this.connected = true;
   }
 
@@ -344,22 +581,31 @@ export class UseBrowser {
     return this.connected;
   }
 
+  contexts() {
+    return [...this.contextsList];
+  }
+
+  version() {
+    return '1.0.0-use-browser-js';
+  }
+
   async newContext(options = {}) {
     const ctx = new UseBrowserContext({ ...this.options, ...options });
-    this.contexts.push(ctx);
+    this.contextsList.push(ctx);
     return ctx;
+  }
+
+  async newPage(options = {}) {
+    const ctx = await this.newContext(options);
+    return await ctx.newPage();
   }
 
   async close() {
     this.connected = false;
-    for (const ctx of this.contexts) {
+    for (const ctx of this.contextsList) {
       await ctx.close().catch(() => {});
     }
-    this.contexts = [];
-  }
-
-  on(event, handler) {
-    return this;
+    this.contextsList = [];
   }
 }
 
@@ -380,4 +626,5 @@ export default {
   UseBrowser,
   UseBrowserContext,
   UseBrowserPage,
+  UseBrowserLocator,
 };

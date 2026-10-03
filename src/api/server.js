@@ -155,16 +155,16 @@ if (portArgIndex !== -1 && cliArgs[portArgIndex + 1]) {
 
 const PORT = detectedPort || process.env.APP_PORT || process.env.API_PORT || DEFAULT_PORT || 3000;
 
+// Connect to database before accepting requests
+await connectToDatabase().catch((err) => {
+  console.warn("MongoDB connection warning:", err.message);
+});
+
 const server = app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Full-Stack AI Apply Job Server is running on port ${PORT}`);
   console.log(
     `📚 Swagger documentation available at: http://localhost:${PORT}/api-docs`,
   );
-
-  // Connect to database asynchronously after server start
-  connectToDatabase().catch((err) => {
-    console.error("Failed async DB connect:", err.message);
-  });
 });
 
 // Setup WebSocket server for real-time live browser streaming & user interactions

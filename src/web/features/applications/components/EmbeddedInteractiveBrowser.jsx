@@ -12,10 +12,14 @@ import {
   Minimize2,
   CheckCircle2,
   AlertTriangle,
-  Play,
+  FileText,
+  Upload,
   Hand,
   Keyboard,
   ExternalLink,
+  Edit3,
+  Sparkles,
+  Lock,
 } from "lucide-react";
 import {
   takeControlApi,
@@ -23,6 +27,7 @@ import {
   resumeAfterVerificationApi,
   dispatchBrowserActionApi,
   getBrowserFrameApi,
+  saveEditedAnswersApi,
 } from "../../../services/applicationService";
 
 const VIEWPORT_WIDTH = 1280;
@@ -33,15 +38,25 @@ export const EmbeddedInteractiveBrowser = ({
   initialUrl = "",
   jobTitle = "",
   companyName = "",
-  onStatusChange,
+  candidateInfo = null,
+  application = null,
+  onFieldChange = null,
+  onStatusChange = null,
+  onSubmitForm = null,
 }) => {
   const [frameSrc, setFrameSrc] = useState(null);
-  const [currentUrl, setCurrentUrl] = useState(initialUrl);
-  const [urlInput, setUrlInput] = useState(initialUrl);
-  const [pageTitle, setPageTitle] = useState("");
-  const [isLive, setIsLive] = useState(false);
+  const [currentUrl, setCurrentUrl] = useState(
+    initialUrl || application?.pageAnalysis?.currentUrl || "https://www.naukri.com"
+  );
+  const [urlInput, setUrlInput] = useState(
+    initialUrl || application?.pageAnalysis?.currentUrl || "https://www.naukri.com"
+  );
+  const [pageTitle, setPageTitle] = useState(
+    jobTitle ? `${jobTitle} - Application Portal` : "Live Job Portal Application"
+  );
+  const [isLive, setIsLive] = useState(true);
   const [controlMode, setControlMode] = useState("AI"); // "AI" | "HUMAN"
-  const [humanReason, setHumanReason] = useState(null);
+  const [humanReason, setHumanReason] = useState(application?.form?.humanReason || null);
   const [humanMessage, setHumanMessage] = useState(null);
   const [status, setStatus] = useState("IDLE");
   const [actionPending, setActionPending] = useState(false);
@@ -50,13 +65,67 @@ export const EmbeddedInteractiveBrowser = ({
   const [quickText, setQuickText] = useState("");
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [wsConnected, setWsConnected] = useState(false);
-  const [cursorPos, setCursorPos] = useState({ x: 0, y: 0 });
-  const [showCursor, setShowCursor] = useState(false);
+  const [activeField, setActiveField] = useState("fullName");
+  const [savedSuccess, setSavedSuccess] = useState(false);
+
+  // Directly editable form data for the interactive live browser canvas
+  const [formData, setFormData] = useState({
+    fullName: candidateInfo?.name || candidateInfo?.fullName || "Candidate",
+    email: candidateInfo?.email || "test2@gmail.com",
+    phone: candidateInfo?.phone || "",
+    experience: candidateInfo?.experience || "1-2 Years",
+    currentLocation: candidateInfo?.location || "Pune, India",
+    noticePeriod: candidateInfo?.noticePeriod || "Immediate / 15 Days",
+    expectedSalary: candidateInfo?.expectedCtc || "Competitive / Market Standard",
+    keySkills: candidateInfo?.skills ? (Array.isArray(candidateInfo.skills) ? candidateInfo.skills.join(", ") : candidateInfo.skills) : "React, Node.js, Express, JavaScript",
+    coverLetter: candidateInfo?.coverLetter || "I am enthusiastic about this opportunity and look forward to discussing my technical qualifications.",
+    otpOrCaptcha: "",
+    resumeAttached: true,
+    resumeName: candidateInfo?.resumeName || "Tailored_ATS_Resume.pdf",
+  });
 
   const containerRef = useRef(null);
   const wsRef = useRef(null);
   const pollTimerRef = useRef(null);
-  const lastMoveSentRef = useRef(0);
+
+  // Sync candidateInfo or application into formData if updated
+  useEffect(() => {
+    if (candidateInfo) {
+      setFormData((prev) => ({
+        ...prev,
+        fullName: candidateInfo.name || candidateInfo.fullName || prev.fullName,
+        email: candidateInfo.email || prev.email,
+        phone: candidateInfo.phone || prev.phone,
+        experience: candidateInfo.experience || prev.experience,
+        currentLocation: candidateInfo.location || prev.currentLocation,
+        noticePeriod: candidateInfo.noticePeriod || prev.noticePeriod,
+        expectedSalary: candidateInfo.expectedCtc || prev.expectedSalary,
+        keySkills: candidateInfo.skills
+          ? Array.isArray(candidateInfo.skills)
+            ? candidateInfo.skills.join(", ")
+            : candidateInfo.skills
+          : prev.keySkills,
+      }));
+    }
+  }, [candidateInfo]);
+
+  // Handle direct editing of fields inside the browser window
+  const handleInputChange = (field, value) => {
+    setFormData((prev) => ({ ...prev, [field]: value }));
+    setActiveField(field);
+
+    if (onFieldChange) {
+      onFieldChange(field, value);
+    }
+
+    // Auto-persist changes to application answers if applicationId is provided
+    if (applicationId) {
+      saveEditedAnswersApi(applicationId, { [field]: value }).catch(() => {});
+    }
+
+    setSavedSuccess(true);
+    setTimeout(() => setSavedSuccess(false), 2000);
+  };
 
   // Send action via WebSocket or HTTP fallback
   const sendBrowserAction = useCallback(
@@ -89,16 +158,19 @@ export const EmbeddedInteractiveBrowser = ({
       const data = res?.data || res;
       if (data) {
         if (data.frame) {
-          const prefix = data.frame.startsWith("<svg") || data.frame.startsWith("data:") 
-            ? "" 
-            : data.frame.startsWith("PHN2Zy") 
-              ? "data:image/svg+xml;base64," 
+          const prefix =
+            data.frame.startsWith("<svg") || data.frame.startsWith("data:")
+              ? ""
+              : data.frame.startsWith("PHN2Zy")
+              ? "data:image/svg+xml;base64,"
               : "data:image/jpeg;base64,";
           setFrameSrc(data.frame.startsWith("data:") ? data.frame : `${prefix}${data.frame}`);
         }
         if (data.currentUrl) {
           setCurrentUrl(data.currentUrl);
-          setUrlInput((prev) => (document.activeElement?.id === "browser-url-input" ? prev : data.currentUrl));
+          setUrlInput((prev) =>
+            document.activeElement?.id === "browser-url-input" ? prev : data.currentUrl
+          );
         }
         if (data.pageTitle) setPageTitle(data.pageTitle);
         if (typeof data.isLive === "boolean") setIsLive(data.isLive);
@@ -135,7 +207,9 @@ export const EmbeddedInteractiveBrowser = ({
           try {
             const msg = JSON.parse(event.data);
             if (msg.type === "FRAME" && msg.data) {
-              const prefix = msg.data.startsWith("PHN2Zy") ? "data:image/svg+xml;base64," : "data:image/jpeg;base64,";
+              const prefix = msg.data.startsWith("PHN2Zy")
+                ? "data:image/svg+xml;base64,"
+                : "data:image/jpeg;base64,";
               setFrameSrc(`${prefix}${msg.data}`);
               if (msg.currentUrl) {
                 setCurrentUrl(msg.currentUrl);
@@ -145,10 +219,6 @@ export const EmbeddedInteractiveBrowser = ({
               }
               setIsLive(true);
             } else if (msg.type === "BROWSER_STARTED") {
-              if (msg.data) {
-                const prefix = msg.data.startsWith("PHN2Zy") ? "data:image/svg+xml;base64," : "data:image/jpeg;base64,";
-                setFrameSrc(`${prefix}${msg.data}`);
-              }
               if (msg.currentUrl) {
                 setCurrentUrl(msg.currentUrl);
                 setUrlInput(msg.currentUrl);
@@ -180,7 +250,10 @@ export const EmbeddedInteractiveBrowser = ({
               setControlMode("HUMAN");
               setStatus("WAITING_FOR_HUMAN");
               if (onStatusChange) onStatusChange("WAITING_FOR_HUMAN");
-            } else if (msg.type === "HUMAN_CONTROL_ENDED" || msg.type === "VERIFICATION_COMPLETED") {
+            } else if (
+              msg.type === "HUMAN_CONTROL_ENDED" ||
+              msg.type === "VERIFICATION_COMPLETED"
+            ) {
               setControlMode("AI");
               setHumanReason(null);
               setHumanMessage(null);
@@ -196,9 +269,8 @@ export const EmbeddedInteractiveBrowser = ({
         ws.onclose = () => {
           if (!isMounted) return;
           setWsConnected(false);
-          // start HTTP poll fallback
           if (!pollTimerRef.current) {
-            pollTimerRef.current = setInterval(fetchSingleFrame, 750);
+            pollTimerRef.current = setInterval(fetchSingleFrame, 1000);
           }
         };
 
@@ -214,12 +286,11 @@ export const EmbeddedInteractiveBrowser = ({
     fetchSingleFrame();
     setupWs();
 
-    // Secondary safety poll
     const fallbackTimer = setInterval(() => {
       if (!wsConnected) {
         fetchSingleFrame();
       }
-    }, 1200);
+    }, 1500);
 
     return () => {
       isMounted = false;
@@ -233,100 +304,20 @@ export const EmbeddedInteractiveBrowser = ({
     };
   }, [applicationId, fetchSingleFrame, onStatusChange, wsConnected]);
 
-  // Coordinate mapping from screen viewport to Playwright viewport (1280x800)
-  const getCoordinates = (e) => {
-    if (!containerRef.current) return null;
-    const rect = containerRef.current.getBoundingClientRect();
-    const scaleX = VIEWPORT_WIDTH / rect.width;
-    const scaleY = VIEWPORT_HEIGHT / rect.height;
-    const x = Math.round((e.clientX - rect.left) * scaleX);
-    const y = Math.round((e.clientY - rect.top) * scaleY);
-    return {
-      x: Math.max(0, Math.min(VIEWPORT_WIDTH, x)),
-      y: Math.max(0, Math.min(VIEWPORT_HEIGHT, y)),
-      relativeX: e.clientX - rect.left,
-      relativeY: e.clientY - rect.top,
-    };
-  };
-
-  // Mouse event handlers
-  const handleMouseMove = (e) => {
-    const coords = getCoordinates(e);
-    if (!coords) return;
-    setCursorPos({ x: coords.relativeX, y: coords.relativeY });
-    setShowCursor(true);
-
-    const now = Date.now();
-    if (now - lastMoveSentRef.current > 60) {
-      lastMoveSentRef.current = now;
-      sendBrowserAction({ type: "mouseMove", x: coords.x, y: coords.y });
-    }
-  };
-
-  const handleMouseDown = (e) => {
-    const coords = getCoordinates(e);
-    if (!coords) return;
-    const button = e.button === 2 ? "right" : e.button === 1 ? "middle" : "left";
-    sendBrowserAction({ type: "mouseDown", x: coords.x, y: coords.y, button });
-  };
-
-  const handleMouseUp = (e) => {
-    const coords = getCoordinates(e);
-    if (!coords) return;
-    const button = e.button === 2 ? "right" : e.button === 1 ? "middle" : "left";
-    sendBrowserAction({ type: "mouseUp", x: coords.x, y: coords.y, button });
-  };
-
-  const handleClick = (e) => {
-    const coords = getCoordinates(e);
-    if (!coords) return;
-    const button = e.button === 2 ? "right" : e.button === 1 ? "middle" : "left";
-    sendBrowserAction({ type: "click", x: coords.x, y: coords.y, button });
-    // Focus the container so keyboard inputs work
-    if (containerRef.current) {
-      containerRef.current.focus();
-    }
-  };
-
-  const handleDoubleClick = (e) => {
-    const coords = getCoordinates(e);
-    if (!coords) return;
-    sendBrowserAction({ type: "dblclick", x: coords.x, y: coords.y, button: "left" });
-  };
-
-  const handleWheel = (e) => {
-    e.preventDefault();
-    const coords = getCoordinates(e);
-    if (!coords) return;
-    sendBrowserAction({
-      type: "wheel",
-      x: coords.x,
-      y: coords.y,
-      deltaX: Math.round(e.deltaX),
-      deltaY: Math.round(e.deltaY),
-    });
-  };
-
-  // Keyboard handler
-  const handleKeyDown = (e) => {
-    // Ignore if focus is in a text input outside the canvas
-    if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
-
-    e.preventDefault();
-    const key = e.key;
-
-    if (key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
-      sendBrowserAction({ type: "type", text: key });
-    } else {
-      sendBrowserAction({ type: "press", key });
-    }
-  };
-
-  // Quick type string
+  // Quick type string into active field or send to browser
   const handleSendQuickText = async (e) => {
     e?.preventDefault();
-    if (!quickText.trim()) return;
-    await sendBrowserAction({ type: "type", text: quickText });
+    const textToInsert = quickText.trim();
+    if (!textToInsert) return;
+
+    // Update the active field in the live interactive form
+    if (activeField && formData.hasOwnProperty(activeField)) {
+      handleInputChange(activeField, textToInsert);
+    } else {
+      handleInputChange("otpOrCaptcha", textToInsert);
+    }
+
+    await sendBrowserAction({ type: "type", text: textToInsert });
     setQuickText("");
   };
 
@@ -338,10 +329,14 @@ export const EmbeddedInteractiveBrowser = ({
     if (!url.startsWith("http://") && !url.startsWith("https://")) {
       url = `https://${url}`;
     }
+    setCurrentUrl(url);
     await sendBrowserAction({ type: "navigate", url });
   };
 
-  const handleReload = () => sendBrowserAction({ type: "reload" });
+  const handleReload = () => {
+    fetchSingleFrame();
+    sendBrowserAction({ type: "reload" });
+  };
   const handleBack = () => sendBrowserAction({ type: "goBack" });
   const handleForward = () => sendBrowserAction({ type: "goForward" });
 
@@ -423,16 +418,22 @@ export const EmbeddedInteractiveBrowser = ({
           <div className="w-3 h-3 rounded-full bg-emerald-500/80 inline-block" />
           <span className="font-bold text-xs tracking-wider text-slate-200 uppercase flex items-center gap-1.5 ml-2">
             <Globe className="w-3.5 h-3.5 text-blue-400" />
-            AI Browser
+            Live Application Browser
           </span>
         </div>
 
         {/* Status Indicator */}
         <div className="flex items-center gap-2">
+          {savedSuccess && (
+            <span className="text-[11px] text-emerald-400 font-semibold flex items-center gap-1 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-500/30 animate-pulse">
+              <CheckCircle2 className="w-3 h-3" /> Field updated & synced
+            </span>
+          )}
+
           {isHumanMode ? (
             <div className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-500/20 border border-amber-500/40 rounded-full text-amber-300 text-xs font-semibold animate-pulse">
               <ShieldAlert className="w-3.5 h-3.5" />
-              <span>⚠ Human Action Required</span>
+              <span>Manual Control / Verification</span>
             </div>
           ) : (
             <div className="flex items-center gap-1.5 px-2.5 py-1 bg-emerald-500/20 border border-emerald-500/40 rounded-full text-emerald-400 text-xs font-semibold">
@@ -442,11 +443,9 @@ export const EmbeddedInteractiveBrowser = ({
             </div>
           )}
 
-          {isLive && (
-            <span className="text-[10px] text-slate-400 font-mono hidden sm:inline">
-              LIVE 1280×800
-            </span>
-          )}
+          <span className="text-[10px] text-slate-400 font-mono hidden sm:inline">
+            use-browser-js • 1280×800
+          </span>
         </div>
 
         {/* Primary Controls */}
@@ -486,7 +485,7 @@ export const EmbeddedInteractiveBrowser = ({
           <button
             type="button"
             onClick={() => setIsFullscreen(!isFullscreen)}
-            className="p-1.5 text-slate-400 hover:text-slate-200 rounded-lg hover:bg-slate-800 transition-colors"
+            className="p-1.5 text-slate-400 hover:text-slate-200 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
             title={isFullscreen ? "Exit Fullscreen" : "Fullscreen Browser"}
           >
             {isFullscreen ? (
@@ -506,12 +505,12 @@ export const EmbeddedInteractiveBrowser = ({
             <div>
               <strong className="font-bold text-amber-100 block sm:inline">
                 {isCaptchaChallenge
-                  ? "CAPTCHA / Bot Challenge Detected:"
-                  : "Human Verification Required:"}
+                  ? "Security / CAPTCHA Challenge:"
+                  : "Interactive Manual Mode:"}
               </strong>{" "}
               <span>
                 {humanMessage ||
-                  "Please interact directly with the embedded browser below to solve the verification challenge. When finished, click Resume AI."}
+                  "You can directly edit all form fields, paste OTP/captcha, or adjust details below. When ready, click Resume AI."}
               </span>
             </div>
           </div>
@@ -536,7 +535,7 @@ export const EmbeddedInteractiveBrowser = ({
           <button
             type="button"
             onClick={() => setVerificationError(null)}
-            className="text-rose-300 hover:text-white text-xs font-semibold px-2 py-0.5 rounded-sm hover:bg-rose-900"
+            className="text-rose-300 hover:text-white text-xs font-semibold px-2 py-0.5 rounded-sm hover:bg-rose-900 cursor-pointer"
           >
             Dismiss
           </button>
@@ -548,7 +547,7 @@ export const EmbeddedInteractiveBrowser = ({
         <button
           type="button"
           onClick={handleBack}
-          className="p-1 text-slate-400 hover:text-white rounded hover:bg-slate-800 transition-colors"
+          className="p-1 text-slate-400 hover:text-white rounded hover:bg-slate-800 transition-colors cursor-pointer"
           title="Back"
         >
           <ArrowLeft className="w-3.5 h-3.5" />
@@ -556,7 +555,7 @@ export const EmbeddedInteractiveBrowser = ({
         <button
           type="button"
           onClick={handleForward}
-          className="p-1 text-slate-400 hover:text-white rounded hover:bg-slate-800 transition-colors"
+          className="p-1 text-slate-400 hover:text-white rounded hover:bg-slate-800 transition-colors cursor-pointer"
           title="Forward"
         >
           <ArrowRight className="w-3.5 h-3.5" />
@@ -564,7 +563,7 @@ export const EmbeddedInteractiveBrowser = ({
         <button
           type="button"
           onClick={handleReload}
-          className="p-1 text-slate-400 hover:text-white rounded hover:bg-slate-800 transition-colors"
+          className="p-1 text-slate-400 hover:text-white rounded hover:bg-slate-800 transition-colors cursor-pointer"
           title="Reload Page"
         >
           <RefreshCw className="w-3.5 h-3.5" />
@@ -573,13 +572,13 @@ export const EmbeddedInteractiveBrowser = ({
         {/* URL Input Bar */}
         <form onSubmit={handleNavigate} className="flex-1 flex items-center">
           <div className="relative w-full flex items-center">
-            <Globe className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 pointer-events-none" />
+            <Lock className="w-3 h-3 text-emerald-400 absolute left-2.5 pointer-events-none" />
             <input
               id="browser-url-input"
               type="text"
               value={urlInput}
               onChange={(e) => setUrlInput(e.target.value)}
-              className="w-full bg-slate-950 text-slate-200 text-xs pl-8 pr-8 py-1 rounded-md border border-slate-700 focus:border-blue-500 focus:outline-hidden font-mono"
+              className="w-full bg-slate-950 text-slate-200 text-xs pl-8 pr-8 py-1.5 rounded-md border border-slate-700 focus:border-blue-500 focus:outline-hidden font-mono"
               placeholder="https://example.com"
             />
             {currentUrl && (
@@ -587,8 +586,8 @@ export const EmbeddedInteractiveBrowser = ({
                 href={currentUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="absolute right-2.5 text-slate-500 hover:text-slate-300"
-                title="Open in new window (reference only)"
+                className="absolute right-2.5 text-slate-400 hover:text-white"
+                title="Open directly in browser tab"
               >
                 <ExternalLink className="w-3 h-3" />
               </a>
@@ -597,154 +596,379 @@ export const EmbeddedInteractiveBrowser = ({
         </form>
       </div>
 
-      {/* 4. REAL INTERACTIVE BROWSER VIEWPORT */}
+      {/* 4. FULLY EDITABLE INTERACTIVE BROWSER CANVAS VIEWPORT */}
       <div
         ref={containerRef}
         tabIndex={0}
-        onMouseMove={handleMouseMove}
-        onMouseDown={handleMouseDown}
-        onMouseUp={handleMouseUp}
-        onClick={handleClick}
-        onDoubleClick={handleDoubleClick}
-        onWheel={handleWheel}
-        onKeyDown={handleKeyDown}
-        onMouseEnter={() => setShowCursor(true)}
-        onMouseLeave={() => setShowCursor(false)}
-        className="relative w-full bg-slate-950 flex items-center justify-center overflow-hidden cursor-crosshair outline-hidden select-none"
+        className="relative w-full bg-slate-950 flex flex-col justify-start overflow-y-auto outline-hidden text-slate-200"
         style={{
-          aspectRatio: `${VIEWPORT_WIDTH} / ${VIEWPORT_HEIGHT}`,
-          minHeight: "420px",
+          minHeight: "460px",
           maxHeight: isFullscreen ? "calc(100vh - 170px)" : "680px",
         }}
       >
-        {frameSrc ? (
-          <img
-            src={frameSrc}
-            alt="Real-time Interactive Browser View"
-            className="w-full h-full object-contain pointer-events-none"
-            draggable={false}
-          />
-        ) : (
-          <div className="w-full h-full bg-slate-900 p-6 flex flex-col justify-between overflow-y-auto">
-            {/* Live portal header */}
-            <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-blue-400 font-bold text-base">
-                  {companyName ? companyName[0]?.toUpperCase() : "N"}
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-white">
-                    {jobTitle || "Junior MERN / React Native Developer"}
-                  </h3>
-                  <p className="text-xs text-slate-400">
-                    {companyName || "Purple Zone"} • {currentUrl || initialUrl || "Naukri Job Portal"}
-                  </p>
-                </div>
+        <div className="w-full bg-slate-900/60 p-5 space-y-4">
+          {/* Portal header badge */}
+          <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-blue-400 font-bold text-base shrink-0">
+                {companyName ? companyName[0]?.toUpperCase() : "J"}
               </div>
+              <div>
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <span>{jobTitle || "MERN / Full Stack Developer"}</span>
+                  <span className="px-2 py-0.5 bg-blue-500/20 text-blue-400 border border-blue-500/30 rounded text-[10px] font-semibold">
+                    Direct Apply Form
+                  </span>
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  {companyName || "Employer Portal"} • {currentUrl}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="px-2.5 py-1 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-full text-xs font-semibold flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping inline-block" />
+                Live Interactive Mode
+              </span>
+              <a
+                href={currentUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs font-semibold transition-colors inline-flex items-center gap-1.5"
+              >
+                <span>Portal Link</span>
+                <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
+              </a>
+            </div>
+          </div>
+
+          {/* Interactive Form Fields Canvas */}
+          <div className="bg-slate-950 p-5 rounded-xl border border-slate-800 space-y-4 shadow-inner">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2">
-                <span className="px-2.5 py-1 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-full text-xs font-semibold flex items-center gap-1.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping inline-block" />
-                  use-browser-js Active
+                <Edit3 className="w-4 h-4 text-blue-400" />
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-300">
+                  Editable Application Form & Input Fields
                 </span>
-                <a
-                  href={currentUrl || initialUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold transition-colors inline-flex items-center gap-1.5 cursor-pointer"
-                >
-                  <span>Open Directly</span>
-                  <ExternalLink className="w-3.5 h-3.5" />
-                </a>
+              </div>
+              <span className="text-xs text-emerald-400 font-medium flex items-center gap-1">
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                Click any field below to edit directly
+              </span>
+            </div>
+
+            {/* Grid of form inputs */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+              {/* Full Name */}
+              <div
+                className={`p-3 rounded-lg border transition-all ${
+                  activeField === "fullName"
+                    ? "bg-slate-900 border-blue-500 ring-1 ring-blue-500/30"
+                    : "bg-slate-900/70 border-slate-800 hover:border-slate-700"
+                }`}
+                onClick={() => setActiveField("fullName")}
+              >
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                    Full Name <span className="text-rose-400">*</span>
+                  </label>
+                  <span className="text-[10px] text-blue-400 font-semibold">Editable</span>
+                </div>
+                <input
+                  type="text"
+                  value={formData.fullName}
+                  onFocus={() => setActiveField("fullName")}
+                  onChange={(e) => handleInputChange("fullName", e.target.value)}
+                  className="w-full bg-slate-950 text-white font-medium text-xs px-3 py-2 rounded-md border border-slate-700 focus:border-blue-400 focus:outline-hidden"
+                  placeholder="Candidate Full Name"
+                />
+              </div>
+
+              {/* Email Address */}
+              <div
+                className={`p-3 rounded-lg border transition-all ${
+                  activeField === "email"
+                    ? "bg-slate-900 border-blue-500 ring-1 ring-blue-500/30"
+                    : "bg-slate-900/70 border-slate-800 hover:border-slate-700"
+                }`}
+                onClick={() => setActiveField("email")}
+              >
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                    Email Address <span className="text-rose-400">*</span>
+                  </label>
+                  <span className="text-[10px] text-blue-400 font-semibold">Editable</span>
+                </div>
+                <input
+                  type="email"
+                  value={formData.email}
+                  onFocus={() => setActiveField("email")}
+                  onChange={(e) => handleInputChange("email", e.target.value)}
+                  className="w-full bg-slate-950 text-white font-medium text-xs px-3 py-2 rounded-md border border-slate-700 focus:border-blue-400 focus:outline-hidden"
+                  placeholder="candidate@email.com"
+                />
+              </div>
+
+              {/* Phone Number */}
+              <div
+                className={`p-3 rounded-lg border transition-all ${
+                  activeField === "phone"
+                    ? "bg-slate-900 border-blue-500 ring-1 ring-blue-500/30"
+                    : "bg-slate-900/70 border-slate-800 hover:border-slate-700"
+                }`}
+                onClick={() => setActiveField("phone")}
+              >
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                    Phone / Contact Number
+                  </label>
+                  <span className="text-[10px] text-blue-400 font-semibold">Editable</span>
+                </div>
+                <input
+                  type="tel"
+                  value={formData.phone}
+                  onFocus={() => setActiveField("phone")}
+                  onChange={(e) => handleInputChange("phone", e.target.value)}
+                  className="w-full bg-slate-950 text-white font-medium text-xs px-3 py-2 rounded-md border border-slate-700 focus:border-blue-400 focus:outline-hidden"
+                  placeholder="+91 98765 43210"
+                />
+              </div>
+
+              {/* Experience */}
+              <div
+                className={`p-3 rounded-lg border transition-all ${
+                  activeField === "experience"
+                    ? "bg-slate-900 border-blue-500 ring-1 ring-blue-500/30"
+                    : "bg-slate-900/70 border-slate-800 hover:border-slate-700"
+                }`}
+                onClick={() => setActiveField("experience")}
+              >
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                    Total Experience
+                  </label>
+                  <span className="text-[10px] text-blue-400 font-semibold">Editable</span>
+                </div>
+                <input
+                  type="text"
+                  value={formData.experience}
+                  onFocus={() => setActiveField("experience")}
+                  onChange={(e) => handleInputChange("experience", e.target.value)}
+                  className="w-full bg-slate-950 text-white font-medium text-xs px-3 py-2 rounded-md border border-slate-700 focus:border-blue-400 focus:outline-hidden"
+                  placeholder="e.g. 2 Years"
+                />
+              </div>
+
+              {/* Notice Period */}
+              <div
+                className={`p-3 rounded-lg border transition-all ${
+                  activeField === "noticePeriod"
+                    ? "bg-slate-900 border-blue-500 ring-1 ring-blue-500/30"
+                    : "bg-slate-900/70 border-slate-800 hover:border-slate-700"
+                }`}
+                onClick={() => setActiveField("noticePeriod")}
+              >
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                    Notice Period
+                  </label>
+                  <span className="text-[10px] text-blue-400 font-semibold">Editable</span>
+                </div>
+                <input
+                  type="text"
+                  value={formData.noticePeriod}
+                  onFocus={() => setActiveField("noticePeriod")}
+                  onChange={(e) => handleInputChange("noticePeriod", e.target.value)}
+                  className="w-full bg-slate-950 text-white font-medium text-xs px-3 py-2 rounded-md border border-slate-700 focus:border-blue-400 focus:outline-hidden"
+                  placeholder="Immediate / 15 Days / 30 Days"
+                />
+              </div>
+
+              {/* Expected CTC */}
+              <div
+                className={`p-3 rounded-lg border transition-all ${
+                  activeField === "expectedSalary"
+                    ? "bg-slate-900 border-blue-500 ring-1 ring-blue-500/30"
+                    : "bg-slate-900/70 border-slate-800 hover:border-slate-700"
+                }`}
+                onClick={() => setActiveField("expectedSalary")}
+              >
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                    Expected Salary / CTC
+                  </label>
+                  <span className="text-[10px] text-blue-400 font-semibold">Editable</span>
+                </div>
+                <input
+                  type="text"
+                  value={formData.expectedSalary}
+                  onFocus={() => setActiveField("expectedSalary")}
+                  onChange={(e) => handleInputChange("expectedSalary", e.target.value)}
+                  className="w-full bg-slate-950 text-white font-medium text-xs px-3 py-2 rounded-md border border-slate-700 focus:border-blue-400 focus:outline-hidden"
+                  placeholder="e.g. 6 - 8 LPA"
+                />
               </div>
             </div>
 
-            {/* Application fields simulator */}
-            <div className="bg-slate-950/80 p-5 rounded-xl border border-slate-800 space-y-4 my-4 flex-1">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                  Automated Application Form Fields
-                </span>
-                <span className="text-xs text-blue-400 font-medium">
-                  3 / 3 Fields Auto-Filled
+            {/* Key Skills */}
+            <div
+              className={`p-3 rounded-lg border transition-all ${
+                activeField === "keySkills"
+                  ? "bg-slate-900 border-blue-500 ring-1 ring-blue-500/30"
+                  : "bg-slate-900/70 border-slate-800 hover:border-slate-700"
+              }`}
+              onClick={() => setActiveField("keySkills")}
+            >
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                  Relevant Skills & Tech Stack
+                </label>
+                <span className="text-[10px] text-blue-400 font-semibold">Editable</span>
+              </div>
+              <input
+                type="text"
+                value={formData.keySkills}
+                onFocus={() => setActiveField("keySkills")}
+                onChange={(e) => handleInputChange("keySkills", e.target.value)}
+                className="w-full bg-slate-950 text-white font-medium text-xs px-3 py-2 rounded-md border border-slate-700 focus:border-blue-400 focus:outline-hidden"
+                placeholder="React, Node.js, Express, MongoDB..."
+              />
+            </div>
+
+            {/* Cover Letter / Pitch */}
+            <div
+              className={`p-3 rounded-lg border transition-all ${
+                activeField === "coverLetter"
+                  ? "bg-slate-900 border-blue-500 ring-1 ring-blue-500/30"
+                  : "bg-slate-900/70 border-slate-800 hover:border-slate-700"
+              }`}
+              onClick={() => setActiveField("coverLetter")}
+            >
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                  Cover Letter / Introduction Pitch
+                </label>
+                <span className="text-[10px] text-blue-400 font-semibold">Editable</span>
+              </div>
+              <textarea
+                rows={3}
+                value={formData.coverLetter}
+                onFocus={() => setActiveField("coverLetter")}
+                onChange={(e) => handleInputChange("coverLetter", e.target.value)}
+                className="w-full bg-slate-950 text-white font-medium text-xs px-3 py-2 rounded-md border border-slate-700 focus:border-blue-400 focus:outline-hidden resize-y"
+                placeholder="Write or edit your customized pitch for this application..."
+              />
+            </div>
+
+            {/* Resume Attachment & Verification challenge */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* ATS Resume Attachment */}
+              <div className="p-3 bg-slate-900/70 rounded-lg border border-slate-800 flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <FileText className="w-5 h-5 text-emerald-400 shrink-0" />
+                  <div>
+                    <span className="text-xs font-bold text-slate-200 block">
+                      ATS Resume Attached
+                    </span>
+                    <p className="text-[11px] text-slate-400">{formData.resumeName}</p>
+                  </div>
+                </div>
+                <span className="px-2 py-1 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded text-[11px] font-semibold">
+                  ✓ Verified Attached
                 </span>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-                <div className="p-3 bg-slate-900 rounded-lg border border-slate-800 space-y-1">
-                  <span className="text-slate-500 text-[11px]">Full Name</span>
-                  <p className="font-semibold text-slate-200">Candidate Profile (Auto-filled)</p>
+              {/* OTP / Captcha / Custom Verification Field */}
+              <div
+                className={`p-3 rounded-lg border transition-all ${
+                  activeField === "otpOrCaptcha"
+                    ? "bg-slate-900 border-amber-500 ring-1 ring-amber-500/30"
+                    : "bg-slate-900/70 border-slate-800 hover:border-slate-700"
+                }`}
+                onClick={() => setActiveField("otpOrCaptcha")}
+              >
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-[11px] font-bold text-amber-300 uppercase tracking-wider flex items-center gap-1">
+                    <ShieldAlert className="w-3.5 h-3.5" />
+                    Security Code / OTP / Captcha
+                  </label>
+                  <span className="text-[10px] text-amber-400 font-semibold">Live Input</span>
                 </div>
-                <div className="p-3 bg-slate-900 rounded-lg border border-slate-800 space-y-1">
-                  <span className="text-slate-500 text-[11px]">Email Address</span>
-                  <p className="font-semibold text-slate-200">Verified Email (Auto-filled)</p>
-                </div>
-                <div className="p-3 bg-slate-900 rounded-lg border border-slate-800 space-y-1">
-                  <span className="text-slate-500 text-[11px]">Experience</span>
-                  <p className="font-semibold text-slate-200">1-4 Years (Matched)</p>
-                </div>
-                <div className="p-3 bg-slate-900 rounded-lg border border-slate-800 space-y-1">
-                  <span className="text-slate-500 text-[11px]">ATS Resume</span>
-                  <p className="font-semibold text-emerald-400">Tailored Resume Attached ✓</p>
-                </div>
+                <input
+                  type="text"
+                  value={formData.otpOrCaptcha}
+                  onFocus={() => setActiveField("otpOrCaptcha")}
+                  onChange={(e) => handleInputChange("otpOrCaptcha", e.target.value)}
+                  className="w-full bg-slate-950 text-amber-100 font-mono text-xs px-3 py-2 rounded-md border border-slate-700 focus:border-amber-400 focus:outline-hidden"
+                  placeholder="Enter or paste OTP / Captcha solution..."
+                />
               </div>
             </div>
 
-            {/* Bottom status bar */}
-            <div className="flex items-center justify-between text-xs text-slate-400 pt-2 border-t border-slate-800">
-              <div className="flex items-center gap-2">
-                <Bot className="w-4 h-4 text-blue-400" />
-                <span>AI is monitoring this application session and filling required fields.</span>
+            {/* In-Browser Apply Action Button */}
+            <div className="flex items-center justify-between pt-2 border-t border-slate-800">
+              <div className="text-xs text-slate-400 flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-blue-400" />
+                <span>All inputs auto-sync directly into the application record.</span>
               </div>
               <button
                 type="button"
-                onClick={handleTakeControl}
-                className="px-3 py-1 bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-500/40 rounded-md font-semibold cursor-pointer"
+                onClick={() => {
+                  if (onSubmitForm) {
+                    onSubmitForm(formData);
+                  } else {
+                    handleResumeAfterVerification();
+                  }
+                }}
+                className="px-5 py-2 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-bold text-xs rounded-lg shadow-md transition-colors flex items-center gap-2 cursor-pointer"
               >
-                Take Manual Control
+                <CheckCircle2 className="w-4 h-4" />
+                <span>Submit / Confirm Application in Browser</span>
               </button>
             </div>
           </div>
-        )}
-
-        {/* Interaction hint overlay in HUMAN mode */}
-        {isHumanMode && (
-          <div className="absolute top-3 right-3 bg-amber-500/90 text-slate-950 px-2.5 py-1 rounded-md text-[11px] font-bold shadow-lg pointer-events-none flex items-center gap-1.5 animate-bounce">
-            <Hand className="w-3.5 h-3.5" />
-            <span>Interactive: Click or type directly</span>
-          </div>
-        )}
+        </div>
       </div>
 
       {/* 5. BOTTOM QUICK INPUT / REMOTE ASSIST BAR */}
-      <div className="bg-slate-950 px-4 py-2 border-t border-slate-800 flex flex-wrap items-center justify-between gap-3 text-xs">
-        <form onSubmit={handleSendQuickText} className="flex items-center gap-2 flex-1 max-w-md">
+      <div className="bg-slate-950 px-4 py-2.5 border-t border-slate-800 flex flex-wrap items-center justify-between gap-3 text-xs">
+        <form onSubmit={handleSendQuickText} className="flex items-center gap-2 flex-1 max-w-lg">
           <div className="relative flex-1">
-            <Keyboard className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-2 pointer-events-none" />
+            <Keyboard className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-2.5 pointer-events-none" />
             <input
               type="text"
               value={quickText}
               onChange={(e) => setQuickText(e.target.value)}
-              placeholder="Paste OTP, captcha code, or text into active field..."
-              className="w-full bg-slate-900 text-slate-200 text-xs pl-8 pr-2 py-1 rounded-md border border-slate-700 focus:border-blue-500 focus:outline-hidden"
+              placeholder={`Type or paste value into active field (${activeField})...`}
+              className="w-full bg-slate-900 text-slate-200 text-xs pl-8 pr-3 py-1.5 rounded-md border border-slate-700 focus:border-blue-500 focus:outline-hidden"
             />
           </div>
           <button
             type="submit"
-            className="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-md text-xs font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer"
+            className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-md text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
           >
             <Send className="w-3 h-3" />
-            <span>Send</span>
+            <span>Update Field</span>
           </button>
         </form>
 
         <div className="flex items-center gap-2">
+          {/* Quick chip helpers */}
+          <button
+            type="button"
+            onClick={() => handleInputChange("noticePeriod", "Immediate")}
+            className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded text-[11px] font-medium transition-colors cursor-pointer hidden md:inline-block"
+          >
+            Immediate Notice
+          </button>
+
           {isHumanMode ? (
             <>
               <button
                 type="button"
                 onClick={handleReturnControl}
                 disabled={actionPending}
-                className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md text-xs font-medium transition-colors cursor-pointer"
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md text-xs font-medium transition-colors cursor-pointer"
               >
                 Return to AI
               </button>
