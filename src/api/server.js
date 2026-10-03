@@ -125,12 +125,12 @@ app.use(globalErrorHandler);
 if (process.env.NODE_ENV !== "production") {
   const { createServer: createViteServer } = await import("vite");
   const vite = await createViteServer({
+    configFile: path.resolve(__dirname, "../../vite.config.js"),
     server: {
       middlewareMode: true,
       hmr: false,
     },
     appType: "spa",
-    root: path.resolve(__dirname, "../web"),
   });
   app.use(vite.middlewares);
 } else {
