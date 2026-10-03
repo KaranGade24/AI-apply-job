@@ -1,4 +1,4 @@
-import { chromium } from "playwright";
+import { chromium } from "../services/browser/useBrowserJs.js";
 import { executeAction } from "../browser/executor/browserExecutor.js";
 import { BROWSER_ACTIONS } from "../constant/application.constant.js";
 import { checkPlaywrightAvailable } from "./helpers/playwrightAvailable.js";

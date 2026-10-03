@@ -1,4 +1,4 @@
-import { chromium } from 'playwright';
+import { chromium } from './browser/useBrowserJs.js';
 import { BrowserManager } from '../browser/browserManager.js';
 import { BROWSER_LAUNCH_ARGS } from '../constant/browser.constant.js';
 import {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { chromium } from "playwright";
+import { chromium } from "../services/browser/useBrowserJs.js";
 import { checkPlaywrightAvailable } from "./helpers/playwrightAvailable.js";
 import { createTestServer } from "./fixtures/testServer.js";
 import { observeBrowser } from "../browser/observer/browserObserver.js";

@@ -1,4 +1,4 @@
-import { chromium } from "playwright";
+import { chromium } from "../services/browser/useBrowserJs.js";
 import { verifyStateTransition } from "../browser/verifier/stateVerifier.js";
 import { BROWSER_ACTIONS } from "../constant/application.constant.js";
 import { checkPlaywrightAvailable } from "./helpers/playwrightAvailable.js";

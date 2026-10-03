@@ -1,4 +1,4 @@
-import { chromium } from "playwright";
+import { chromium } from "../services/browser/useBrowserJs.js";
 import { verifyFilledFields } from "../application/form/formVerifier.js";
 import { checkPlaywrightAvailable } from "./helpers/playwrightAvailable.js";
 import assert from "assert";

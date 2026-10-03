@@ -9,6 +9,8 @@ export const getApplicationDetailsApi = async (id) => {
   return await fetchWithAuth(`/applications/${id}`);
 };
 
+export const getApplicationByIdApi = getApplicationDetailsApi;
+
 export const getApplicationByJobIdApi = async (jobId) => {
   return await fetchWithAuth(`/applications/job/${jobId}`);
 };

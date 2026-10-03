@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useContext, useRef } from 'react';
-import { Search, MapPin, Briefcase, Check, X, Plus } from 'lucide-react';
+import { Search, MapPin, Briefcase, Check, X, Plus, Terminal, CheckSquare, Square } from 'lucide-react';
 import { Input } from '../../components/ui/Input';
 import { Select } from '../../components/ui/Select';
 import { Button } from '../../components/ui/Button';
@@ -7,6 +7,7 @@ import { JobCard } from './JobCard';
 import { ApplicationReviewModal } from '../applications/ApplicationReviewModal';
 import { getDiscoveredJobsApi, discoverJobsApi, deleteJobApi } from '../../services/jobService';
 import { createApplicationApi } from '../../services/applicationService';
+import { addJobsToQueueApi, getQueueApi } from '../../services/queueService';
 import { useNaukri } from '../../context/NaukriContext';
 import { SettingsContext } from '../../context/SettingsContext';
 
@@ -33,12 +34,29 @@ export const JobSearchPage = () => {
   const [customLocationInput, setCustomLocationInput] = useState('');
   const [selectedSources, setSelectedSources] = useState(['naukri', 'jobViaReferral']);
   const [excludeKeywords, setExcludeKeywords] = useState('Senior, Lead, Manager');
+  const [selectedJobIds, setSelectedJobIds] = useState([]);
+  const [queuedJobIds, setQueuedJobIds] = useState(new Set());
+  const [enqueuing, setEnqueuing] = useState(false);
 
   const abortControllerRef = useRef(null);
 
   const showToast = (msg) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(''), 3000);
+  };
+
+  const loadQueuedJobs = async () => {
+    try {
+      const res = await getQueueApi();
+      if (res?.data) {
+        const ids = new Set(
+          res.data
+            .map((item) => (item.jobId?._id ? item.jobId._id : item.jobId))
+            .filter(Boolean)
+        );
+        setQueuedJobIds(ids);
+      }
+    } catch {}
   };
 
   const fetchJobs = async () => {
@@ -57,6 +75,45 @@ export const JobSearchPage = () => {
     }
   };
 
+  const handleToggleSelect = (jobId) => {
+    setSelectedJobIds((prev) =>
+      prev.includes(jobId) ? prev.filter((id) => id !== jobId) : [...prev, jobId]
+    );
+  };
+
+  const handleSelectAll = (targetJobs) => {
+    if (selectedJobIds.length === targetJobs.length && targetJobs.length > 0) {
+      setSelectedJobIds([]);
+    } else {
+      setSelectedJobIds(targetJobs.map((j) => j._id));
+    }
+  };
+
+  const handleAddSingleToQueue = async (job) => {
+    try {
+      await addJobsToQueueApi([job._id]);
+      setQueuedJobIds((prev) => new Set([...prev, job._id]));
+      showToast(`Job "${job.title}" added to automation queue.`);
+    } catch (err) {
+      showToast('Failed to add to queue: ' + err.message);
+    }
+  };
+
+  const handleBatchAddToQueue = async () => {
+    if (selectedJobIds.length === 0) return;
+    setEnqueuing(true);
+    try {
+      await addJobsToQueueApi(selectedJobIds);
+      setQueuedJobIds((prev) => new Set([...prev, ...selectedJobIds]));
+      showToast(`Enqueued ${selectedJobIds.length} jobs to automation queue!`);
+      setSelectedJobIds([]);
+    } catch (err) {
+      showToast('Failed to enqueue jobs: ' + err.message);
+    } finally {
+      setEnqueuing(false);
+    }
+  };
+
   const handleDeleteJob = async (jobId) => {
     try {
       await deleteJobApi(jobId);
@@ -71,6 +128,7 @@ export const JobSearchPage = () => {
   useEffect(() => {
     fetchJobs();
     refreshNaukriStatus();
+    loadQueuedJobs();
   }, []);
 
   useEffect(() => {

@@ -1,4 +1,4 @@
-import { chromium } from "playwright";
+import { chromium } from "../services/browser/useBrowserJs.js";
 import { observeDOM } from "../browser/observer/domObserver.js";
 import { resolveElement } from "../browser/observer/elementResolver.js";
 import { checkPlaywrightAvailable } from "./helpers/playwrightAvailable.js";

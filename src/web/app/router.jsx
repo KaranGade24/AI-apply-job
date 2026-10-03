@@ -7,6 +7,9 @@ import { SignupPage } from '../features/auth/SignupPage';
 import { DashboardPage } from '../features/dashboard/DashboardPage';
 import { JobSearchPage } from '../features/jobs/JobSearchPage';
 import { ApplicationsPage } from '../features/applications/ApplicationsPage';
+import { AutomationPage } from '../features/automation/AutomationPage';
+import { AnalyticsPage } from '../features/analytics/AnalyticsPage';
+import { ProfilePage } from '../features/profile/ProfilePage';
 import { ResumeBuilderPage } from '../features/resume/ResumeBuilderPage';
 import { SettingsPage } from '../features/settings/SettingsPage';
 import { AiSettingsTab } from '../features/settings/aiSettings/AiSettingsTab';
@@ -36,6 +39,9 @@ export const AppRouter = () => {
           <Route path="/" element={<DashboardPage />} />
           <Route path="/jobs" element={<JobSearchPage />} />
           <Route path="/applications" element={<ApplicationsPage />} />
+          <Route path="/automation" element={<AutomationPage />} />
+          <Route path="/analytics" element={<AnalyticsPage />} />
+          <Route path="/profile" element={<ProfilePage />} />
           <Route path="/resume" element={<ResumeBuilderPage />} />
 
           {/* Settings Sub-routes */}

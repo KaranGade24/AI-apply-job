@@ -1,4 +1,4 @@
-import { chromium } from 'playwright';
+import { chromium } from '../services/browser/useBrowserJs.js';
 import {
   BROWSER_HEADLESS,
   BROWSER_SLOW_MO,
@@ -6,8 +6,8 @@ import {
 } from '../constant/browser.constant.js';
 
 /**
- * Launches and configures a Chromium browser instance using Playwright
- * @returns {Promise<import('playwright').Browser>} Chromium browser instance
+ * Launches and configures a browser instance using use-browser-js runtime
+ * @returns {Promise<object>} Browser instance
  */
 export const createBrowser = async () => {
   const isHeadless = typeof BROWSER_HEADLESS === 'string'

@@ -8,7 +8,10 @@ import {
   Bot,
   Settings,
   LogOut,
-  Sparkles
+  Sparkles,
+  Terminal,
+  BarChart3,
+  User,
 } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 import { useNaukri } from '../../context/NaukriContext';
@@ -21,8 +24,10 @@ export const Sidebar = () => {
     { label: 'Dashboard', path: '/', icon: LayoutDashboard },
     { label: 'Job Search', path: '/jobs', icon: Search },
     { label: 'Applications', path: '/applications', icon: Briefcase },
+    { label: 'Automation Queue', path: '/automation', icon: Terminal },
+    { label: 'Analytics', path: '/analytics', icon: BarChart3 },
+    { label: 'Candidate Profile', path: '/profile', icon: User },
     { label: 'Resume Builder', path: '/resume', icon: FileText },
-    { label: 'AI Assistant', path: '/settings/ai', icon: Bot },
     { label: 'Settings', path: '/settings', icon: Settings },
   ];
 

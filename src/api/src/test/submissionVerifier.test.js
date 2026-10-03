@@ -1,4 +1,4 @@
-import { chromium } from "playwright";
+import { chromium } from "../services/browser/useBrowserJs.js";
 import {
   verifySubmission,
   VERIFICATION_STATUS,

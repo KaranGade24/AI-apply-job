@@ -13,6 +13,8 @@ import {
   Clock,
   Layers,
   Info,
+  Plus,
+  Terminal,
 } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 
@@ -23,6 +25,10 @@ export const JobCard = ({
   onDelete,
   applyingId,
   onSelectPosition,
+  isSelected,
+  onToggleSelect,
+  onAddToQueue,
+  isQueued,
 }) => {
   const [isDeleting, setIsDeleting] = useState(false);
   const [selectedPositionId, setSelectedPositionId] = useState(null);
@@ -126,7 +132,17 @@ export const JobCard = ({
       </button>
 
       {/* Left Info */}
-      <div className="flex items-start gap-4 min-w-0">
+      <div className="flex items-start gap-3.5 min-w-0">
+        {onToggleSelect && (
+          <div className="pt-3.5" onClick={(e) => e.stopPropagation()}>
+            <input
+              type="checkbox"
+              checked={!!isSelected}
+              onChange={() => onToggleSelect(job._id)}
+              className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 border-slate-300 cursor-pointer"
+            />
+          </div>
+        )}
         <div
           className={`w-12 h-12 rounded-xl ${getLogoColor(
             job.company
@@ -303,6 +319,27 @@ export const JobCard = ({
                 title="Open job posting"
               >
                 <ExternalLink className="w-3.5 h-3.5" /> View
+              </Button>
+            )}
+
+            {onAddToQueue && (
+              <Button
+                size="sm"
+                variant={isQueued ? 'ghost' : 'outline'}
+                disabled={isQueued}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onAddToQueue(job);
+                }}
+                className={`px-3 text-xs font-semibold flex items-center gap-1 cursor-pointer ${
+                  isQueued
+                    ? 'text-slate-400 bg-slate-100 border border-slate-200 cursor-not-allowed'
+                    : 'text-blue-600 border-blue-200 hover:bg-blue-50'
+                }`}
+                title={isQueued ? 'Already queued' : 'Enqueue for automated application'}
+              >
+                {isQueued ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> : <Plus className="w-3.5 h-3.5" />}
+                {isQueued ? 'Queued' : 'Add to Queue'}
               </Button>
             )}
 
