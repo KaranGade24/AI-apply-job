@@ -32,8 +32,14 @@ const app = express();
 
 // Request logging middleware using centralized logger with strict body redaction & route exclusions
 app.use((req, res, next) => {
+  const { originalUrl, method } = req;
+
+  // Only log API and documentation requests to keep console clean
+  if (!originalUrl.startsWith("/api") && !originalUrl.startsWith("/api-docs")) {
+    return next();
+  }
+
   const start = Date.now();
-  const { method, originalUrl } = req;
   const authHeader = req.headers.authorization ? "Bearer ***" : "None";
 
   // Never log request bodies for sensitive routes
@@ -71,20 +77,18 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(jsonSyntaxErrorHandler);
 
-// Root API Health Check
-app.get("/", (req, res) => {
-  res
-    .status(200)
-    .json({
-      status: "ok",
-      service: "AI Apply Job Backend API",
-      docs: "/api-docs",
-    });
-});
-
 // Swagger API Documentation setup
 const swaggerSpec = swaggerJsdoc(swaggerOptions);
 app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+
+// API Health Check
+app.get("/api/health", (req, res) => {
+  res.status(200).json({
+    status: "ok",
+    service: "AI Apply Job Backend API",
+    docs: "/api-docs",
+  });
+});
 
 // Register API Routes
 app.use("/api/auth", authRouter);
@@ -103,21 +107,52 @@ if (process.env.NODE_ENV !== "production") {
 
 // 404 Handler for undefined API endpoints
 app.use((req, res, next) => {
-  next(
-    new appError(
-      `Cannot find endpoint ${req.originalUrl} on this server!`,
-      404,
-    ),
-  );
+  if (req.originalUrl.startsWith("/api")) {
+    return next(
+      new appError(
+        `Cannot find endpoint ${req.originalUrl} on this server!`,
+        404,
+      ),
+    );
+  }
+  next();
 });
 
-// Centralized Global Error Handler
+// Centralized Global Error Handler for API routes
 app.use(globalErrorHandler);
 
-const PORT = process.env.API_PORT || DEFAULT_PORT || 5000;
+// Mount Frontend: Vite middleware in development, static bundle in production
+if (process.env.NODE_ENV !== "production") {
+  const { createServer: createViteServer } = await import("vite");
+  const vite = await createViteServer({
+    server: {
+      middlewareMode: true,
+      hmr: false,
+    },
+    appType: "spa",
+    root: path.resolve(__dirname, "../web"),
+  });
+  app.use(vite.middlewares);
+} else {
+  const distPath = path.resolve(__dirname, "../web/dist");
+  app.use(express.static(distPath));
+  app.get("/:any*", (req, res) => {
+    res.sendFile(path.resolve(distPath, "index.html"));
+  });
+}
 
-const server = app.listen(PORT, () => {
-  console.log(`🚀 Standalone Backend API Server is running on port ${PORT}`);
+// Parse CLI port flag (--port 3000) or explicit APP_PORT / API_PORT / DEFAULT_PORT
+const cliArgs = process.argv.slice(2);
+let detectedPort = null;
+const portArgIndex = cliArgs.indexOf("--port");
+if (portArgIndex !== -1 && cliArgs[portArgIndex + 1]) {
+  detectedPort = parseInt(cliArgs[portArgIndex + 1], 10);
+}
+
+const PORT = detectedPort || process.env.APP_PORT || process.env.API_PORT || DEFAULT_PORT || 3000;
+
+const server = app.listen(PORT, "0.0.0.0", () => {
+  console.log(`🚀 Full-Stack AI Apply Job Server is running on port ${PORT}`);
   console.log(
     `📚 Swagger documentation available at: http://localhost:${PORT}/api-docs`,
   );
