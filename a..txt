@@ -1,0 +1,1868 @@
+# AI-Apply-Job — AI-Powered Job Discovery & Automated Application Platform
+
+## 1. Product Goal
+
+Build a production-grade Node.js application that helps users discover relevant jobs, analyze job listings, decide whether they match the user's profile, personalize application materials, and—when explicitly enabled by the user—automate the application workflow through browser automation.
+
+The system should provide a clean unified dashboard where users can:
+
+* Find jobs from popular job boards such as LinkedIn and Indeed.
+* Search and analyze jobs using configurable criteria.
+* Automatically discover jobs matching the user's profile.
+* Deep-dive into every relevant job listing by default.
+* Open the actual job/application page through browser automation.
+* Understand the application form dynamically.
+* Fill supported application fields using the user's stored profile.
+* Generate job-specific cover letters and other application answers with an LLM.
+* Ask the user for missing information instead of inventing answers.
+* Track every application and automation step.
+* Show real-time application status.
+* Support multiple applications in an automated queue.
+* Provide application history, analytics, failures, and logs.
+
+The system should be designed around **user-controlled automation** rather than blindly submitting applications.
+
+---
+
+# 2. Core Architecture
+
+Use a modular architecture:
+
+Frontend
+↓
+Backend API
+↓
+Job Discovery Service
+↓
+Job Analysis / Matching Service
+↓
+Application Orchestrator
+↓
+Browser Automation Service
+↓
+LLM Service
+↓
+Application Form Analyzer
+↓
+Application Data / User Profile
+↓
+MongoDB
+
+Browser automation should be implemented as a dedicated service/module using `use-browser-js` or the appropriate browser automation runtime.
+
+Do not tightly couple browser automation logic with controllers.
+
+Recommended structure:
+
+```text
+src/
+├── api/
+│   ├── controllers/
+│   ├── routes/
+│   ├── middleware/
+│   └── validators/
+│
+├── services/
+│   ├── job/
+│   │   ├── jobDiscoveryService.js
+│   │   ├── jobSearchService.js
+│   │   ├── jobAnalysisService.js
+│   │   └── jobMatchingService.js
+│   │
+│   ├── application/
+│   │   ├── applicationService.js
+│   │   ├── applicationQueueService.js
+│   │   ├── applicationOrchestrator.js
+│   │   ├── applicationStatusService.js
+│   │   └── applicationAnswerService.js
+│   │
+│   ├── browser/
+│   │   ├── browserService.js
+│   │   ├── browserSessionService.js
+│   │   ├── pageAnalyzer.js
+│   │   ├── formAnalyzer.js
+│   │   ├── formFiller.js
+│   │   └── siteAdapters/
+│   │       ├── linkedinAdapter.js
+│   │       ├── indeedAdapter.js
+│   │       └── genericJobSiteAdapter.js
+│   │
+│   ├── ai/
+│   │   ├── jobAnalysisService.js
+│   │   ├── personalizationService.js
+│   │   ├── answerGenerationService.js
+│   │   └── missingInformationService.js
+│   │
+│   └── resume/
+│       ├── resumeService.js
+│       └── profileService.js
+│
+├── models/
+├── config/
+├── constants/
+├── utils/
+├── events/
+├── queues/
+└── agent/
+```
+
+Use JavaScript only.
+
+Do not introduce TypeScript.
+
+---
+
+# 3. User Profile
+
+The user's profile is the central source of truth.
+
+The system should store:
+
+### Personal Information
+
+* Full name
+* Email
+* Phone
+* Location
+* Address
+* Date of birth if required and explicitly provided
+* LinkedIn
+* GitHub
+* Portfolio
+* Other professional links
+
+### Education
+
+* Degree
+* College/university
+* Field of study
+* CGPA/percentage
+* Graduation year
+* Education history
+
+### Experience
+
+For each experience:
+
+* Company
+* Position
+* Employment type
+* Start date
+* End date
+* Description
+* Skills
+* Location
+
+### Projects
+
+For each project:
+
+* Project name
+* Description
+* Technologies
+* GitHub URL
+* Live URL
+* Responsibilities
+* Key achievements
+
+### Skills
+
+* Programming languages
+* Frameworks
+* Databases
+* Tools
+* Cloud
+* AI/ML
+* Other technical skills
+
+### Application Information
+
+Potential reusable answers:
+
+* Work authorization
+* Sponsorship requirement
+* Notice period
+* Expected salary
+* Current salary if applicable
+* Willingness to relocate
+* Preferred work mode
+* Availability
+* Years of experience
+* Professional summary
+
+Sensitive fields should only be stored when explicitly provided by the user.
+
+---
+
+# 4. Resume Processing
+
+The existing resume-processing system should remain the primary mechanism for extracting the user's professional profile.
+
+Flow:
+
+```text
+Resume Upload
+      ↓
+File Validation
+      ↓
+Text Extraction
+      ↓
+Resume Parsing
+      ↓
+Structured Resume
+      ↓
+User Profile
+      ↓
+Profile Validation
+```
+
+The LLM must NOT silently invent missing resume information.
+
+If extraction is uncertain:
+
+```text
+UNCERTAIN
+    ↓
+Ask user
+    ↓
+User confirms
+    ↓
+Store confirmed value
+```
+
+---
+
+# 5. Job Discovery
+
+Support multiple job sources.
+
+Initial sources:
+
+* LinkedIn
+* Indeed
+* Other supported job boards
+* Generic job websites
+
+The system should have a common internal job format regardless of source.
+
+Example:
+
+```js
+{
+    title,
+    company,
+    location,
+    workMode,
+    employmentType,
+    salary,
+    description,
+    requirements,
+    skills,
+    experienceRequired,
+    source,
+    sourceUrl,
+    applicationUrl,
+    postedAt,
+    discoveredAt
+}
+```
+
+The UI should not care whether a job came from LinkedIn, Indeed, or another source.
+
+---
+
+# 6. User-Defined Job Filters
+
+Users should be able to configure filters such as:
+
+### Job Title
+
+Examples:
+
+```text
+MERN Developer
+Full Stack Developer
+Node.js Developer
+Backend Developer
+Junior Software Developer
+```
+
+### Location
+
+Examples:
+
+```text
+Pune
+Mumbai
+Bangalore
+Remote
+India
+```
+
+### Experience
+
+```text
+Fresher
+0-1 years
+1-2 years
+```
+
+### Salary
+
+```text
+Minimum salary
+Maximum salary
+```
+
+### Employment Type
+
+* Full-time
+* Part-time
+* Internship
+* Contract
+
+### Work Mode
+
+* Remote
+* Hybrid
+* On-site
+
+### Skills
+
+Example:
+
+```text
+JavaScript
+React
+Node.js
+Express
+MongoDB
+REST API
+```
+
+### Excluded Conditions
+
+Users can define:
+
+```text
+Exclude unpaid internships
+Exclude senior roles
+Exclude locations
+Exclude companies
+Exclude technologies
+```
+
+---
+
+# 7. AI Job Matching
+
+Every discovered job should be analyzed against the user's profile.
+
+Do not only compare job title.
+
+Analyze:
+
+```text
+User Profile
+      +
+Resume
+      +
+Skills
+      +
+Experience
+      +
+Education
+      +
+Projects
+      +
+Job Description
+      ↓
+AI Job Analysis
+```
+
+Return structured information:
+
+```js
+{
+    matchPercentage,
+    matchingSkills,
+    missingSkills,
+    relevantExperience,
+    relevantProjects,
+    educationMatch,
+    experienceMatch,
+    concerns,
+    reasons,
+    recommendation
+}
+```
+
+The frontend should show:
+
+```text
+92% Match
+
+Full Stack Developer — MERN
+
+Matching Skills
+✓ React
+✓ Node.js
+✓ MongoDB
+✓ Express
+
+Missing / Weak
+• AWS
+
+Relevant Projects
+• AI Chat Application
+• ChatFlow
+
+Experience Requirement
+0-2 years
+
+Education
+Matches
+```
+
+The match score should be presented as an AI-generated assessment, not as an objective fact.
+
+---
+
+# 8. Deep Dive Should Be the Default
+
+Do NOT make "Deep Dive" a special feature that only works for one job title.
+
+Deep Dive should be part of the normal workflow.
+
+For every relevant discovered job:
+
+```text
+Job discovered
+      ↓
+Open job
+      ↓
+Analyze actual job page
+      ↓
+Extract complete job information
+      ↓
+Find application mechanism
+      ↓
+Analyze application requirements
+      ↓
+Determine whether automation is possible
+      ↓
+Prepare application
+```
+
+The system should work generically rather than depending on a hardcoded title.
+
+---
+
+# 9. Browser Automation
+
+Use `use-browser-js` for browser-based interaction where appropriate.
+
+The browser automation layer should be capable of:
+
+* Opening websites
+* Navigating pages
+* Clicking elements
+* Reading page content
+* Detecting buttons
+* Detecting links
+* Detecting forms
+* Filling fields
+* Selecting dropdowns
+* Uploading files
+* Navigating multi-step forms
+* Detecting validation errors
+* Capturing screenshots
+* Reading dynamically rendered content
+* Waiting for page state changes
+* Handling redirects
+* Tracking browser actions
+
+The browser should behave as an agent rather than relying exclusively on fragile CSS selectors.
+
+---
+
+# 10. Generic Website Analyzer
+
+Do not build the system only around LinkedIn and Indeed selectors.
+
+Create a generic browser/page analyzer.
+
+Example:
+
+```text
+Browser
+   ↓
+Page
+   ↓
+DOM + Accessibility Tree + Visible Text
+   ↓
+Page Analyzer
+   ↓
+LLM / Rule Engine
+   ↓
+Page Understanding
+```
+
+The analyzer should identify:
+
+```text
+Page type:
+- Job listing
+- Search results
+- Login
+- Application form
+- Confirmation
+- Error
+- CAPTCHA
+- Unknown
+
+Important elements:
+- Job title
+- Company
+- Location
+- Apply button
+- Application fields
+- Continue button
+- Submit button
+- Login requirement
+- File upload
+```
+
+This makes the system reusable for websites beyond LinkedIn and Indeed.
+
+---
+
+# 11. Application Form Analyzer
+
+When an application page is opened, inspect the form dynamically.
+
+For each field determine:
+
+```js
+{
+    fieldId,
+    label,
+    type,
+    required,
+    options,
+    placeholder,
+    currentValue,
+    semanticMeaning,
+    confidence
+}
+```
+
+Examples:
+
+```text
+First Name
+Last Name
+Email
+Phone
+Resume
+Cover Letter
+LinkedIn URL
+GitHub URL
+Portfolio URL
+Years of Experience
+Expected Salary
+Work Authorization
+Sponsorship
+Relocation
+Education
+Custom Questions
+```
+
+Do not depend only on the HTML field name.
+
+For example:
+
+```text
+"What is your professional background?"
+```
+
+may correspond to:
+
+```text
+Professional Summary
+```
+
+The LLM can help map unknown fields to known profile attributes.
+
+---
+
+# 12. Missing Information System
+
+This is extremely important.
+
+The AI must NEVER invent user information.
+
+If an application asks:
+
+```text
+Are you legally authorized to work in the United States?
+```
+
+and the user has not provided the answer:
+
+```text
+AI → Missing user information
+```
+
+The application should pause.
+
+Frontend:
+
+```text
+Action Required
+
+LinkedIn — Software Engineer
+
+The application asks:
+
+"Are you legally authorized to work in the United States?"
+
+We don't have this information.
+
+[Provide Answer]
+
+[Skip Application]
+```
+
+The same system should work for:
+
+* Salary
+* Sponsorship
+* Notice period
+* Relocation
+* Work authorization
+* Years of experience
+* Gender
+* Demographic questions
+* Security clearance
+* Veteran status
+* Disability information
+* Custom company questions
+
+Do not guess.
+
+---
+
+# 13. LLM Personalization
+
+The LLM should generate application-specific content.
+
+Do NOT generate one generic cover letter and reuse it everywhere.
+
+For every application:
+
+```text
+User Profile
+      +
+Resume
+      +
+Job Description
+      +
+Company Information
+      +
+Relevant Projects
+      +
+Required Skills
+      +
+Application Questions
+      ↓
+LLM
+      ↓
+Job-specific Application Content
+```
+
+Generate:
+
+### Cover Letter
+
+The cover letter should reference:
+
+* Company
+* Role
+* Relevant skills
+* Relevant projects
+* Relevant experience
+* Job requirements
+
+Avoid generic filler.
+
+### Custom Questions
+
+For example:
+
+```text
+Why do you want to join our company?
+```
+
+Generate an answer based on the actual company and job.
+
+### Project Questions
+
+If the job asks:
+
+```text
+Describe a project involving real-time communication.
+```
+
+The system should identify the relevant user project and generate a truthful answer.
+
+---
+
+# 14. User Review for Generated Answers
+
+The user should be able to review generated content before submission when required.
+
+Example:
+
+```text
+AI Generated Answer
+
+Why should we hire you?
+
+[Generated response...]
+
+[Edit]
+[Approve]
+[Regenerate]
+```
+
+The user can:
+
+* Edit
+* Approve
+* Regenerate
+* Reject
+
+Approved answers can optionally be saved as reusable preferences.
+
+---
+
+# 15. Application Automation Modes
+
+Provide multiple modes.
+
+### Manual
+
+AI only discovers and analyzes jobs.
+
+```text
+Find → Analyze → User applies manually
+```
+
+### Assisted
+
+AI fills information but waits for the user before final submission.
+
+```text
+Find
+ ↓
+Analyze
+ ↓
+Fill
+ ↓
+User Review
+ ↓
+Submit
+```
+
+### Automatic
+
+For user-approved job criteria, the system can process the application queue automatically.
+
+```text
+Find
+ ↓
+Match
+ ↓
+Deep Dive
+ ↓
+Prepare
+ ↓
+Fill
+ ↓
+Validate
+ ↓
+Submit
+ ↓
+Track
+```
+
+The user should explicitly enable automatic submission.
+
+---
+
+# 16. Application Queue
+
+Users should be able to select multiple jobs.
+
+Example:
+
+```text
+Selected Jobs: 15
+
+Queue
+
+1. Full Stack Developer — Company A
+2. MERN Developer — Company B
+3. Node.js Developer — Company C
+...
+```
+
+The queue should support:
+
+```text
+Pending
+Analyzing
+Preparing
+Waiting for User
+Filling
+Submitting
+Submitted
+Failed
+Skipped
+Needs Review
+```
+
+Allow:
+
+* Pause
+* Resume
+* Cancel
+* Retry
+* Skip
+* Retry failed applications
+
+---
+
+# 17. Application State Machine
+
+Every application should have a controlled state.
+
+Example:
+
+```text
+DISCOVERED
+    ↓
+ANALYZING
+    ↓
+MATCHED
+    ↓
+DEEP_DIVING
+    ↓
+APPLICATION_FOUND
+    ↓
+PREPARING
+    ↓
+WAITING_FOR_INFORMATION
+    ↓
+READY
+    ↓
+FILLING
+    ↓
+VALIDATING
+    ↓
+SUBMITTING
+    ↓
+SUBMITTED
+```
+
+Failure paths:
+
+```text
+FAILED
+BLOCKED
+CAPTCHA_REQUIRED
+LOGIN_REQUIRED
+MANUAL_ACTION_REQUIRED
+SKIPPED
+```
+
+Never mark an application as submitted unless the browser workflow has evidence that submission succeeded.
+
+---
+
+# 18. CAPTCHA / Anti-Bot / Login Handling
+
+The automation system should detect when human intervention is required.
+
+Examples:
+
+```text
+CAPTCHA detected
+Login required
+Two-factor authentication required
+Email verification required
+Unexpected page
+Website blocked automation
+```
+
+Instead of attempting to bypass these mechanisms:
+
+```text
+Automation Paused
+
+Manual action required.
+
+[Open Browser Session]
+[Continue After Verification]
+```
+
+The system resumes after the user completes the required action.
+
+---
+
+# 19. Real-Time Status Updates
+
+The frontend should receive real-time events.
+
+Use Socket.IO or Server-Sent Events.
+
+Example:
+
+```text
+Job discovered
+Job analyzed
+Application started
+Browser opened
+Application form detected
+Resume uploaded
+Cover letter generated
+Question requires user input
+Application submitted
+Application failed
+```
+
+Dashboard example:
+
+```text
+● Applying
+
+Full Stack Developer
+Company: Example Corp
+
+Step 4 / 7
+
+✓ Job analyzed
+✓ Resume selected
+✓ Cover letter generated
+✓ Basic information filled
+→ Custom questions
+○ Final submission
+```
+
+---
+
+# 20. Unified Dashboard
+
+The dashboard should contain:
+
+## Overview
+
+```text
+Jobs Found        248
+Matched Jobs     74
+Applications      38
+Submitted         31
+Pending             5
+Failed              2
+```
+
+## Job Feed
+
+```text
+Job
+Company
+Location
+Match
+Source
+Status
+Action
+```
+
+## Application Queue
+
+Show currently running automation jobs.
+
+## Application History
+
+Filter by:
+
+* Date
+* Company
+* Job title
+* Source
+* Status
+* Match
+* Location
+
+## Analytics
+
+Display:
+
+```text
+Jobs discovered
+Jobs matched
+Applications submitted
+Applications failed
+Applications requiring review
+Response rate
+Applications by source
+Applications by job title
+Applications by location
+Applications over time
+```
+
+---
+
+# 21. Application Detail Page
+
+Every application should have its own detail page.
+
+Example:
+
+```text
+Full Stack Developer
+Company XYZ
+
+92% Match
+
+Source: LinkedIn
+Status: Submitted
+
+Job Information
+----------------
+Location: Pune
+Work Mode: Hybrid
+Experience: 0-2 years
+
+AI Analysis
+-----------
+Matching Skills
+Missing Skills
+Relevant Projects
+Potential Concerns
+
+Application
+-----------
+Resume
+Cover Letter
+Answers
+
+Automation
+-----------
+Started
+Completed
+Browser actions
+Errors
+Screenshots
+
+Timeline
+--------
+10:31 Job discovered
+10:32 Deep dive started
+10:33 Application form found
+10:34 Resume uploaded
+10:35 Cover letter generated
+10:36 Application submitted
+```
+
+---
+
+# 22. Browser Automation Logs
+
+Every browser action should be traceable.
+
+Example:
+
+```text
+[10:32:01] Opening job URL
+[10:32:04] Job page loaded
+[10:32:05] Apply button detected
+[10:32:07] Clicking Apply
+[10:32:10] Application page detected
+[10:32:11] Form analyzed
+[10:32:12] Email field detected
+[10:32:13] Email populated
+```
+
+Store important events in the database.
+
+Do not store unnecessary sensitive page data.
+
+---
+
+# 23. Screenshots / Evidence
+
+For important application stages, optionally capture screenshots:
+
+```text
+Job page
+Application form
+Before submission
+Submission confirmation
+Error state
+```
+
+This gives the user evidence of what happened.
+
+---
+
+# 24. Database Models
+
+Recommended models:
+
+```text
+User
+UserProfile
+Resume
+Job
+JobSource
+JobMatch
+Application
+ApplicationAnswer
+ApplicationEvent
+ApplicationSession
+AutomationTask
+AutomationLog
+UserPreference
+MissingInformation
+```
+
+Relationships:
+
+```text
+User
+ ├── UserProfile
+ ├── Resumes
+ ├── Jobs
+ ├── JobMatches
+ ├── Applications
+ ├── Preferences
+ └── AutomationTasks
+
+Job
+ └── Applications
+
+Application
+ ├── Answers
+ ├── Events
+ ├── AutomationSession
+ └── Logs
+```
+
+---
+
+# 25. Job Deduplication
+
+The same job may appear on multiple sources.
+
+Example:
+
+```text
+LinkedIn
+Indeed
+Company Website
+```
+
+could all point to the same position.
+
+Create a deduplication mechanism using combinations of:
+
+```text
+Company
+Job title
+Location
+Normalized URL
+Job identifier
+Description similarity
+```
+
+The dashboard should avoid showing unnecessary duplicates.
+
+---
+
+# 26. Job Expiration
+
+Jobs should have lifecycle states:
+
+```text
+ACTIVE
+EXPIRED
+CLOSED
+REMOVED
+UNKNOWN
+```
+
+Before applying, the system should verify that the job/application page is still active.
+
+---
+
+# 27. Security
+
+Protect:
+
+* Passwords
+* Authentication tokens
+* Browser sessions
+* Cookies
+* Resume files
+* Personal information
+* Application answers
+
+Never expose browser session credentials to the frontend.
+
+Use encrypted storage where appropriate.
+
+Never log:
+
+```text
+Passwords
+Session cookies
+Authentication tokens
+Sensitive personal information
+```
+
+---
+
+# 28. Browser Session Management
+
+Each user should have isolated browser sessions.
+
+Example:
+
+```text
+User
+ ↓
+Browser Session
+ ↓
+LinkedIn session
+Indeed session
+Other sites
+```
+
+The backend should never accidentally reuse one user's authenticated browser session for another user.
+
+Provide:
+
+```text
+Connect LinkedIn
+Connect Indeed
+Disconnect
+Session status
+```
+
+The system should respect the site's authentication and automation requirements rather than attempting to bypass access controls.
+
+---
+
+# 29. Generic Application Answer Engine
+
+Instead of hardcoding every possible question, create a semantic answer engine.
+
+Input:
+
+```text
+Question:
+"How many years of experience do you have working with Node.js?"
+```
+
+AI maps it to:
+
+```text
+userProfile.experience.nodeJs
+```
+
+If the value exists:
+
+```text
+Return value
+```
+
+If unavailable:
+
+```text
+REQUEST_USER_INPUT
+```
+
+Another example:
+
+```text
+"Are you willing to relocate?"
+
+→ userPreferences.relocation
+```
+
+Unknown:
+
+```text
+"Describe a time when you resolved a production incident."
+```
+
+The AI searches:
+
+```text
+Experience
+Projects
+Resume
+```
+
+If sufficient information exists, generate an answer.
+
+If not:
+
+```text
+ASK_USER
+```
+
+---
+
+# 30. No Hallucination Rule
+
+This should be a global application rule.
+
+The AI must not:
+
+* Invent experience
+* Invent employment
+* Invent degrees
+* Invent certifications
+* Invent salary
+* Invent work authorization
+* Invent company knowledge
+* Invent achievements
+* Invent project details
+
+Allowed:
+
+```text
+Transform existing information
+Summarize existing information
+Personalize existing information
+Generate natural language from verified information
+```
+
+Not allowed:
+
+```text
+Create fictional credentials to improve an application
+```
+
+---
+
+# 31. AI Agent Architecture
+
+The application can use an agentic workflow.
+
+Example:
+
+```text
+Job Agent
+    ↓
+Browser Agent
+    ↓
+Page Analyzer
+    ↓
+Application Agent
+    ↓
+Question Agent
+    ↓
+Personalization Agent
+    ↓
+Validation Agent
+    ↓
+Submission Agent
+```
+
+Each agent should have a narrow responsibility.
+
+Avoid one huge LLM prompt controlling the entire application.
+
+---
+
+# 32. LangGraph / Workflow Integration
+
+The existing LangGraph architecture can be used for the application workflow.
+
+Example:
+
+```text
+START
+ ↓
+discoverJob
+ ↓
+analyzeJob
+ ↓
+matchCandidate
+ ↓
+deepDive
+ ↓
+detectApplication
+ ↓
+analyzeForm
+ ↓
+resolveKnownFields
+ ↓
+generatePersonalizedContent
+ ↓
+checkMissingInformation
+ ↓
+waitForUser
+ ↓
+fillApplication
+ ↓
+validateApplication
+ ↓
+submitApplication
+ ↓
+verifySubmission
+ ↓
+saveResult
+ ↓
+END
+```
+
+Conditional edges:
+
+```text
+Missing information
+    → WAIT_FOR_USER
+
+CAPTCHA
+    → MANUAL_ACTION
+
+Login required
+    → LOGIN_REQUIRED
+
+Application unavailable
+    → SKIPPED
+
+Automation error
+    → RETRY / FAILED
+```
+
+---
+
+# 33. Frontend Pages
+
+Recommended pages:
+
+```text
+/login
+/register
+
+/dashboard
+
+/jobs
+/jobs/:jobId
+
+/applications
+/applications/:applicationId
+
+/automation
+/automation/:taskId
+
+/profile
+/profile/resume
+/profile/preferences
+
+/settings
+
+/browser-sessions
+```
+
+---
+
+# 34. Dashboard UX
+
+Keep the UI clean and professional.
+
+Primary navigation:
+
+```text
+Dashboard
+Jobs
+Applications
+Automation
+Analytics
+Profile
+Settings
+```
+
+Dashboard cards:
+
+```text
+Jobs Found
+Matched
+Applications
+Submitted
+Pending
+Failed
+```
+
+Then:
+
+```text
+Active Automation
+```
+
+Then:
+
+```text
+Recommended Jobs
+```
+
+Then:
+
+```text
+Recent Applications
+```
+
+Then:
+
+```text
+Application Analytics
+```
+
+---
+
+# 35. Job Card
+
+Each job card should contain:
+
+```text
+Full Stack Developer
+Company XYZ
+
+Pune · Hybrid
+0-2 years
+
+92% Match
+
+React ✓
+Node.js ✓
+MongoDB ✓
+AWS Missing
+
+Source: LinkedIn
+
+[Deep Dive]
+[Apply]
+[Add to Queue]
+```
+
+But Deep Dive should also happen automatically for jobs selected by the user's automation rules.
+
+---
+
+# 36. Automation Rules
+
+Allow users to configure:
+
+```text
+Automatically discover jobs: ON
+
+Automatically analyze jobs: ON
+
+Automatically deep dive: ON
+
+Automatically prepare application: ON
+
+Automatically generate cover letter: ON
+
+Automatically fill application: ON
+
+Automatically submit:
+[OFF / ON]
+
+Require review before final submission:
+[ON]
+```
+
+Users should be able to define conditions such as:
+
+```text
+Apply automatically when:
+
+Match >= 80%
+
+Location = Pune OR Remote
+
+Experience <= 2 years
+
+Job title contains:
+MERN
+Full Stack
+Node.js
+
+Exclude:
+Internship
+Senior
+Lead
+```
+
+---
+
+# 37. Automation Safety Limits
+
+Provide configurable limits:
+
+```text
+Maximum applications per day
+Maximum applications per hour
+Maximum concurrent browser sessions
+Maximum retries per application
+```
+
+Example:
+
+```text
+Daily application limit: 20
+Concurrent sessions: 2
+Retries: 2
+```
+
+The system must stop when limits are reached.
+
+---
+
+# 38. Application Quality Control
+
+Before submitting:
+
+```text
+Validate:
+✓ Correct candidate
+✓ Correct resume
+✓ Correct job
+✓ Correct company
+✓ Required fields filled
+✓ Generated answers reviewed/approved if required
+✓ No missing required information
+✓ No invented information
+✓ Application still active
+```
+
+Then:
+
+```text
+SUBMIT
+```
+
+After submission:
+
+```text
+Verify confirmation
+      ↓
+Store evidence
+      ↓
+Mark SUBMITTED
+```
+
+---
+
+# 39. Error Recovery
+
+Automation must be resilient.
+
+Example:
+
+```text
+Browser crash
+    ↓
+Restart session
+    ↓
+Restore application state
+    ↓
+Retry current step
+```
+
+If retry fails:
+
+```text
+FAILED
+```
+
+with:
+
+```text
+Reason
+Last successful step
+Screenshot
+Browser URL
+Error message
+Retry option
+```
+
+---
+
+# 40. Important Design Principle
+
+Do not build this as:
+
+```text
+scrape jobs → click apply → submit
+```
+
+Build it as:
+
+```text
+DISCOVER
+   ↓
+UNDERSTAND
+   ↓
+MATCH
+   ↓
+DEEP DIVE
+   ↓
+PLAN
+   ↓
+PERSONALIZE
+   ↓
+VALIDATE
+   ↓
+AUTOMATE
+   ↓
+VERIFY
+   ↓
+TRACK
+   ↓
+ANALYZE
+```
+
+The browser is the execution layer.
+
+The LLM is the reasoning/personalization layer.
+
+The database is the source of truth.
+
+The workflow engine is the orchestration layer.
+
+The frontend is the user's control center.
+
+---
+
+# 41. Final End-to-End Flow
+
+```text
+USER
+ │
+ │ Configure profile + preferences
+ ▼
+PROFILE
+ │
+ ▼
+JOB DISCOVERY
+ │
+ ├── LinkedIn
+ ├── Indeed
+ ├── Other Job Boards
+ └── Generic Websites
+ │
+ ▼
+NORMALIZE + DEDUPLICATE
+ │
+ ▼
+AI JOB MATCHING
+ │
+ ▼
+FILTER
+ │
+ ▼
+AUTOMATIC DEEP DIVE
+ │
+ ▼
+BROWSER AGENT
+ │
+ ▼
+UNDERSTAND JOB PAGE
+ │
+ ▼
+FIND APPLICATION
+ │
+ ▼
+OPEN APPLICATION
+ │
+ ▼
+ANALYZE FORM
+ │
+ ▼
+MAP FIELDS TO USER PROFILE
+ │
+ ├── Known information
+ │       ↓
+ │    Fill automatically
+ │
+ └── Unknown information
+         ↓
+      Ask user
+         ↓
+      Wait
+ │
+ ▼
+LLM PERSONALIZATION
+ │
+ ├── Cover Letter
+ ├── Custom Questions
+ ├── Why Company?
+ ├── Why Role?
+ └── Other Application Answers
+ │
+ ▼
+VALIDATION
+ │
+ ▼
+USER REVIEW (if configured)
+ │
+ ▼
+BROWSER FORM FILLING
+ │
+ ▼
+FINAL VALIDATION
+ │
+ ▼
+SUBMISSION
+ │
+ ▼
+VERIFY SUCCESS
+ │
+ ▼
+STORE APPLICATION
+ │
+ ▼
+REAL-TIME DASHBOARD UPDATE
+ │
+ ▼
+ANALYTICS
+```
+
+# 42. Primary Product Outcome
+
+The finished application should feel like a **personal AI job-application operating system**.
+
+The user should not have to manually visit every job board, open every listing, analyze every job description, rewrite every cover letter, or repeatedly enter the same information.
+
+Instead:
+
+```text
+User Profile
+      +
+User Preferences
+      +
+Automation Rules
+      ↓
+AI-Apply-Job
+      ↓
+Discover → Analyze → Deep Dive → Personalize → Apply → Track
+```
+
+while keeping the user in control whenever information is missing, a site requires manual interaction, or final approval is configured.
