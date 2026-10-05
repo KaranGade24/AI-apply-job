@@ -196,7 +196,18 @@ export class SessionRegistry {
   }
 
   static getActivePage(applicationId) {
-    return this.getSession(applicationId)?.getActivePage() || null;
+    const session = this.getSession(applicationId);
+    if (!session) return null;
+    if (typeof session.getActivePage === "function") {
+      return session.getActivePage();
+    }
+    if (session.activePage && (!session.activePage.isClosed || !session.activePage.isClosed())) {
+      return session.activePage;
+    }
+    if (Array.isArray(session.pages)) {
+      return session.pages.slice().reverse().find(p => !p.isClosed || !p.isClosed()) || null;
+    }
+    return null;
   }
 
   static async switchToPage(applicationId, target) {
@@ -306,7 +317,10 @@ export const getActivePage = (session) => {
   if (typeof session === "string") {
     return SessionRegistry.getActivePage(session);
   }
-  return session.getActivePage();
+  if (session.applicationId) {
+    return SessionRegistry.getActivePage(session.applicationId) || (typeof session.getActivePage === "function" ? session.getActivePage() : null);
+  }
+  return typeof session.getActivePage === "function" ? session.getActivePage() : (session.activePage || null);
 };
 
 export const switchTab = async (session, tabId) => {

@@ -11,6 +11,7 @@ import { SessionRegistry } from "../browser/session/sessionRegistry.js";
 import { ApplicationSessionRepository } from "../repositories/applicationSession.repository.js";
 import { ApplicationRepository } from "../repositories/application.repository.js";
 import { JobApplication } from "../model/JobApplication.js";
+import { Job } from "../model/Job.js";
 import { AGENT_STATUS, MAX_AGENT_STEPS } from "../constant/agent.constant.js";
 import { appError } from "../utils/errors.js";
 import { logJobEvent, logError } from "../utils/logger.js";
@@ -130,9 +131,19 @@ export const startApplicationWorkflow = async (
     );
   }
 
-  const applyUrl = jobApp.applyUrl || options.applyUrl || "";
+  let applyUrl = jobApp.applyUrl || options.applyUrl || "";
+  if (!applyUrl && jobApp.jobId) {
+    const jobDoc = await Job.findById(jobApp.jobId).lean().catch(() => null);
+    applyUrl = jobDoc?.applicationUrl || jobDoc?.sourceUrl || "";
+  }
+  if (!applyUrl && jobApp.sourceUrl) {
+    applyUrl = jobApp.sourceUrl;
+  }
+  if (!applyUrl && jobApp.pageAnalysis?.currentUrl) {
+    applyUrl = jobApp.pageAnalysis.currentUrl;
+  }
 
-  // Ensure SessionRegistry context is initialized and navigate session page to applyUrl before first observation
+  // Ensure SessionRegistry context is initialized and navigate session page to real applyUrl
   const session = await SessionRegistry.createOrGetSession(
     appIdStr,
     userId,
@@ -141,12 +152,24 @@ export const startApplicationWorkflow = async (
     throw err;
   });
 
-  if (session && session.activePage && applyUrl) {
-    await session.activePage
-      .goto(applyUrl, { waitUntil: "domcontentloaded", timeout: 30000 })
-      .catch((err) => {
-        logError("agentRunner.pageGoto", err.message);
+  const page = SessionRegistry.getActivePage(appIdStr);
+  if (page && applyUrl) {
+    try {
+      await page.goto(applyUrl, { waitUntil: "domcontentloaded", timeout: 35000 });
+      await page.waitForLoadState("networkidle", { timeout: 8000 }).catch(() => {});
+      const { attachScreencast, broadcastToApp } = await import("../browser/session/browserStreamService.js");
+      await attachScreencast(appIdStr, page);
+      broadcastToApp(appIdStr, {
+        type: "PAGE_CHANGED",
+        url: page.url(),
+        title: await page.title().catch(() => ""),
+        timestamp: Date.now(),
       });
+    } catch (err) {
+      logError("agentRunner.pageGoto", err.message);
+      const { setBrowserError } = await import("../browser/session/browserStreamService.js");
+      setBrowserError(appIdStr, `Failed to navigate to ${applyUrl}: ${err.message}`);
+    }
   }
 
   activeRunners.add(appIdStr);

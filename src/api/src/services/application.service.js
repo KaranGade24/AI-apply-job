@@ -327,7 +327,15 @@ export const approveAndSendApplication = async (applicationId, userId) => {
       (application.pageAnalysis?.currentUrl &&
         !application.pageAnalysis.currentUrl.includes('naukri.com')) ||
       (application.form?.portalUrl &&
-        !application.form.portalUrl.includes('naukri.com'))
+        !application.form.portalUrl.includes('naukri.com')) ||
+      (application.applyUrl &&
+        !application.applyUrl.includes('naukri.com')) ||
+      (application.sourceUrl &&
+        !application.sourceUrl.includes('naukri.com')) ||
+      (application.jobId?.applicationUrl &&
+        !application.jobId?.applicationUrl.includes('naukri.com')) ||
+      (application.jobId?.sourceUrl &&
+        !application.jobId?.sourceUrl.includes('naukri.com'))
     );
 
     if (hasExternalPortal) {
@@ -692,9 +700,13 @@ export const submitFinalUnknownApplicationService = async (applicationId, userId
   });
 
   const savedUrl =
+    application.applyUrl ||
+    application.sourceUrl ||
     application.workflow?.agentState?.pendingHumanAction?.savedUrl ||
     application.jobId?.applicationUrl ||
-    application.jobId?.sourceUrl;
+    application.jobId?.sourceUrl ||
+    application.pageAnalysis?.currentUrl ||
+    application.form?.portalUrl;
 
   const savedStorageState =
     (await BrowserSessionRepository.loadStorageState(applicationId)) ||
@@ -711,10 +723,26 @@ export const submitFinalUnknownApplicationService = async (applicationId, userId
     });
     browser = session.browser;
     context = session.context;
-    page = session.getActivePage();
+    page = SessionRegistry.getActivePage(applicationId);
 
-    await page.goto(savedUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
+    if (page && savedUrl) {
+      try {
+        await page.goto(savedUrl, { waitUntil: 'domcontentloaded', timeout: 35000 });
+        await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
+        const { attachScreencast, broadcastToApp } = await import("../browser/session/browserStreamService.js");
+        await attachScreencast(applicationId, page);
+        broadcastToApp(applicationId, {
+          type: "PAGE_CHANGED",
+          url: page.url(),
+          title: await page.title().catch(() => ""),
+          timestamp: Date.now(),
+        });
+      } catch (navErr) {
+        const { setBrowserError } = await import("../browser/session/browserStreamService.js");
+        setBrowserError(applicationId, `Failed to navigate to ${savedUrl}: ${navErr.message}`);
+        throw navErr;
+      }
+    }
     await page.waitForSelector('input, textarea, select, button, [data-automation-id]', { timeout: 8000 }).catch(() => {});
     await page.waitForTimeout(1500);
 
@@ -1061,14 +1089,15 @@ export const submitFinalUnknownApplicationService = async (applicationId, userId
     });
   } finally {
     const freshApp = await JobApplication.findById(applicationId).lean().catch(() => null);
-    const keepOpen = freshApp && [
-      "WAITING_FOR_USER",
-      "WAITING_FOR_CONFIRMATION",
-      "WAITING_FOR_FINAL_REVIEW",
-      "SUBMITTING"
-    ].includes(freshApp.status);
+    const isCompleted = freshApp && [
+      APPLICATION_STATUS.APPLIED,
+      "APPLIED",
+      APPLICATION_STATUS.FAILED,
+      "FAILED",
+      "REJECTED",
+    ].includes(freshApp.status?.toUpperCase?.());
 
-    if (!keepOpen) {
+    if (isCompleted) {
       await SessionRegistry.closeSession(applicationId).catch(() => {});
     } else {
       SessionRegistry.startHumanResponseTimer(applicationId, userId);
@@ -1146,7 +1175,7 @@ export const refillUnknownApplicationFormService = async (applicationId, userId,
     });
     browser = session.browser;
     context = session.context;
-    page = session.getActivePage();
+    page = SessionRegistry.getActivePage(applicationId);
 
     await page.goto(savedUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
     await page.waitForTimeout(1500);
@@ -1874,11 +1903,16 @@ export const analyzeEmployerPortalService = async (applicationId, userId) => {
     await injectGoogleSessionIntoContext(context, userId);
 
     let latestPopupPage = null;
-    context.on('page', (p) => {
-      latestPopupPage = p;
-    });
+    if (context && typeof context.on === 'function') {
+      context.on('page', (p) => {
+        latestPopupPage = p;
+      });
+    }
 
-    page = await context.newPage();
+    page = (context && typeof context.newPage === 'function') ? await context.newPage() : null;
+    if (!page) {
+      throw new appError("Failed to initialize browser page context for employer portal analysis", 500);
+    }
 
     await updateApplicationStatus(applicationId, APPLICATION_STATUS.ANALYZING_PORTAL, {
       logMessage: `Opening and analyzing actual application portal: ${targetUrl}...`,
@@ -2061,7 +2095,7 @@ export const advanceEmployerPortalActionService = async (applicationId, userId, 
     });
     context = session.context;
     browser = session.browser;
-    page = session.getActivePage();
+    page = SessionRegistry.getActivePage(applicationId);
 
     await injectGoogleSessionIntoContext(context, userId).catch(() => {});
 
@@ -2072,7 +2106,7 @@ export const advanceEmployerPortalActionService = async (applicationId, userId, 
       await page.waitForTimeout(2000);
     }
 
-    let activePage = session.getActivePage() || page;
+    let activePage = SessionRegistry.getActivePage(applicationId) || page;
 
     // If on Naukri job page with #company-site-button, click it to reach the actual company portal
     const isNaukriListingPage = activePage.url().includes("naukri.com/job-listings");

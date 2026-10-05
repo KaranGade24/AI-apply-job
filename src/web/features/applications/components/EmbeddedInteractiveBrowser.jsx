@@ -47,6 +47,7 @@ export const EmbeddedInteractiveBrowser = ({
   const [actionPending, setActionPending] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [verificationError, setVerificationError] = useState(null);
+  const [browserError, setBrowserError] = useState(null);
   const [quickText, setQuickText] = useState("");
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [wsConnected, setWsConnected] = useState(false);
@@ -117,6 +118,7 @@ export const EmbeddedInteractiveBrowser = ({
         if (data.controlMode) setControlMode(data.controlMode);
         if (data.humanReason) setHumanReason(data.humanReason);
         if (data.humanMessage) setHumanMessage(data.humanMessage);
+        if (data.browserError) setBrowserError(data.browserError);
       }
     } catch {
       // Ignore polling errors
@@ -172,7 +174,10 @@ export const EmbeddedInteractiveBrowser = ({
               if (msg.humanReason) setHumanReason(msg.humanReason);
               if (msg.humanMessage) setHumanMessage(msg.humanMessage);
               setIsLive(Boolean(msg.isLive));
+            } else if (msg.type === "BROWSER_ERROR") {
+              setBrowserError(msg.error || "Browser navigation error");
             } else if (msg.type === "PAGE_CHANGED") {
+              setBrowserError(null);
               if (msg.url) {
                 setCurrentUrl(msg.url);
                 setUrlInput(msg.url);
@@ -358,18 +363,8 @@ export const EmbeddedInteractiveBrowser = ({
     [getCoordinates, sendBrowserAction]
   );
 
-  // Click handler
-  const handleClick = useCallback(
-    (e) => {
-      if (!isHumanModeRef.current) return;
-      const coords = getCoordinates(e);
-      if (!coords) return;
-
-      const button = e.button === 2 ? "right" : e.button === 1 ? "middle" : "left";
-      sendBrowserAction({ type: "click", x: coords.x, y: coords.y, button });
-    },
-    [getCoordinates, sendBrowserAction]
-  );
+  // Click handler (noop: mouseDown + mouseUp handle click natively in Playwright to prevent duplicate clicks)
+  const handleClick = useCallback(() => {}, []);
 
   // Double click handler
   const handleDoubleClick = useCallback(
@@ -383,16 +378,13 @@ export const EmbeddedInteractiveBrowser = ({
     [getCoordinates, sendBrowserAction]
   );
 
-  // Context menu handler (prevents host browser menu on right-click)
+  // Context menu handler (prevents host browser menu on right-click without duplicate event)
   const handleContextMenu = useCallback(
     (e) => {
       if (!isHumanModeRef.current) return;
       e.preventDefault();
-      const coords = getCoordinates(e);
-      if (!coords) return;
-      sendBrowserAction({ type: "click", x: coords.x, y: coords.y, button: "right" });
     },
-    [getCoordinates, sendBrowserAction]
+    []
   );
 
   // Global drag release and move listener (ensures dragging out-of-bounds doesn't get stuck)
@@ -723,11 +715,14 @@ export const EmbeddedInteractiveBrowser = ({
               <strong className="font-bold text-amber-100 block sm:inline">
                 {isCaptchaChallenge
                   ? "Security / CAPTCHA Challenge:"
+                  : humanReason === "UNKNOWN_QUESTION"
+                  ? "Action Required:"
                   : "Interactive Manual Control:"}
               </strong>{" "}
               <span>
-                {humanMessage ||
-                  "Interact directly with the browser: click, type, drag, and scroll to complete your action. Click 'Resume AI' when finished."}
+                {humanReason === "UNKNOWN_QUESTION"
+                  ? "AI needs your input. Please complete or edit this field directly in the browser."
+                  : (humanMessage || "Interact directly with the browser: click, type, drag, and scroll to complete your action. Click 'Resume AI' when finished.")}
               </span>
             </div>
           </div>
@@ -738,6 +733,23 @@ export const EmbeddedInteractiveBrowser = ({
             className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition-colors whitespace-nowrap shrink-0 cursor-pointer shadow-xs disabled:opacity-50"
           >
             {verifying ? "Verifying..." : "I'm Done — Resume AI"}
+          </button>
+        </div>
+      )}
+
+      {/* Browser Navigation Error Banner */}
+      {browserError && (
+        <div className="bg-rose-950/90 border-b border-rose-600/50 px-4 py-2.5 text-rose-200 text-xs flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+            <span><strong>Browser Error:</strong> {browserError}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setBrowserError(null)}
+            className="text-rose-300 hover:text-white text-xs font-semibold px-2 py-0.5 rounded-sm hover:bg-rose-900 cursor-pointer"
+          >
+            Dismiss
           </button>
         </div>
       )}
@@ -831,7 +843,6 @@ export const EmbeddedInteractiveBrowser = ({
         onMouseMove={handleMouseMove}
         onMouseDown={handleMouseDown}
         onMouseUp={handleMouseUp}
-        onClick={handleClick}
         onDoubleClick={handleDoubleClick}
         onContextMenu={handleContextMenu}
         className={`relative w-full bg-slate-950 flex items-center justify-center overflow-hidden outline-hidden select-none transition-shadow ${

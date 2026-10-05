@@ -487,15 +487,33 @@ const collectQuestionsNode = async (state) => {
   await logJobEvent(
     "browserAgentGraph",
     "COLLECT_QUESTIONS",
-    `[application:${appIdStr}] Persisting ${pendingQuestions.length} questions for human review`,
+    `[application:${appIdStr}] Unknown questions encountered. Switching to HUMAN control and prompting in browser.`,
   );
 
-  if (pendingQuestions.length > 0) {
-    await ApplicationSessionRepository.updateSession(appIdStr, userId, {
-      pendingQuestions,
-      status: AGENT_STATUS.WAITING_FOR_USER,
-    }).catch(() => {});
+  const session = SessionRegistry.getSession(appIdStr);
+  if (session) {
+    session.controlMode = CONTROL_MODES.HUMAN;
+    session.humanReason = "UNKNOWN_QUESTION";
+    session.humanMessage = "AI needs your input. Please complete or edit this field directly in the browser.";
   }
+
+  await ApplicationSessionRepository.updateSession(appIdStr, userId, {
+    pendingQuestions,
+    controlMode: CONTROL_MODES.HUMAN,
+    humanReason: "UNKNOWN_QUESTION",
+    humanMessage: "AI needs your input. Please complete or edit this field directly in the browser.",
+    status: AGENT_STATUS.WAITING_FOR_USER,
+  }).catch(() => {});
+
+  broadcastToApp(appIdStr, {
+    type: REALTIME_EVENTS.HUMAN_INTERVENTION_REQUIRED,
+    controlMode: CONTROL_MODES.HUMAN,
+    status: AGENT_STATUS.WAITING_FOR_USER,
+    humanReason: "UNKNOWN_QUESTION",
+    humanMessage: "AI needs your input. Please complete or edit this field directly in the browser.",
+    currentUrl: SessionRegistry.getActivePage(appIdStr)?.url() || "",
+    timestamp: Date.now(),
+  });
 
   return {
     status: AGENT_STATUS.WAITING_FOR_USER,

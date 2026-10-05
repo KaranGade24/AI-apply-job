@@ -208,8 +208,7 @@ const startScreenshotFallback = (applicationId, page) => {
 export const releaseHeldInputs = async (applicationId) => {
   const appIdStr = String(applicationId);
   const streamState = streamStates.get(appIdStr);
-  const session = SessionRegistry.getSession(appIdStr);
-  const page = session?.getActivePage();
+  const page = SessionRegistry.getActivePage(appIdStr);
 
   if (streamState && page && !page.isClosed()) {
     try {
@@ -268,7 +267,7 @@ export const dispatchBrowserAction = async (applicationId, action = {}) => {
 
   const appIdStr = String(applicationId);
   const session = SessionRegistry.getSession(appIdStr);
-  const page = session?.getActivePage();
+  const page = SessionRegistry.getActivePage(appIdStr);
 
   if (!page || page.isClosed()) {
     return { success: false, message: "Browser page is not active or has closed" };
@@ -476,38 +475,56 @@ export const dispatchBrowserAction = async (applicationId, action = {}) => {
   }
 };
 
-const generateFallbackFrame = (url = "https://www.naukri.com", title = "Job Application Portal") => {
-  const cleanUrl = url || "https://www.naukri.com";
-  const cleanTitle = title || "Job Application Portal";
+export const generateErrorFrame = (url = "", errorMessage = "Navigation failed") => {
+  const cleanUrl = String(url || "").replace(/&/g, "&amp;").slice(0, 80);
+  const cleanErr = String(errorMessage || "Navigation failed").replace(/&/g, "&amp;").slice(0, 200);
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="800" viewBox="0 0 1280 800">
-    <defs>
-      <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
-        <stop offset="0%" stop-color="#0f172a" />
-        <stop offset="100%" stop-color="#1e293b" />
-      </linearGradient>
-    </defs>
-    <rect width="1280" height="800" fill="url(#bg)"/>
+    <rect width="1280" height="800" fill="#0f172a"/>
     <rect x="20" y="20" width="1240" height="48" rx="8" fill="#1e293b" stroke="#334155" stroke-width="1"/>
     <circle cx="48" cy="44" r="6" fill="#ef4444"/>
     <circle cx="68" cy="44" r="6" fill="#f59e0b"/>
     <circle cx="88" cy="44" r="6" fill="#10b981"/>
     <rect x="120" y="30" width="800" height="28" rx="6" fill="#0f172a" stroke="#475569" stroke-width="1"/>
-    <text x="140" y="49" fill="#94a3b8" font-family="sans-serif" font-size="13">${cleanUrl.replace(/&/g, '&amp;').slice(0, 80)}</text>
-    <rect x="20" y="80" width="1240" height="700" rx="12" fill="#ffffff"/>
-    <rect x="60" y="120" width="1160" height="80" rx="8" fill="#f8fafc" stroke="#e2e8f0"/>
-    <text x="90" y="165" fill="#0f172a" font-family="sans-serif" font-size="22" font-weight="bold">${cleanTitle.replace(/&/g, '&amp;')}</text>
-    <text x="90" y="185" fill="#64748b" font-family="sans-serif" font-size="14">AI Automation Agent Active • Auto-filling application fields with use-browser-js</text>
-    <rect x="60" y="230" width="760" height="500" rx="8" fill="#ffffff" stroke="#e2e8f0"/>
-    <rect x="100" y="270" width="680" height="42" rx="6" fill="#f1f5f9" stroke="#cbd5e1"/>
-    <text x="120" y="296" fill="#64748b" font-family="sans-serif" font-size="14">Full Name (Auto-populated from Profile)</text>
-    <rect x="100" y="340" width="680" height="42" rx="6" fill="#f1f5f9" stroke="#cbd5e1"/>
-    <text x="120" y="366" fill="#64748b" font-family="sans-serif" font-size="14">Email Address (Auto-populated)</text>
-    <rect x="100" y="410" width="680" height="42" rx="6" fill="#f1f5f9" stroke="#cbd5e1"/>
-    <text x="120" y="436" fill="#64748b" font-family="sans-serif" font-size="14">Tailored Resume: Attached ✓</text>
-    <rect x="100" y="490" width="220" height="48" rx="8" fill="#2563eb"/>
-    <text x="160" y="520" fill="#ffffff" font-family="sans-serif" font-size="16" font-weight="bold">Apply Now</text>
+    <text x="140" y="49" fill="#94a3b8" font-family="sans-serif" font-size="13">${cleanUrl}</text>
+    <rect x="60" y="160" width="1160" height="480" rx="16" fill="#1e293b" stroke="#ef4444" stroke-width="2"/>
+    <circle cx="640" cy="280" r="44" fill="#ef4444" fill-opacity="0.15"/>
+    <text x="640" y="295" fill="#ef4444" font-family="sans-serif" font-size="44" text-anchor="middle" font-weight="bold">✕</text>
+    <text x="640" y="380" fill="#f8fafc" font-family="sans-serif" font-size="24" text-anchor="middle" font-weight="bold">Browser Navigation Error</text>
+    <text x="640" y="420" fill="#94a3b8" font-family="sans-serif" font-size="15" text-anchor="middle">Could not load the application career site URL:</text>
+    <text x="640" y="450" fill="#38bdf8" font-family="monospace" font-size="14" text-anchor="middle">${cleanUrl}</text>
+    <rect x="200" y="490" width="880" height="60" rx="8" fill="#0f172a" stroke="#334155"/>
+    <text x="640" y="525" fill="#f87171" font-family="sans-serif" font-size="13" text-anchor="middle">${cleanErr}</text>
   </svg>`;
   return Buffer.from(svg).toString("base64");
+};
+
+export const generateLoadingFrame = (url = "", title = "Live Application") => {
+  const cleanUrl = String(url || "").replace(/&/g, "&amp;").slice(0, 80);
+  const cleanTitle = String(title || "Connecting to live site...").replace(/&/g, "&amp;").slice(0, 80);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="800" viewBox="0 0 1280 800">
+    <rect width="1280" height="800" fill="#0f172a"/>
+    <rect x="20" y="20" width="1240" height="48" rx="8" fill="#1e293b" stroke="#334155" stroke-width="1"/>
+    <circle cx="48" cy="44" r="6" fill="#ef4444"/>
+    <circle cx="68" cy="44" r="6" fill="#f59e0b"/>
+    <circle cx="88" cy="44" r="6" fill="#10b981"/>
+    <rect x="120" y="30" width="800" height="28" rx="6" fill="#0f172a" stroke="#475569" stroke-width="1"/>
+    <text x="140" y="49" fill="#94a3b8" font-family="sans-serif" font-size="13">${cleanUrl}</text>
+    <circle cx="640" cy="380" r="32" fill="none" stroke="#3b82f6" stroke-width="4" stroke-dasharray="100 60"/>
+    <text x="640" y="450" fill="#f8fafc" font-family="sans-serif" font-size="20" text-anchor="middle" font-weight="bold">${cleanTitle}</text>
+    <text x="640" y="480" fill="#94a3b8" font-family="sans-serif" font-size="14" text-anchor="middle">Streaming active Playwright browser viewport...</text>
+  </svg>`;
+  return Buffer.from(svg).toString("base64");
+};
+
+export const setBrowserError = (applicationId, error) => {
+  const appIdStr = String(applicationId);
+  const streamState = getOrCreateStreamState(appIdStr);
+  streamState.browserError = error;
+  broadcastToApp(appIdStr, {
+    type: "BROWSER_ERROR",
+    error,
+    timestamp: Date.now(),
+  });
 };
 
 /**
@@ -520,21 +537,30 @@ export const getLatestBrowserFrame = (applicationId) => {
   const appIdStr = String(applicationId);
   const streamState = getOrCreateStreamState(appIdStr);
   const session = SessionRegistry.getSession(appIdStr);
-  const page = session?.getActivePage();
+  const page = SessionRegistry.getActivePage(appIdStr);
 
   const currentUrl = page?.url() || streamState.currentUrl || "";
-  const pageTitle = streamState.pageTitle || "Live Job Portal Application";
-  const frame = streamState.latestFrame || generateFallbackFrame(currentUrl, pageTitle);
+  const pageTitle = streamState.pageTitle || "Live Application";
+
+  // When a real page exists or navigation is in progress, do NOT show fake/mock portal SVG.
+  // Show error SVG if navigation error occurred; show loading SVG if live page exists but first frame pending.
+  let frame = streamState.latestFrame;
+  if (!frame && streamState.browserError) {
+    frame = generateErrorFrame(currentUrl, streamState.browserError);
+  } else if (!frame && page && !page.isClosed()) {
+    frame = generateLoadingFrame(currentUrl, pageTitle);
+  }
 
   return {
     applicationId: appIdStr,
-    frame,
+    frame: frame || null,
     currentUrl,
     pageTitle,
-    isLive: true,
+    isLive: Boolean(page && !page.isClosed()),
     controlMode: session?.controlMode || CONTROL_MODES.AI,
     humanReason: session?.humanReason || null,
     humanMessage: session?.humanMessage || null,
+    browserError: streamState.browserError || null,
     timestamp: Date.now(),
   };
 };
@@ -554,7 +580,7 @@ export const subscribeClient = async (applicationId, ws) => {
   clients.add(ws);
 
   const session = SessionRegistry.getSession(appIdStr);
-  const page = session?.getActivePage();
+  const page = SessionRegistry.getActivePage(appIdStr);
 
   // Send initial connected metadata & latest frame immediately
   const streamState = getOrCreateStreamState(appIdStr);
@@ -567,6 +593,7 @@ export const subscribeClient = async (applicationId, ws) => {
       controlMode: session?.controlMode || CONTROL_MODES.AI,
       humanReason: session?.humanReason || null,
       humanMessage: session?.humanMessage || null,
+      browserError: streamState.browserError || null,
       data: streamState.latestFrame,
       timestamp: Date.now(),
     }),
@@ -608,7 +635,7 @@ export const subscribeClient = async (applicationId, ws) => {
 export const checkHumanChallengeResolved = async (applicationId) => {
   const appIdStr = String(applicationId);
   const session = SessionRegistry.getSession(appIdStr);
-  const page = session?.getActivePage();
+  const page = SessionRegistry.getActivePage(appIdStr);
 
   if (!page || page.isClosed()) {
     return {
@@ -675,4 +702,6 @@ export default {
   checkHumanChallengeResolved,
   releaseHeldInputs,
   cleanupStreamState,
+  generateErrorFrame,
+  setBrowserError,
 };

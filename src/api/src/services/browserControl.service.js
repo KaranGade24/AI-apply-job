@@ -72,7 +72,7 @@ export const takeControlService = async (applicationId, userId) => {
 
   await ApplicationSessionRepository.appendHistory(appIdStr, userId, {
     action: "Took browser control",
-    pageUrl: session.getActivePage()?.url() || "",
+    pageUrl: SessionRegistry.getActivePage(appIdStr)?.url() || "",
     details: { source: "USER", controlMode: "HUMAN" },
   }).catch(() => {});
 
@@ -128,7 +128,7 @@ export const returnControlService = async (applicationId, userId) => {
 
   await ApplicationSessionRepository.appendHistory(appIdStr, userId, {
     action: "Returned control to AI",
-    pageUrl: session.getActivePage()?.url() || "",
+    pageUrl: SessionRegistry.getActivePage(appIdStr)?.url() || "",
     details: { source: "USER", controlMode: "AI" },
   }).catch(() => {});
 
@@ -185,7 +185,8 @@ export const resumeAfterVerificationService = async (applicationId, userId) => {
   await assertOwnership(appIdStr, userId);
 
   const session = SessionRegistry.getSession(appIdStr);
-  if (!session || !session.getActivePage()) {
+  const activePage = SessionRegistry.getActivePage(appIdStr);
+  if (!session || !activePage) {
     throw new appError("No active browser session found for verification.", 404);
   }
 

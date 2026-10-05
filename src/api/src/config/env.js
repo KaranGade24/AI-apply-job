@@ -41,7 +41,7 @@ if (NODE_ENV === 'production') {
 }
 
 // Browser Automation envs
-export const BROWSER_HEADLESS = process.env.BROWSER_HEADLESS === 'true';
+export const BROWSER_HEADLESS = process.env.BROWSER_HEADLESS !== 'false';
 export const BROWSER_SLOW_MO = Number(process.env.BROWSER_SLOW_MO || 0);
 export const BROWSER_TIMEOUT = Number(process.env.BROWSER_TIMEOUT || 30000);
 
