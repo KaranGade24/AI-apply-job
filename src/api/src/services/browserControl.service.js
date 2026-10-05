@@ -4,6 +4,7 @@ import {
   getLatestBrowserFrame,
   checkHumanChallengeResolved,
   broadcastToApp,
+  releaseHeldInputs,
 } from "../browser/session/browserStreamService.js";
 import { ApplicationSessionRepository } from "../repositories/applicationSession.repository.js";
 import { JobApplication } from "../model/JobApplication.js";
@@ -116,6 +117,8 @@ export const returnControlService = async (applicationId, userId) => {
   session.humanReason = null;
   session.humanMessage = null;
 
+  await releaseHeldInputs(appIdStr).catch(() => {});
+
   await ApplicationSessionRepository.updateSession(appIdStr, userId, {
     controlMode: CONTROL_MODES.AI,
     humanReason: "",
@@ -205,6 +208,8 @@ export const resumeAfterVerificationService = async (applicationId, userId) => {
   session.controlMode = CONTROL_MODES.AI;
   session.humanReason = null;
   session.humanMessage = null;
+
+  await releaseHeldInputs(appIdStr).catch(() => {});
 
   await ApplicationSessionRepository.updateSession(appIdStr, userId, {
     controlMode: CONTROL_MODES.AI,

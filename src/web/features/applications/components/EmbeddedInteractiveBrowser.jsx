@@ -6,19 +6,14 @@ import {
   ArrowRight,
   ShieldAlert,
   Bot,
-  UserCheck,
   Send,
   Maximize2,
   Minimize2,
   CheckCircle2,
   AlertTriangle,
-  FileText,
-  Upload,
   Hand,
   Keyboard,
   ExternalLink,
-  Edit3,
-  Sparkles,
   Lock,
 } from "lucide-react";
 import {
@@ -27,7 +22,6 @@ import {
   resumeAfterVerificationApi,
   dispatchBrowserActionApi,
   getBrowserFrameApi,
-  saveEditedAnswersApi,
 } from "../../../services/applicationService";
 
 const VIEWPORT_WIDTH = 1280;
@@ -38,94 +32,40 @@ export const EmbeddedInteractiveBrowser = ({
   initialUrl = "",
   jobTitle = "",
   companyName = "",
-  candidateInfo = null,
-  application = null,
-  onFieldChange = null,
   onStatusChange = null,
-  onSubmitForm = null,
 }) => {
   const [frameSrc, setFrameSrc] = useState(null);
-  const [currentUrl, setCurrentUrl] = useState(
-    initialUrl || application?.pageAnalysis?.currentUrl || "https://www.naukri.com"
-  );
-  const [urlInput, setUrlInput] = useState(
-    initialUrl || application?.pageAnalysis?.currentUrl || "https://www.naukri.com"
-  );
+  const [currentUrl, setCurrentUrl] = useState(initialUrl || "https://www.naukri.com");
+  const [urlInput, setUrlInput] = useState(initialUrl || "https://www.naukri.com");
   const [pageTitle, setPageTitle] = useState(
     jobTitle ? `${jobTitle} - Application Portal` : "Live Job Portal Application"
   );
   const [isLive, setIsLive] = useState(true);
   const [controlMode, setControlMode] = useState("AI"); // "AI" | "HUMAN"
-  const [humanReason, setHumanReason] = useState(application?.form?.humanReason || null);
+  const [humanReason, setHumanReason] = useState(null);
   const [humanMessage, setHumanMessage] = useState(null);
-  const [status, setStatus] = useState("IDLE");
   const [actionPending, setActionPending] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [verificationError, setVerificationError] = useState(null);
   const [quickText, setQuickText] = useState("");
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [wsConnected, setWsConnected] = useState(false);
-  const [activeField, setActiveField] = useState("fullName");
-  const [savedSuccess, setSavedSuccess] = useState(false);
-
-  // Directly editable form data for the interactive live browser canvas
-  const [formData, setFormData] = useState({
-    fullName: candidateInfo?.name || candidateInfo?.fullName || "Candidate",
-    email: candidateInfo?.email || "test2@gmail.com",
-    phone: candidateInfo?.phone || "",
-    experience: candidateInfo?.experience || "1-2 Years",
-    currentLocation: candidateInfo?.location || "Pune, India",
-    noticePeriod: candidateInfo?.noticePeriod || "Immediate / 15 Days",
-    expectedSalary: candidateInfo?.expectedCtc || "Competitive / Market Standard",
-    keySkills: candidateInfo?.skills ? (Array.isArray(candidateInfo.skills) ? candidateInfo.skills.join(", ") : candidateInfo.skills) : "React, Node.js, Express, JavaScript",
-    coverLetter: candidateInfo?.coverLetter || "I am enthusiastic about this opportunity and look forward to discussing my technical qualifications.",
-    otpOrCaptcha: "",
-    resumeAttached: true,
-    resumeName: candidateInfo?.resumeName || "Tailored_ATS_Resume.pdf",
-  });
+  const [isFocused, setIsFocused] = useState(false);
 
   const containerRef = useRef(null);
+  const imageRef = useRef(null);
   const wsRef = useRef(null);
   const pollTimerRef = useRef(null);
 
-  // Sync candidateInfo or application into formData if updated
-  useEffect(() => {
-    if (candidateInfo) {
-      setFormData((prev) => ({
-        ...prev,
-        fullName: candidateInfo.name || candidateInfo.fullName || prev.fullName,
-        email: candidateInfo.email || prev.email,
-        phone: candidateInfo.phone || prev.phone,
-        experience: candidateInfo.experience || prev.experience,
-        currentLocation: candidateInfo.location || prev.currentLocation,
-        noticePeriod: candidateInfo.noticePeriod || prev.noticePeriod,
-        expectedSalary: candidateInfo.expectedCtc || prev.expectedSalary,
-        keySkills: candidateInfo.skills
-          ? Array.isArray(candidateInfo.skills)
-            ? candidateInfo.skills.join(", ")
-            : candidateInfo.skills
-          : prev.keySkills,
-      }));
-    }
-  }, [candidateInfo]);
+  // References to track real-time interaction state without excessive React re-renders
+  const isFocusedRef = useRef(false);
+  const isMouseDownRef = useRef(false);
+  const lastMoveSentRef = useRef(0);
+  const pendingMoveTimerRef = useRef(null);
+  const isHumanModeRef = useRef(false);
 
-  // Handle direct editing of fields inside the browser window
-  const handleInputChange = (field, value) => {
-    setFormData((prev) => ({ ...prev, [field]: value }));
-    setActiveField(field);
-
-    if (onFieldChange) {
-      onFieldChange(field, value);
-    }
-
-    // Auto-persist changes to application answers if applicationId is provided
-    if (applicationId) {
-      saveEditedAnswersApi(applicationId, { [field]: value }).catch(() => {});
-    }
-
-    setSavedSuccess(true);
-    setTimeout(() => setSavedSuccess(false), 2000);
-  };
+  const isHumanMode = controlMode === "HUMAN" || Boolean(humanReason);
+  isHumanModeRef.current = isHumanMode;
 
   // Send action via WebSocket or HTTP fallback
   const sendBrowserAction = useCallback(
@@ -137,14 +77,14 @@ export const EmbeddedInteractiveBrowser = ({
           wsRef.current.send(JSON.stringify({ type: "ACTION", action }));
           return;
         } catch {
-          // fallback to HTTP
+          // fallback to HTTP below
         }
       }
 
       try {
         await dispatchBrowserActionApi(applicationId, action);
       } catch (err) {
-        console.error("Action dispatch error:", err.message);
+        // Silently ignore transient dispatch errors
       }
     },
     [applicationId]
@@ -177,7 +117,6 @@ export const EmbeddedInteractiveBrowser = ({
         if (data.controlMode) setControlMode(data.controlMode);
         if (data.humanReason) setHumanReason(data.humanReason);
         if (data.humanMessage) setHumanMessage(data.humanMessage);
-        if (data.status) setStatus(data.status);
       }
     } catch {
       // Ignore polling errors
@@ -223,6 +162,12 @@ export const EmbeddedInteractiveBrowser = ({
                 setCurrentUrl(msg.currentUrl);
                 setUrlInput(msg.currentUrl);
               }
+              if (msg.data) {
+                const prefix = msg.data.startsWith("PHN2Zy")
+                  ? "data:image/svg+xml;base64,"
+                  : "data:image/jpeg;base64,";
+                setFrameSrc(`${prefix}${msg.data}`);
+              }
               if (msg.controlMode) setControlMode(msg.controlMode);
               if (msg.humanReason) setHumanReason(msg.humanReason);
               if (msg.humanMessage) setHumanMessage(msg.humanMessage);
@@ -244,11 +189,9 @@ export const EmbeddedInteractiveBrowser = ({
                 msg.humanMessage ||
                   "Human verification required. Solve the challenge inside the embedded browser."
               );
-              setStatus("WAITING_FOR_HUMAN");
               if (onStatusChange) onStatusChange("WAITING_FOR_HUMAN");
             } else if (msg.type === "HUMAN_CONTROL_STARTED") {
               setControlMode("HUMAN");
-              setStatus("WAITING_FOR_HUMAN");
               if (onStatusChange) onStatusChange("WAITING_FOR_HUMAN");
             } else if (
               msg.type === "HUMAN_CONTROL_ENDED" ||
@@ -258,11 +201,10 @@ export const EmbeddedInteractiveBrowser = ({
               setHumanReason(null);
               setHumanMessage(null);
               setVerificationError(null);
-              setStatus("FILLING");
               if (onStatusChange) onStatusChange("FILLING");
             }
           } catch {
-            // ignore parse errors
+            // Ignore parse errors
           }
         };
 
@@ -304,20 +246,277 @@ export const EmbeddedInteractiveBrowser = ({
     };
   }, [applicationId, fetchSingleFrame, onStatusChange, wsConnected]);
 
-  // Quick type string into active field or send to browser
+  // Coordinate mapping from screen / element viewport to Playwright viewport (1280x800)
+  // Correctly handles object-contain scaling, pillarboxing, and letterboxing
+  const getCoordinates = useCallback((e) => {
+    const targetElement = imageRef.current || containerRef.current;
+    if (!targetElement) return null;
+
+    const rect = targetElement.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return null;
+
+    const natW = VIEWPORT_WIDTH;
+    const natH = VIEWPORT_HEIGHT;
+
+    const containerRatio = rect.width / rect.height;
+    const imageRatio = natW / natH;
+
+    let renderedW, renderedH, offsetX, offsetY;
+
+    if (containerRatio > imageRatio) {
+      // Container is wider than the image: pillarbox (black bars on left & right)
+      renderedH = rect.height;
+      renderedW = rect.height * imageRatio;
+      offsetX = (rect.width - renderedW) / 2;
+      offsetY = 0;
+    } else {
+      // Container is taller than the image: letterbox (black bars on top & bottom)
+      renderedW = rect.width;
+      renderedH = rect.width / imageRatio;
+      offsetX = 0;
+      offsetY = (rect.height - renderedH) / 2;
+    }
+
+    const relativeX = e.clientX - rect.left - offsetX;
+    const relativeY = e.clientY - rect.top - offsetY;
+
+    // Clamp within image bounds
+    const clampedX = Math.max(0, Math.min(renderedW, relativeX));
+    const clampedY = Math.max(0, Math.min(renderedH, relativeY));
+
+    // Scale up to Playwright viewport (1280 x 800)
+    const scaleX = natW / renderedW;
+    const scaleY = natH / renderedH;
+
+    return {
+      x: Math.round(clampedX * scaleX),
+      y: Math.round(clampedY * scaleY),
+      inBounds: relativeX >= 0 && relativeX <= renderedW && relativeY >= 0 && relativeY <= renderedH,
+    };
+  }, []);
+
+  // Throttled mouse move event handler
+  const handleMouseMove = useCallback(
+    (e) => {
+      if (!isHumanModeRef.current) return;
+      const coords = getCoordinates(e);
+      if (!coords) return;
+
+      const now = performance.now();
+      // Throttle to ~30 fps (approx every 33ms) to avoid network flooding
+      if (now - lastMoveSentRef.current >= 33) {
+        lastMoveSentRef.current = now;
+        if (pendingMoveTimerRef.current) {
+          clearTimeout(pendingMoveTimerRef.current);
+          pendingMoveTimerRef.current = null;
+        }
+        sendBrowserAction({ type: "mouseMove", x: coords.x, y: coords.y });
+      } else if (!pendingMoveTimerRef.current) {
+        // Coalesce: ensure final resting cursor position is sent
+        pendingMoveTimerRef.current = setTimeout(() => {
+          pendingMoveTimerRef.current = null;
+          lastMoveSentRef.current = performance.now();
+          sendBrowserAction({ type: "mouseMove", x: coords.x, y: coords.y });
+        }, 35);
+      }
+    },
+    [getCoordinates, sendBrowserAction]
+  );
+
+  // Mouse down handler
+  const handleMouseDown = useCallback(
+    (e) => {
+      if (!isHumanModeRef.current) return;
+      const coords = getCoordinates(e);
+      if (!coords) return;
+
+      // Focus the container so keyboard inputs work
+      if (containerRef.current) {
+        containerRef.current.focus();
+      }
+      isFocusedRef.current = true;
+      setIsFocused(true);
+      isMouseDownRef.current = true;
+
+      const button = e.button === 2 ? "right" : e.button === 1 ? "middle" : "left";
+      sendBrowserAction({ type: "mouseDown", x: coords.x, y: coords.y, button });
+    },
+    [getCoordinates, sendBrowserAction]
+  );
+
+  // Mouse up handler
+  const handleMouseUp = useCallback(
+    (e) => {
+      if (!isHumanModeRef.current) return;
+      const coords = getCoordinates(e);
+      if (!coords) return;
+
+      isMouseDownRef.current = false;
+      const button = e.button === 2 ? "right" : e.button === 1 ? "middle" : "left";
+      sendBrowserAction({ type: "mouseUp", x: coords.x, y: coords.y, button });
+    },
+    [getCoordinates, sendBrowserAction]
+  );
+
+  // Click handler
+  const handleClick = useCallback(
+    (e) => {
+      if (!isHumanModeRef.current) return;
+      const coords = getCoordinates(e);
+      if (!coords) return;
+
+      const button = e.button === 2 ? "right" : e.button === 1 ? "middle" : "left";
+      sendBrowserAction({ type: "click", x: coords.x, y: coords.y, button });
+    },
+    [getCoordinates, sendBrowserAction]
+  );
+
+  // Double click handler
+  const handleDoubleClick = useCallback(
+    (e) => {
+      if (!isHumanModeRef.current) return;
+      const coords = getCoordinates(e);
+      if (!coords) return;
+
+      sendBrowserAction({ type: "dblclick", x: coords.x, y: coords.y, button: "left" });
+    },
+    [getCoordinates, sendBrowserAction]
+  );
+
+  // Context menu handler (prevents host browser menu on right-click)
+  const handleContextMenu = useCallback(
+    (e) => {
+      if (!isHumanModeRef.current) return;
+      e.preventDefault();
+      const coords = getCoordinates(e);
+      if (!coords) return;
+      sendBrowserAction({ type: "click", x: coords.x, y: coords.y, button: "right" });
+    },
+    [getCoordinates, sendBrowserAction]
+  );
+
+  // Global drag release and move listener (ensures dragging out-of-bounds doesn't get stuck)
+  useEffect(() => {
+    const handleGlobalMouseMove = (e) => {
+      if (isMouseDownRef.current && isHumanModeRef.current) {
+        handleMouseMove(e);
+      }
+    };
+
+    const handleGlobalMouseUp = (e) => {
+      if (isMouseDownRef.current && isHumanModeRef.current) {
+        isMouseDownRef.current = false;
+        const coords = getCoordinates(e);
+        const button = e.button === 2 ? "right" : e.button === 1 ? "middle" : "left";
+        sendBrowserAction({
+          type: "mouseUp",
+          x: coords ? coords.x : 0,
+          y: coords ? coords.y : 0,
+          button,
+        });
+      }
+    };
+
+    window.addEventListener("mousemove", handleGlobalMouseMove);
+    window.addEventListener("mouseup", handleGlobalMouseUp);
+
+    return () => {
+      window.removeEventListener("mousemove", handleGlobalMouseMove);
+      window.removeEventListener("mouseup", handleGlobalMouseUp);
+      if (pendingMoveTimerRef.current) clearTimeout(pendingMoveTimerRef.current);
+    };
+  }, [getCoordinates, handleMouseMove, sendBrowserAction]);
+
+  // Non-passive wheel event listener: prevents outer React page from scrolling
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const onWheel = (e) => {
+      if (!isHumanModeRef.current) return;
+
+      // Prevent outer page/modal from scrolling
+      e.preventDefault();
+      e.stopPropagation();
+
+      const coords = getCoordinates(e);
+      if (!coords) return;
+
+      sendBrowserAction({
+        type: "wheel",
+        x: coords.x,
+        y: coords.y,
+        deltaX: Math.round(e.deltaX),
+        deltaY: Math.round(e.deltaY),
+      });
+    };
+
+    container.addEventListener("wheel", onWheel, { passive: false });
+    return () => {
+      container.removeEventListener("wheel", onWheel);
+    };
+  }, [getCoordinates, sendBrowserAction]);
+
+  // Keyboard handlers: only captured when browser is focused and in HUMAN mode
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (!isHumanModeRef.current || !isFocusedRef.current) return;
+
+      // Do NOT intercept if typing in an input or textarea
+      const targetTag = e.target?.tagName;
+      if (targetTag === "INPUT" || targetTag === "TEXTAREA" || e.target?.isContentEditable) {
+        return;
+      }
+
+      // Prevent browser default behavior (scrolling on Space/Arrows, Tab navigation outside, etc.)
+      e.preventDefault();
+      e.stopPropagation();
+
+      sendBrowserAction({ type: "keyDown", key: e.key, code: e.code });
+    };
+
+    const handleKeyUp = (e) => {
+      if (!isHumanModeRef.current || !isFocusedRef.current) return;
+
+      const targetTag = e.target?.tagName;
+      if (targetTag === "INPUT" || targetTag === "TEXTAREA" || e.target?.isContentEditable) {
+        return;
+      }
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      sendBrowserAction({ type: "keyUp", key: e.key, code: e.code });
+    };
+
+    const handleFocusOut = (e) => {
+      if (containerRef.current && !containerRef.current.contains(e.relatedTarget)) {
+        isFocusedRef.current = false;
+        setIsFocused(false);
+        // Release any held modifier keys on blur
+        sendBrowserAction({ type: "resetInput" });
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown, { capture: true });
+    window.addEventListener("keyup", handleKeyUp, { capture: true });
+    window.addEventListener("blur", handleFocusOut);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown, { capture: true });
+      window.removeEventListener("keyup", handleKeyUp, { capture: true });
+      window.removeEventListener("blur", handleFocusOut);
+    };
+  }, [sendBrowserAction]);
+
+  // Quick type text from the assist bar
   const handleSendQuickText = async (e) => {
     e?.preventDefault();
     const textToInsert = quickText.trim();
     if (!textToInsert) return;
 
-    // Update the active field in the live interactive form
-    if (activeField && formData.hasOwnProperty(activeField)) {
-      handleInputChange(activeField, textToInsert);
-    } else {
-      handleInputChange("otpOrCaptcha", textToInsert);
-    }
-
     await sendBrowserAction({ type: "type", text: textToInsert });
+    await sendBrowserAction({ type: "press", key: "Enter" });
     setQuickText("");
   };
 
@@ -347,8 +546,15 @@ export const EmbeddedInteractiveBrowser = ({
     try {
       await takeControlApi(applicationId);
       setControlMode("HUMAN");
-      setStatus("WAITING_FOR_HUMAN");
+      isHumanModeRef.current = true;
       if (onStatusChange) onStatusChange("WAITING_FOR_HUMAN");
+      setTimeout(() => {
+        if (containerRef.current) {
+          containerRef.current.focus();
+          isFocusedRef.current = true;
+          setIsFocused(true);
+        }
+      }, 100);
     } catch (err) {
       console.error("Take control error:", err.message);
     } finally {
@@ -359,11 +565,14 @@ export const EmbeddedInteractiveBrowser = ({
   const handleReturnControl = async () => {
     setActionPending(true);
     try {
+      await sendBrowserAction({ type: "resetInput" });
       await returnControlApi(applicationId);
       setControlMode("AI");
+      isHumanModeRef.current = false;
       setHumanReason(null);
       setHumanMessage(null);
-      setStatus("FILLING");
+      setIsFocused(false);
+      isFocusedRef.current = false;
       if (onStatusChange) onStatusChange("FILLING");
     } catch (err) {
       console.error("Return control error:", err.message);
@@ -377,27 +586,29 @@ export const EmbeddedInteractiveBrowser = ({
     setVerifying(true);
     setVerificationError(null);
     try {
+      await sendBrowserAction({ type: "resetInput" });
       const res = await resumeAfterVerificationApi(applicationId);
       if (res?.data?.success || res?.status === "success" || res?.success) {
         setControlMode("AI");
+        isHumanModeRef.current = false;
         setHumanReason(null);
         setHumanMessage(null);
         setVerificationError(null);
-        setStatus("FILLING");
+        setIsFocused(false);
+        isFocusedRef.current = false;
         if (onStatusChange) onStatusChange("FILLING");
       }
     } catch (err) {
       const msg =
         err?.response?.data?.message ||
         err?.message ||
-        "Verification is still incomplete. Please solve the challenge in the browser above.";
+        "Verification is still incomplete. Please finish the action in the browser.";
       setVerificationError(msg);
     } finally {
       setVerifying(false);
     }
   };
 
-  const isHumanMode = controlMode === "HUMAN" || Boolean(humanReason);
   const isCaptchaChallenge =
     humanReason === "CAPTCHA_REQUIRED" ||
     humanReason === "captcha" ||
@@ -424,16 +635,10 @@ export const EmbeddedInteractiveBrowser = ({
 
         {/* Status Indicator */}
         <div className="flex items-center gap-2">
-          {savedSuccess && (
-            <span className="text-[11px] text-emerald-400 font-semibold flex items-center gap-1 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-500/30 animate-pulse">
-              <CheckCircle2 className="w-3 h-3" /> Field updated & synced
-            </span>
-          )}
-
           {isHumanMode ? (
             <div className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-500/20 border border-amber-500/40 rounded-full text-amber-300 text-xs font-semibold animate-pulse">
               <ShieldAlert className="w-3.5 h-3.5" />
-              <span>Manual Control / Verification</span>
+              <span>Manual Control (Active)</span>
             </div>
           ) : (
             <div className="flex items-center gap-1.5 px-2.5 py-1 bg-emerald-500/20 border border-emerald-500/40 rounded-full text-emerald-400 text-xs font-semibold">
@@ -443,8 +648,20 @@ export const EmbeddedInteractiveBrowser = ({
             </div>
           )}
 
+          {isHumanMode && (
+            <span
+              className={`text-[10px] px-2 py-0.5 rounded font-mono font-semibold transition-colors ${
+                isFocused
+                  ? "bg-blue-600/30 text-blue-300 border border-blue-500/40"
+                  : "bg-slate-800 text-slate-400 border border-slate-700"
+              }`}
+            >
+              {isFocused ? "Keyboard Focused" : "Click inside to type"}
+            </span>
+          )}
+
           <span className="text-[10px] text-slate-400 font-mono hidden sm:inline">
-            use-browser-js • 1280×800
+            1280×800
           </span>
         </div>
 
@@ -506,11 +723,11 @@ export const EmbeddedInteractiveBrowser = ({
               <strong className="font-bold text-amber-100 block sm:inline">
                 {isCaptchaChallenge
                   ? "Security / CAPTCHA Challenge:"
-                  : "Interactive Manual Mode:"}
+                  : "Interactive Manual Control:"}
               </strong>{" "}
               <span>
                 {humanMessage ||
-                  "You can directly edit all form fields, paste OTP/captcha, or adjust details below. When ready, click Resume AI."}
+                  "Interact directly with the browser: click, type, drag, and scroll to complete your action. Click 'Resume AI' when finished."}
               </span>
             </div>
           </div>
@@ -596,338 +813,69 @@ export const EmbeddedInteractiveBrowser = ({
         </form>
       </div>
 
-      {/* 4. FULLY EDITABLE INTERACTIVE BROWSER CANVAS VIEWPORT */}
+      {/* 4. REAL INTERACTIVE STREAMED BROWSER VIEWPORT */}
       <div
         ref={containerRef}
         tabIndex={0}
-        className="relative w-full bg-slate-950 flex flex-col justify-start overflow-y-auto outline-hidden text-slate-200"
+        onFocus={() => {
+          isFocusedRef.current = true;
+          setIsFocused(true);
+        }}
+        onBlur={(e) => {
+          if (!containerRef.current?.contains(e.relatedTarget)) {
+            isFocusedRef.current = false;
+            setIsFocused(false);
+            sendBrowserAction({ type: "resetInput" });
+          }
+        }}
+        onMouseMove={handleMouseMove}
+        onMouseDown={handleMouseDown}
+        onMouseUp={handleMouseUp}
+        onClick={handleClick}
+        onDoubleClick={handleDoubleClick}
+        onContextMenu={handleContextMenu}
+        className={`relative w-full bg-slate-950 flex items-center justify-center overflow-hidden outline-hidden select-none transition-shadow ${
+          isHumanMode
+            ? isFocused
+              ? "cursor-default ring-2 ring-blue-500/50"
+              : "cursor-pointer ring-1 ring-amber-500/30"
+            : "cursor-not-allowed"
+        }`}
         style={{
-          minHeight: "460px",
+          aspectRatio: `${VIEWPORT_WIDTH} / ${VIEWPORT_HEIGHT}`,
+          minHeight: "440px",
           maxHeight: isFullscreen ? "calc(100vh - 170px)" : "680px",
         }}
       >
-        <div className="w-full bg-slate-900/60 p-5 space-y-4">
-          {/* Portal header badge */}
-          <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-blue-400 font-bold text-base shrink-0">
-                {companyName ? companyName[0]?.toUpperCase() : "J"}
-              </div>
-              <div>
-                <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                  <span>{jobTitle || "MERN / Full Stack Developer"}</span>
-                  <span className="px-2 py-0.5 bg-blue-500/20 text-blue-400 border border-blue-500/30 rounded text-[10px] font-semibold">
-                    Direct Apply Form
-                  </span>
-                </h3>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  {companyName || "Employer Portal"} • {currentUrl}
-                </p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <span className="px-2.5 py-1 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-full text-xs font-semibold flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping inline-block" />
-                Live Interactive Mode
-              </span>
-              <a
-                href={currentUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs font-semibold transition-colors inline-flex items-center gap-1.5"
-              >
-                <span>Portal Link</span>
-                <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
-              </a>
+        {frameSrc ? (
+          <img
+            ref={imageRef}
+            src={frameSrc}
+            alt="Real-time Streamed Browser View"
+            className="w-full h-full object-contain pointer-events-none select-none"
+            draggable={false}
+          />
+        ) : (
+          <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 space-y-3 p-6 text-center">
+            <RefreshCw className="w-8 h-8 text-blue-500 animate-spin" />
+            <div>
+              <p className="text-sm font-semibold text-slate-200">
+                Connecting to live browser session...
+              </p>
+              <p className="text-xs text-slate-500 mt-1">
+                Waiting for first screencast frame from {currentUrl || "portal"}
+              </p>
             </div>
           </div>
+        )}
 
-          {/* Interactive Form Fields Canvas */}
-          <div className="bg-slate-950 p-5 rounded-xl border border-slate-800 space-y-4 shadow-inner">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <div className="flex items-center gap-2">
-                <Edit3 className="w-4 h-4 text-blue-400" />
-                <span className="text-xs font-bold uppercase tracking-wider text-slate-300">
-                  Editable Application Form & Input Fields
-                </span>
-              </div>
-              <span className="text-xs text-emerald-400 font-medium flex items-center gap-1">
-                <CheckCircle2 className="w-3.5 h-3.5" />
-                Click any field below to edit directly
-              </span>
-            </div>
-
-            {/* Grid of form inputs */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-              {/* Full Name */}
-              <div
-                className={`p-3 rounded-lg border transition-all ${
-                  activeField === "fullName"
-                    ? "bg-slate-900 border-blue-500 ring-1 ring-blue-500/30"
-                    : "bg-slate-900/70 border-slate-800 hover:border-slate-700"
-                }`}
-                onClick={() => setActiveField("fullName")}
-              >
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                    Full Name <span className="text-rose-400">*</span>
-                  </label>
-                  <span className="text-[10px] text-blue-400 font-semibold">Editable</span>
-                </div>
-                <input
-                  type="text"
-                  value={formData.fullName}
-                  onFocus={() => setActiveField("fullName")}
-                  onChange={(e) => handleInputChange("fullName", e.target.value)}
-                  className="w-full bg-slate-950 text-white font-medium text-xs px-3 py-2 rounded-md border border-slate-700 focus:border-blue-400 focus:outline-hidden"
-                  placeholder="Candidate Full Name"
-                />
-              </div>
-
-              {/* Email Address */}
-              <div
-                className={`p-3 rounded-lg border transition-all ${
-                  activeField === "email"
-                    ? "bg-slate-900 border-blue-500 ring-1 ring-blue-500/30"
-                    : "bg-slate-900/70 border-slate-800 hover:border-slate-700"
-                }`}
-                onClick={() => setActiveField("email")}
-              >
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                    Email Address <span className="text-rose-400">*</span>
-                  </label>
-                  <span className="text-[10px] text-blue-400 font-semibold">Editable</span>
-                </div>
-                <input
-                  type="email"
-                  value={formData.email}
-                  onFocus={() => setActiveField("email")}
-                  onChange={(e) => handleInputChange("email", e.target.value)}
-                  className="w-full bg-slate-950 text-white font-medium text-xs px-3 py-2 rounded-md border border-slate-700 focus:border-blue-400 focus:outline-hidden"
-                  placeholder="candidate@email.com"
-                />
-              </div>
-
-              {/* Phone Number */}
-              <div
-                className={`p-3 rounded-lg border transition-all ${
-                  activeField === "phone"
-                    ? "bg-slate-900 border-blue-500 ring-1 ring-blue-500/30"
-                    : "bg-slate-900/70 border-slate-800 hover:border-slate-700"
-                }`}
-                onClick={() => setActiveField("phone")}
-              >
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                    Phone / Contact Number
-                  </label>
-                  <span className="text-[10px] text-blue-400 font-semibold">Editable</span>
-                </div>
-                <input
-                  type="tel"
-                  value={formData.phone}
-                  onFocus={() => setActiveField("phone")}
-                  onChange={(e) => handleInputChange("phone", e.target.value)}
-                  className="w-full bg-slate-950 text-white font-medium text-xs px-3 py-2 rounded-md border border-slate-700 focus:border-blue-400 focus:outline-hidden"
-                  placeholder="+91 98765 43210"
-                />
-              </div>
-
-              {/* Experience */}
-              <div
-                className={`p-3 rounded-lg border transition-all ${
-                  activeField === "experience"
-                    ? "bg-slate-900 border-blue-500 ring-1 ring-blue-500/30"
-                    : "bg-slate-900/70 border-slate-800 hover:border-slate-700"
-                }`}
-                onClick={() => setActiveField("experience")}
-              >
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                    Total Experience
-                  </label>
-                  <span className="text-[10px] text-blue-400 font-semibold">Editable</span>
-                </div>
-                <input
-                  type="text"
-                  value={formData.experience}
-                  onFocus={() => setActiveField("experience")}
-                  onChange={(e) => handleInputChange("experience", e.target.value)}
-                  className="w-full bg-slate-950 text-white font-medium text-xs px-3 py-2 rounded-md border border-slate-700 focus:border-blue-400 focus:outline-hidden"
-                  placeholder="e.g. 2 Years"
-                />
-              </div>
-
-              {/* Notice Period */}
-              <div
-                className={`p-3 rounded-lg border transition-all ${
-                  activeField === "noticePeriod"
-                    ? "bg-slate-900 border-blue-500 ring-1 ring-blue-500/30"
-                    : "bg-slate-900/70 border-slate-800 hover:border-slate-700"
-                }`}
-                onClick={() => setActiveField("noticePeriod")}
-              >
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                    Notice Period
-                  </label>
-                  <span className="text-[10px] text-blue-400 font-semibold">Editable</span>
-                </div>
-                <input
-                  type="text"
-                  value={formData.noticePeriod}
-                  onFocus={() => setActiveField("noticePeriod")}
-                  onChange={(e) => handleInputChange("noticePeriod", e.target.value)}
-                  className="w-full bg-slate-950 text-white font-medium text-xs px-3 py-2 rounded-md border border-slate-700 focus:border-blue-400 focus:outline-hidden"
-                  placeholder="Immediate / 15 Days / 30 Days"
-                />
-              </div>
-
-              {/* Expected CTC */}
-              <div
-                className={`p-3 rounded-lg border transition-all ${
-                  activeField === "expectedSalary"
-                    ? "bg-slate-900 border-blue-500 ring-1 ring-blue-500/30"
-                    : "bg-slate-900/70 border-slate-800 hover:border-slate-700"
-                }`}
-                onClick={() => setActiveField("expectedSalary")}
-              >
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                    Expected Salary / CTC
-                  </label>
-                  <span className="text-[10px] text-blue-400 font-semibold">Editable</span>
-                </div>
-                <input
-                  type="text"
-                  value={formData.expectedSalary}
-                  onFocus={() => setActiveField("expectedSalary")}
-                  onChange={(e) => handleInputChange("expectedSalary", e.target.value)}
-                  className="w-full bg-slate-950 text-white font-medium text-xs px-3 py-2 rounded-md border border-slate-700 focus:border-blue-400 focus:outline-hidden"
-                  placeholder="e.g. 6 - 8 LPA"
-                />
-              </div>
-            </div>
-
-            {/* Key Skills */}
-            <div
-              className={`p-3 rounded-lg border transition-all ${
-                activeField === "keySkills"
-                  ? "bg-slate-900 border-blue-500 ring-1 ring-blue-500/30"
-                  : "bg-slate-900/70 border-slate-800 hover:border-slate-700"
-              }`}
-              onClick={() => setActiveField("keySkills")}
-            >
-              <div className="flex items-center justify-between mb-1.5">
-                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                  Relevant Skills & Tech Stack
-                </label>
-                <span className="text-[10px] text-blue-400 font-semibold">Editable</span>
-              </div>
-              <input
-                type="text"
-                value={formData.keySkills}
-                onFocus={() => setActiveField("keySkills")}
-                onChange={(e) => handleInputChange("keySkills", e.target.value)}
-                className="w-full bg-slate-950 text-white font-medium text-xs px-3 py-2 rounded-md border border-slate-700 focus:border-blue-400 focus:outline-hidden"
-                placeholder="React, Node.js, Express, MongoDB..."
-              />
-            </div>
-
-            {/* Cover Letter / Pitch */}
-            <div
-              className={`p-3 rounded-lg border transition-all ${
-                activeField === "coverLetter"
-                  ? "bg-slate-900 border-blue-500 ring-1 ring-blue-500/30"
-                  : "bg-slate-900/70 border-slate-800 hover:border-slate-700"
-              }`}
-              onClick={() => setActiveField("coverLetter")}
-            >
-              <div className="flex items-center justify-between mb-1.5">
-                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                  Cover Letter / Introduction Pitch
-                </label>
-                <span className="text-[10px] text-blue-400 font-semibold">Editable</span>
-              </div>
-              <textarea
-                rows={3}
-                value={formData.coverLetter}
-                onFocus={() => setActiveField("coverLetter")}
-                onChange={(e) => handleInputChange("coverLetter", e.target.value)}
-                className="w-full bg-slate-950 text-white font-medium text-xs px-3 py-2 rounded-md border border-slate-700 focus:border-blue-400 focus:outline-hidden resize-y"
-                placeholder="Write or edit your customized pitch for this application..."
-              />
-            </div>
-
-            {/* Resume Attachment & Verification challenge */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* ATS Resume Attachment */}
-              <div className="p-3 bg-slate-900/70 rounded-lg border border-slate-800 flex items-center justify-between">
-                <div className="flex items-center gap-2.5">
-                  <FileText className="w-5 h-5 text-emerald-400 shrink-0" />
-                  <div>
-                    <span className="text-xs font-bold text-slate-200 block">
-                      ATS Resume Attached
-                    </span>
-                    <p className="text-[11px] text-slate-400">{formData.resumeName}</p>
-                  </div>
-                </div>
-                <span className="px-2 py-1 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded text-[11px] font-semibold">
-                  ✓ Verified Attached
-                </span>
-              </div>
-
-              {/* OTP / Captcha / Custom Verification Field */}
-              <div
-                className={`p-3 rounded-lg border transition-all ${
-                  activeField === "otpOrCaptcha"
-                    ? "bg-slate-900 border-amber-500 ring-1 ring-amber-500/30"
-                    : "bg-slate-900/70 border-slate-800 hover:border-slate-700"
-                }`}
-                onClick={() => setActiveField("otpOrCaptcha")}
-              >
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-[11px] font-bold text-amber-300 uppercase tracking-wider flex items-center gap-1">
-                    <ShieldAlert className="w-3.5 h-3.5" />
-                    Security Code / OTP / Captcha
-                  </label>
-                  <span className="text-[10px] text-amber-400 font-semibold">Live Input</span>
-                </div>
-                <input
-                  type="text"
-                  value={formData.otpOrCaptcha}
-                  onFocus={() => setActiveField("otpOrCaptcha")}
-                  onChange={(e) => handleInputChange("otpOrCaptcha", e.target.value)}
-                  className="w-full bg-slate-950 text-amber-100 font-mono text-xs px-3 py-2 rounded-md border border-slate-700 focus:border-amber-400 focus:outline-hidden"
-                  placeholder="Enter or paste OTP / Captcha solution..."
-                />
-              </div>
-            </div>
-
-            {/* In-Browser Apply Action Button */}
-            <div className="flex items-center justify-between pt-2 border-t border-slate-800">
-              <div className="text-xs text-slate-400 flex items-center gap-1.5">
-                <Sparkles className="w-3.5 h-3.5 text-blue-400" />
-                <span>All inputs auto-sync directly into the application record.</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  if (onSubmitForm) {
-                    onSubmitForm(formData);
-                  } else {
-                    handleResumeAfterVerification();
-                  }
-                }}
-                className="px-5 py-2 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-bold text-xs rounded-lg shadow-md transition-colors flex items-center gap-2 cursor-pointer"
-              >
-                <CheckCircle2 className="w-4 h-4" />
-                <span>Submit / Confirm Application in Browser</span>
-              </button>
-            </div>
+        {/* Human Mode interaction banner overlay */}
+        {isHumanMode && (
+          <div className="absolute top-3 right-3 bg-amber-500/90 text-slate-950 px-2.5 py-1 rounded-md text-[11px] font-bold shadow-lg pointer-events-none flex items-center gap-1.5">
+            <Hand className="w-3.5 h-3.5" />
+            <span>{isFocused ? "Active: Mouse & Keys enabled" : "Click to focus and type"}</span>
           </div>
-        </div>
+        )}
       </div>
 
       {/* 5. BOTTOM QUICK INPUT / REMOTE ASSIST BAR */}
@@ -939,7 +887,7 @@ export const EmbeddedInteractiveBrowser = ({
               type="text"
               value={quickText}
               onChange={(e) => setQuickText(e.target.value)}
-              placeholder={`Type or paste value into active field (${activeField})...`}
+              placeholder="Paste OTP, captcha code, or text into active field..."
               className="w-full bg-slate-900 text-slate-200 text-xs pl-8 pr-3 py-1.5 rounded-md border border-slate-700 focus:border-blue-500 focus:outline-hidden"
             />
           </div>
@@ -948,20 +896,11 @@ export const EmbeddedInteractiveBrowser = ({
             className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-md text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
           >
             <Send className="w-3 h-3" />
-            <span>Update Field</span>
+            <span>Send to Field</span>
           </button>
         </form>
 
         <div className="flex items-center gap-2">
-          {/* Quick chip helpers */}
-          <button
-            type="button"
-            onClick={() => handleInputChange("noticePeriod", "Immediate")}
-            className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded text-[11px] font-medium transition-colors cursor-pointer hidden md:inline-block"
-          >
-            Immediate Notice
-          </button>
-
           {isHumanMode ? (
             <>
               <button

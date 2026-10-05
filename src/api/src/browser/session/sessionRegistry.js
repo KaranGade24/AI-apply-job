@@ -236,6 +236,9 @@ export class SessionRegistry {
   static async closeSession(applicationId) {
     const appId = String(applicationId);
     this.clearHumanResponseTimer(appId);
+    import("./browserStreamService.js")
+      .then((m) => m.cleanupStreamState(appId))
+      .catch(() => {});
     const session = activeSessions.get(appId);
     if (!session) return;
     activeSessions.delete(appId);

@@ -152,6 +152,7 @@ export class UseBrowserLocator {
 export class UseBrowserPage extends EventEmitter {
   constructor(browserContext, options = {}) {
     super();
+    this._browserContext = browserContext;
     this.context = browserContext;
     this.currentUrl = 'about:blank';
     this.pageTitle = '';
@@ -168,6 +169,7 @@ export class UseBrowserPage extends EventEmitter {
 
     this.keyboard = {
       type: async (text) => logJobEvent('use-browser-js', 'KEYBOARD', `Typed "${text}"`),
+      insertText: async (text) => logJobEvent('use-browser-js', 'KEYBOARD', `Inserted "${text}"`),
       press: async (key) => logJobEvent('use-browser-js', 'KEYBOARD', `Pressed "${key}"`),
       down: async (key) => {},
       up: async (key) => {}
@@ -176,10 +178,14 @@ export class UseBrowserPage extends EventEmitter {
     this.mouse = {
       click: async (x, y) => logJobEvent('use-browser-js', 'MOUSE', `Clicked at (${x}, ${y})`),
       move: async (x, y) => {},
-      down: async () => {},
-      up: async () => {},
+      down: async (opts) => {},
+      up: async (opts) => {},
       wheel: async (dx, dy) => {}
     };
+  }
+
+  context() {
+    return this._browserContext;
   }
 
   url() {

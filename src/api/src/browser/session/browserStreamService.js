@@ -31,6 +31,8 @@ const getOrCreateStreamState = (applicationId) => {
       activePage: null,
       isScreencasting: false,
       lastInteractionAt: Date.now(),
+      heldMouseButtons: new Set(),
+      heldKeys: new Set(),
     });
   }
   return streamStates.get(appIdStr);
@@ -95,7 +97,11 @@ export const attachScreencast = async (applicationId, page) => {
   } catch {}
 
   try {
-    const context = page.context();
+    const context = typeof page.context === "function" ? page.context() : page.context;
+    if (!context || typeof context.newCDPSession !== "function") {
+      startScreenshotFallback(appIdStr, page);
+      return true;
+    }
     const cdp = await context.newCDPSession(page);
     streamState.cdpSession = cdp;
 
@@ -195,6 +201,60 @@ const startScreenshotFallback = (applicationId, page) => {
 };
 
 /**
+ * Safely releases any held mouse buttons or modifier keys for an application.
+ *
+ * @param {string} applicationId
+ */
+export const releaseHeldInputs = async (applicationId) => {
+  const appIdStr = String(applicationId);
+  const streamState = streamStates.get(appIdStr);
+  const session = SessionRegistry.getSession(appIdStr);
+  const page = session?.getActivePage();
+
+  if (streamState && page && !page.isClosed()) {
+    try {
+      if (streamState.heldMouseButtons && streamState.heldMouseButtons.size > 0) {
+        for (const button of streamState.heldMouseButtons) {
+          await page.mouse.up({ button }).catch(() => {});
+        }
+        streamState.heldMouseButtons.clear();
+      }
+      if (streamState.heldKeys && streamState.heldKeys.size > 0) {
+        for (const key of streamState.heldKeys) {
+          await page.keyboard.up(key).catch(() => {});
+        }
+        streamState.heldKeys.clear();
+      }
+    } catch (err) {
+      logError("browserStreamService.releaseHeldInputs", err.message);
+    }
+  }
+};
+
+/**
+ * Cleans up streaming state and detached CDP session when application session is closed.
+ *
+ * @param {string} applicationId
+ */
+export const cleanupStreamState = async (applicationId) => {
+  const appIdStr = String(applicationId);
+  await releaseHeldInputs(appIdStr).catch(() => {});
+
+  if (fallbackIntervals.has(appIdStr)) {
+    clearInterval(fallbackIntervals.get(appIdStr));
+    fallbackIntervals.delete(appIdStr);
+  }
+
+  const streamState = streamStates.get(appIdStr);
+  if (streamState?.cdpSession) {
+    try {
+      await streamState.cdpSession.detach().catch(() => {});
+    } catch {}
+  }
+  streamStates.delete(appIdStr);
+};
+
+/**
  * Dispatches remote user input interactions directly into the live Playwright browser page.
  *
  * @param {string} applicationId
@@ -202,6 +262,10 @@ const startScreenshotFallback = (applicationId, page) => {
  * @returns {Promise<{ success: boolean, message?: string }>}
  */
 export const dispatchBrowserAction = async (applicationId, action = {}) => {
+  if (!applicationId || typeof applicationId !== "string") {
+    return { success: false, message: "Invalid applicationId" };
+  }
+
   const appIdStr = String(applicationId);
   const session = SessionRegistry.getSession(appIdStr);
   const page = session?.getActivePage();
@@ -213,103 +277,184 @@ export const dispatchBrowserAction = async (applicationId, action = {}) => {
   const streamState = getOrCreateStreamState(appIdStr);
   streamState.lastInteractionAt = Date.now();
 
+  const isHumanActive =
+    session.controlMode === CONTROL_MODES.HUMAN ||
+    Boolean(session.humanReason) ||
+    session.status === AGENT_STATUS.WAITING_FOR_HUMAN ||
+    session.status === AGENT_STATUS.WAITING_FOR_USER;
+
+  const directInputTypes = new Set([
+    "mouseMove",
+    "mouseDown",
+    "mouseUp",
+    "click",
+    "dblclick",
+    "wheel",
+    "scroll",
+    "keyDown",
+    "keyUp",
+    "press",
+    "type",
+    "insertText",
+  ]);
+
+  if (directInputTypes.has(action.type) && !isHumanActive) {
+    return {
+      success: false,
+      message: "Direct user input ignored: browser is in AI Autonomous mode. Click 'Take Control' first.",
+    };
+  }
+
+  const sanitizeCoord = (val, max = 2560) => {
+    if (typeof val !== "number" || Number.isNaN(val)) return null;
+    return Math.max(0, Math.min(max, Math.round(val)));
+  };
+
+  const allowedButtons = new Set(["left", "middle", "right"]);
+  const button = allowedButtons.has(action.button) ? action.button : "left";
+
   try {
     switch (action.type) {
-      case "mouseMove":
-        if (typeof action.x === "number" && typeof action.y === "number") {
-          await page.mouse.move(action.x, action.y);
+      case "mouseMove": {
+        const x = sanitizeCoord(action.x, 2560);
+        const y = sanitizeCoord(action.y, 1600);
+        if (x !== null && y !== null) {
+          await page.mouse.move(x, y);
         }
         break;
+      }
 
-      case "mouseDown":
-        if (typeof action.x === "number" && typeof action.y === "number") {
-          await page.mouse.move(action.x, action.y);
+      case "mouseDown": {
+        const x = sanitizeCoord(action.x, 2560);
+        const y = sanitizeCoord(action.y, 1600);
+        if (x !== null && y !== null) {
+          await page.mouse.move(x, y);
         }
-        await page.mouse.down({ button: action.button || "left" });
+        await page.mouse.down({ button });
+        streamState.heldMouseButtons.add(button);
         break;
+      }
 
-      case "mouseUp":
-        if (typeof action.x === "number" && typeof action.y === "number") {
-          await page.mouse.move(action.x, action.y);
+      case "mouseUp": {
+        const x = sanitizeCoord(action.x, 2560);
+        const y = sanitizeCoord(action.y, 1600);
+        if (x !== null && y !== null) {
+          await page.mouse.move(x, y);
         }
-        await page.mouse.up({ button: action.button || "left" });
+        await page.mouse.up({ button });
+        streamState.heldMouseButtons.delete(button);
         break;
+      }
 
-      case "click":
-        if (typeof action.x === "number" && typeof action.y === "number") {
-          await page.mouse.click(action.x, action.y, {
-            button: action.button || "left",
-            clickCount: action.clickCount || 1,
-            delay: action.delay || 50,
+      case "click": {
+        const x = sanitizeCoord(action.x, 2560);
+        const y = sanitizeCoord(action.y, 1600);
+        if (x !== null && y !== null) {
+          await page.mouse.click(x, y, {
+            button,
+            clickCount: Math.min(3, Math.max(1, action.clickCount || 1)),
+            delay: Math.min(500, Math.max(0, action.delay || 50)),
           });
         }
         break;
+      }
 
-      case "dblclick":
-        if (typeof action.x === "number" && typeof action.y === "number") {
-          await page.mouse.dblclick(action.x, action.y, {
-            button: action.button || "left",
-          });
+      case "dblclick": {
+        const x = sanitizeCoord(action.x, 2560);
+        const y = sanitizeCoord(action.y, 1600);
+        if (x !== null && y !== null) {
+          await page.mouse.dblclick(x, y, { button });
         }
         break;
+      }
 
       case "wheel":
-      case "scroll":
-        if (typeof action.x === "number" && typeof action.y === "number") {
-          await page.mouse.move(action.x, action.y);
+      case "scroll": {
+        const x = sanitizeCoord(action.x, 2560);
+        const y = sanitizeCoord(action.y, 1600);
+        if (x !== null && y !== null) {
+          await page.mouse.move(x, y);
         }
-        await page.mouse.wheel(action.deltaX || 0, action.deltaY || 0);
+        const deltaX = typeof action.deltaX === "number" ? Math.max(-1000, Math.min(1000, Math.round(action.deltaX))) : 0;
+        const deltaY = typeof action.deltaY === "number" ? Math.max(-1000, Math.min(1000, Math.round(action.deltaY))) : 0;
+        await page.mouse.wheel(deltaX, deltaY);
         break;
+      }
 
-      case "keyDown":
-        if (action.key) {
+      case "keyDown": {
+        if (typeof action.key === "string" && action.key && action.key.length <= 50) {
           await page.keyboard.down(action.key);
+          streamState.heldKeys.add(action.key);
         }
         break;
+      }
 
-      case "keyUp":
-        if (action.key) {
+      case "keyUp": {
+        if (typeof action.key === "string" && action.key && action.key.length <= 50) {
           await page.keyboard.up(action.key);
+          streamState.heldKeys.delete(action.key);
         }
         break;
+      }
 
-      case "type":
-        if (typeof action.text === "string") {
-          await page.keyboard.type(action.text, { delay: 10 });
+      case "press": {
+        if (typeof action.key === "string" && action.key && action.key.length <= 50) {
+          await page.keyboard.press(action.key, {
+            delay: Math.min(500, Math.max(0, action.delay || 20)),
+          });
         }
         break;
+      }
 
-      case "press":
-        if (action.key) {
-          await page.keyboard.press(action.key);
+      case "type": {
+        if (typeof action.text === "string" && action.text) {
+          await page.keyboard.type(action.text.slice(0, 5000), { delay: Math.min(200, Math.max(0, action.delay || 10)) });
         }
         break;
+      }
 
-      case "navigate":
-        if (action.url) {
+      case "insertText": {
+        if (typeof action.text === "string" && action.text) {
+          await page.keyboard.insertText(action.text.slice(0, 5000));
+        }
+        break;
+      }
+
+      case "resetInput": {
+        await releaseHeldInputs(appIdStr);
+        break;
+      }
+
+      case "navigate": {
+        if (action.url && typeof action.url === "string") {
           await page.goto(action.url, { waitUntil: "domcontentloaded", timeout: 25000 });
         }
         break;
+      }
 
-      case "reload":
+      case "reload": {
         await page.reload({ waitUntil: "domcontentloaded", timeout: 20000 });
         break;
+      }
 
-      case "goBack":
+      case "goBack": {
         await page.goBack().catch(() => {});
         break;
+      }
 
-      case "goForward":
+      case "goForward": {
         await page.goForward().catch(() => {});
         break;
+      }
 
-      case "selectOption":
+      case "selectOption": {
         if (action.selector && action.value) {
           await page.selectOption(action.selector, action.value);
         }
         break;
+      }
 
-      case "setCheckbox":
+      case "setCheckbox": {
         if (action.selector) {
           if (action.checked) {
             await page.check(action.selector);
@@ -318,6 +463,7 @@ export const dispatchBrowserAction = async (applicationId, action = {}) => {
           }
         }
         break;
+      }
 
       default:
         return { success: false, message: `Unknown action type: ${action.type}` };
@@ -444,10 +590,11 @@ export const subscribeClient = async (applicationId, ws) => {
     }
   });
 
-  ws.on("close", () => {
+  ws.on("close", async () => {
     clients.delete(ws);
     if (clients.size === 0) {
       clientSubscribers.delete(appIdStr);
+      await releaseHeldInputs(appIdStr).catch(() => {});
     }
   });
 };
@@ -526,4 +673,6 @@ export default {
   getLatestBrowserFrame,
   subscribeClient,
   checkHumanChallengeResolved,
+  releaseHeldInputs,
+  cleanupStreamState,
 };
