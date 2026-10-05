@@ -5,6 +5,7 @@ import {
   checkHumanChallengeResolved,
   broadcastToApp,
   releaseHeldInputs,
+  attachScreencast,
 } from "../browser/session/browserStreamService.js";
 import { ApplicationSessionRepository } from "../repositories/applicationSession.repository.js";
 import { JobApplication } from "../model/JobApplication.js";
@@ -298,7 +299,36 @@ export const dispatchUserActionService = async (applicationId, userId, action) =
  */
 export const getBrowserFrameService = async (applicationId, userId) => {
   const appIdStr = String(applicationId);
-  await assertOwnership(appIdStr, userId);
+  const jobApp = await assertOwnership(appIdStr, userId);
+
+  // If no active page in SessionRegistry yet, attempt background session start if application has a career URL
+  const activePage = SessionRegistry.getActivePage(appIdStr);
+  if (!activePage) {
+    const targetUrl =
+      jobApp?.applyUrl ||
+      jobApp?.sourceUrl ||
+      jobApp?.workflow?.agentState?.pendingHumanAction?.savedUrl ||
+      jobApp?.pageAnalysis?.currentUrl ||
+      jobApp?.jobId?.applicationUrl ||
+      jobApp?.jobId?.sourceUrl;
+
+    if (targetUrl && (targetUrl.startsWith("http://") || targetUrl.startsWith("https://"))) {
+      SessionRegistry.createOrGetSession(appIdStr, userId)
+        .then(async () => {
+          const page = SessionRegistry.getActivePage(appIdStr);
+          if (page && (page.url() === "about:blank" || page.url() === "")) {
+            await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 35000 }).catch(() => {});
+          }
+          if (page) {
+            await attachScreencast(appIdStr, page).catch(() => {});
+          }
+        })
+        .catch((err) => {
+          logError("browserControl.autoStartSession", err.message);
+        });
+    }
+  }
+
   return getLatestBrowserFrame(appIdStr);
 };
 

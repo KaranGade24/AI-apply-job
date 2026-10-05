@@ -542,12 +542,11 @@ export const getLatestBrowserFrame = (applicationId) => {
   const currentUrl = page?.url() || streamState.currentUrl || "";
   const pageTitle = streamState.pageTitle || "Live Application";
 
-  // When a real page exists or navigation is in progress, do NOT show fake/mock portal SVG.
-  // Show error SVG if navigation error occurred; show loading SVG if live page exists but first frame pending.
+  // When a real page exists or navigation is in progress, show screencast frame, error frame, or loading frame
   let frame = streamState.latestFrame;
   if (!frame && streamState.browserError) {
     frame = generateErrorFrame(currentUrl, streamState.browserError);
-  } else if (!frame && page && !page.isClosed()) {
+  } else if (!frame) {
     frame = generateLoadingFrame(currentUrl, pageTitle);
   }
 
@@ -581,9 +580,18 @@ export const subscribeClient = async (applicationId, ws) => {
 
   const session = SessionRegistry.getSession(appIdStr);
   const page = SessionRegistry.getActivePage(appIdStr);
+  const streamState = getOrCreateStreamState(appIdStr);
+
+  const initialFrame =
+    streamState.latestFrame ||
+    (streamState.browserError
+      ? generateErrorFrame(page?.url() || streamState.currentUrl || "", streamState.browserError)
+      : generateLoadingFrame(
+          page?.url() || streamState.currentUrl || "",
+          streamState.pageTitle || "Live Job Portal Application"
+        ));
 
   // Send initial connected metadata & latest frame immediately
-  const streamState = getOrCreateStreamState(appIdStr);
   ws.send(
     JSON.stringify({
       type: REALTIME_EVENTS.BROWSER_STARTED,
@@ -594,7 +602,7 @@ export const subscribeClient = async (applicationId, ws) => {
       humanReason: session?.humanReason || null,
       humanMessage: session?.humanMessage || null,
       browserError: streamState.browserError || null,
-      data: streamState.latestFrame,
+      data: initialFrame,
       timestamp: Date.now(),
     }),
   );

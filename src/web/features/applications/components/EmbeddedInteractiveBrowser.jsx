@@ -162,7 +162,9 @@ export const EmbeddedInteractiveBrowser = ({
             } else if (msg.type === "BROWSER_STARTED") {
               if (msg.currentUrl) {
                 setCurrentUrl(msg.currentUrl);
-                setUrlInput(msg.currentUrl);
+                setUrlInput((prev) =>
+                  document.activeElement?.id === "browser-url-input" ? prev : msg.currentUrl
+                );
               }
               if (msg.data) {
                 const prefix = msg.data.startsWith("PHN2Zy")
@@ -234,9 +236,7 @@ export const EmbeddedInteractiveBrowser = ({
     setupWs();
 
     const fallbackTimer = setInterval(() => {
-      if (!wsConnected) {
-        fetchSingleFrame();
-      }
+      fetchSingleFrame();
     }, 1500);
 
     return () => {
@@ -249,7 +249,7 @@ export const EmbeddedInteractiveBrowser = ({
         } catch {}
       }
     };
-  }, [applicationId, fetchSingleFrame, onStatusChange, wsConnected]);
+  }, [applicationId, fetchSingleFrame, onStatusChange]);
 
   // Coordinate mapping from screen / element viewport to Playwright viewport (1280x800)
   // Correctly handles object-contain scaling, pillarboxing, and letterboxing
@@ -867,15 +867,39 @@ export const EmbeddedInteractiveBrowser = ({
             draggable={false}
           />
         ) : (
-          <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 space-y-3 p-6 text-center">
+          <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 space-y-4 p-6 text-center">
             <RefreshCw className="w-8 h-8 text-blue-500 animate-spin" />
-            <div>
+            <div className="space-y-1 max-w-md">
               <p className="text-sm font-semibold text-slate-200">
                 Connecting to live browser session...
               </p>
-              <p className="text-xs text-slate-500 mt-1">
-                Waiting for first screencast frame from {currentUrl || "portal"}
+              <p className="text-xs text-slate-400">
+                Target URL: <span className="text-blue-400 font-mono">{currentUrl || "Application Portal"}</span>
               </p>
+            </div>
+            <div className="flex items-center gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  fetchSingleFrame();
+                  if (currentUrl) handleNavigate();
+                }}
+                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer shadow-sm"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Reload Stream</span>
+              </button>
+              {currentUrl && (
+                <a
+                  href={currentUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-colors"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  <span>Open URL in Tab</span>
+                </a>
+              )}
             </div>
           </div>
         )}
