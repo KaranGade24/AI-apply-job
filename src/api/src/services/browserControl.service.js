@@ -27,7 +27,7 @@ const assertOwnership = async (applicationId, userId) => {
     throw new appError("Unauthorized", 401);
   }
   try {
-    const jobApp = await JobApplication.findById(applicationId).lean();
+    const jobApp = await JobApplication.findById(applicationId).populate('jobId').lean();
     if (!jobApp) {
       return { _id: applicationId, userId };
     }
@@ -302,7 +302,7 @@ export const getBrowserFrameService = async (applicationId, userId) => {
   const jobApp = await assertOwnership(appIdStr, userId);
 
   // If no active page in SessionRegistry yet, attempt background session start if application has a career URL
-  const activePage = SessionRegistry.getActivePage(appIdStr);
+  let activePage = SessionRegistry.getActivePage(appIdStr);
   if (!activePage) {
     const targetUrl =
       jobApp?.applyUrl ||
@@ -313,19 +313,24 @@ export const getBrowserFrameService = async (applicationId, userId) => {
       jobApp?.jobId?.sourceUrl;
 
     if (targetUrl && (targetUrl.startsWith("http://") || targetUrl.startsWith("https://"))) {
-      SessionRegistry.createOrGetSession(appIdStr, userId)
-        .then(async () => {
-          const page = SessionRegistry.getActivePage(appIdStr);
-          if (page && (page.url() === "about:blank" || page.url() === "")) {
-            await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 35000 }).catch(() => {});
-          }
-          if (page) {
-            await attachScreencast(appIdStr, page).catch(() => {});
-          }
-        })
-        .catch((err) => {
-          logError("browserControl.autoStartSession", err.message);
-        });
+      try {
+        await SessionRegistry.createOrGetSession(appIdStr, userId);
+        activePage = SessionRegistry.getActivePage(appIdStr);
+        if (activePage && (activePage.url() === "about:blank" || activePage.url() === "")) {
+          activePage.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 35000 })
+            .then(async () => {
+              await attachScreencast(appIdStr, activePage).catch(() => {});
+            })
+            .catch((err) => {
+              logError("browserControl.autoStartSession.goto", err.message);
+            });
+        }
+        if (activePage) {
+          await attachScreencast(appIdStr, activePage).catch(() => {});
+        }
+      } catch (err) {
+        logError("browserControl.autoStartSession", err.message);
+      }
     }
   }
 

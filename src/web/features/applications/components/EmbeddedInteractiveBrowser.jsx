@@ -27,6 +27,25 @@ import {
 const VIEWPORT_WIDTH = 1280;
 const VIEWPORT_HEIGHT = 800;
 
+const formatFrameSrc = (rawFrame) => {
+  if (!rawFrame) return null;
+  const str = String(rawFrame).trim();
+  if (str.startsWith("data:")) return str;
+  if (str.startsWith("<svg") || str.startsWith("<?xml")) {
+    return `data:image/svg+xml;utf8,${encodeURIComponent(str)}`;
+  }
+  try {
+    const decodedStart = atob(str.slice(0, 32)).trim();
+    if (decodedStart.startsWith("<svg") || decodedStart.startsWith("<?xml")) {
+      return `data:image/svg+xml;base64,${str}`;
+    }
+  } catch {}
+  if (str.startsWith("PHN2") || str.startsWith("PD94")) {
+    return `data:image/svg+xml;base64,${str}`;
+  }
+  return `data:image/jpeg;base64,${str}`;
+};
+
 export const EmbeddedInteractiveBrowser = ({
   applicationId,
   initialUrl = "",
@@ -99,13 +118,7 @@ export const EmbeddedInteractiveBrowser = ({
       const data = res?.data || res;
       if (data) {
         if (data.frame) {
-          const prefix =
-            data.frame.startsWith("<svg") || data.frame.startsWith("data:")
-              ? ""
-              : data.frame.startsWith("PHN2Zy")
-              ? "data:image/svg+xml;base64,"
-              : "data:image/jpeg;base64,";
-          setFrameSrc(data.frame.startsWith("data:") ? data.frame : `${prefix}${data.frame}`);
+          setFrameSrc(formatFrameSrc(data.frame));
         }
         if (data.currentUrl) {
           setCurrentUrl(data.currentUrl);
@@ -148,10 +161,7 @@ export const EmbeddedInteractiveBrowser = ({
           try {
             const msg = JSON.parse(event.data);
             if (msg.type === "FRAME" && msg.data) {
-              const prefix = msg.data.startsWith("PHN2Zy")
-                ? "data:image/svg+xml;base64,"
-                : "data:image/jpeg;base64,";
-              setFrameSrc(`${prefix}${msg.data}`);
+              setFrameSrc(formatFrameSrc(msg.data));
               if (msg.currentUrl) {
                 setCurrentUrl(msg.currentUrl);
                 setUrlInput((prev) =>
@@ -167,10 +177,7 @@ export const EmbeddedInteractiveBrowser = ({
                 );
               }
               if (msg.data) {
-                const prefix = msg.data.startsWith("PHN2Zy")
-                  ? "data:image/svg+xml;base64,"
-                  : "data:image/jpeg;base64,";
-                setFrameSrc(`${prefix}${msg.data}`);
+                setFrameSrc(formatFrameSrc(msg.data));
               }
               if (msg.controlMode) setControlMode(msg.controlMode);
               if (msg.humanReason) setHumanReason(msg.humanReason);
