@@ -546,8 +546,10 @@ export const getLatestBrowserFrame = (applicationId) => {
   let frame = streamState.latestFrame;
   if (!frame && streamState.browserError) {
     frame = generateErrorFrame(currentUrl, streamState.browserError);
-  } else if (!frame) {
+  } else if (!frame && page) {
     frame = generateLoadingFrame(currentUrl, pageTitle);
+  } else if (!frame) {
+    frame = null;
   }
 
   return {
@@ -586,10 +588,12 @@ export const subscribeClient = async (applicationId, ws) => {
     streamState.latestFrame ||
     (streamState.browserError
       ? generateErrorFrame(page?.url() || streamState.currentUrl || "", streamState.browserError)
-      : generateLoadingFrame(
+      : page
+      ? generateLoadingFrame(
           page?.url() || streamState.currentUrl || "",
           streamState.pageTitle || "Live Job Portal Application"
-        ));
+        )
+      : null);
 
   // Send initial connected metadata & latest frame immediately
   ws.send(

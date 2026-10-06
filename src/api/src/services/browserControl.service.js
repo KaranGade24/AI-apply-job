@@ -57,11 +57,34 @@ const getThreadConfig = (applicationId) => ({
  */
 export const takeControlService = async (applicationId, userId) => {
   const appIdStr = String(applicationId);
-  await assertOwnership(appIdStr, userId);
+  const jobApp = await assertOwnership(appIdStr, userId);
 
-  const session = SessionRegistry.getSession(appIdStr);
+  let session = SessionRegistry.getSession(appIdStr);
   if (!session) {
-    throw new appError("No active browser session found for this application", 404);
+    // If no active session exists, let's start a new one!
+    const targetUrl =
+      jobApp?.applyUrl ||
+      jobApp?.sourceUrl ||
+      jobApp?.workflow?.agentState?.pendingHumanAction?.savedUrl ||
+      jobApp?.pageAnalysis?.currentUrl ||
+      jobApp?.jobId?.applicationUrl ||
+      jobApp?.jobId?.sourceUrl ||
+      "https://www.naukri.com";
+
+    session = await SessionRegistry.createOrGetSession(appIdStr, userId, { targetUrl });
+    const activePage = session.getActivePage();
+    if (activePage && (activePage.url() === "about:blank" || activePage.url() === "")) {
+      activePage.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 35005 })
+        .then(async () => {
+          await attachScreencast(appIdStr, activePage).catch(() => {});
+        })
+        .catch((err) => {
+          logError("browserControl.takeControlService.goto", err.message);
+        });
+    }
+    if (activePage) {
+      await attachScreencast(appIdStr, activePage).catch(() => {});
+    }
   }
 
   session.controlMode = CONTROL_MODES.HUMAN;
@@ -299,41 +322,7 @@ export const dispatchUserActionService = async (applicationId, userId, action) =
  */
 export const getBrowserFrameService = async (applicationId, userId) => {
   const appIdStr = String(applicationId);
-  const jobApp = await assertOwnership(appIdStr, userId);
-
-  // If no active page in SessionRegistry yet, attempt background session start if application has a career URL
-  let activePage = SessionRegistry.getActivePage(appIdStr);
-  if (!activePage) {
-    const targetUrl =
-      jobApp?.applyUrl ||
-      jobApp?.sourceUrl ||
-      jobApp?.workflow?.agentState?.pendingHumanAction?.savedUrl ||
-      jobApp?.pageAnalysis?.currentUrl ||
-      jobApp?.jobId?.applicationUrl ||
-      jobApp?.jobId?.sourceUrl;
-
-    if (targetUrl && (targetUrl.startsWith("http://") || targetUrl.startsWith("https://"))) {
-      try {
-        await SessionRegistry.createOrGetSession(appIdStr, userId);
-        activePage = SessionRegistry.getActivePage(appIdStr);
-        if (activePage && (activePage.url() === "about:blank" || activePage.url() === "")) {
-          activePage.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 35000 })
-            .then(async () => {
-              await attachScreencast(appIdStr, activePage).catch(() => {});
-            })
-            .catch((err) => {
-              logError("browserControl.autoStartSession.goto", err.message);
-            });
-        }
-        if (activePage) {
-          await attachScreencast(appIdStr, activePage).catch(() => {});
-        }
-      } catch (err) {
-        logError("browserControl.autoStartSession", err.message);
-      }
-    }
-  }
-
+  await assertOwnership(appIdStr, userId);
   return getLatestBrowserFrame(appIdStr);
 };
 

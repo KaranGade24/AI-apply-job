@@ -3,7 +3,7 @@ import os from "os";
 import fs from "fs";
 import { BrowserManager } from "../browserManager.js";
 import { attachDialogHandler } from "./dialogHandler.js";
-import { logJobEvent } from "../../utils/logger.js";
+import { logJobEvent, logError } from "../../utils/logger.js";
 
 export class BrowserSession {
   constructor(applicationId, userId, options = {}) {
@@ -41,6 +41,20 @@ export class BrowserSession {
     this.activePage = launched.page;
     this.pages = [launched.page];
     this.currentUrl = launched.page.url() || "";
+
+    // Always inject Google session on start
+    try {
+      const { injectGoogleSessionIntoContext } = await import("../../services/googleSession.service.js");
+      await injectGoogleSessionIntoContext(this.context, this.userId);
+    } catch (err) {
+      logError("browserSession.start.injectGoogle", err.message);
+    }
+
+    // Dynamic Naukri session injection if initial URL is Naukri
+    const initialUrl = this.options.targetUrl || this.currentUrl;
+    if (initialUrl) {
+      await this.injectNaukriSessionIfRequired(initialUrl);
+    }
 
     // Dialog handling for functional compatibility
     this.context.on("dialog", async (dialog) => {
@@ -105,6 +119,11 @@ export class BrowserSession {
         const newUrl = page.url();
         this.currentUrl = newUrl;
         this.lastUsedAt = new Date();
+
+        // Dynamically inject Naukri session if navigating to a Naukri URL
+        if (newUrl && newUrl.toLowerCase().includes("naukri.com")) {
+          await this.injectNaukriSessionIfRequired(newUrl);
+        }
 
         try {
           const { SessionRegistry } = await import("./sessionRegistry.js");
@@ -229,6 +248,55 @@ export class BrowserSession {
     return this.navigate(url, options);
   }
 
+  async injectNaukriSessionIfRequired(url) {
+    if (!url) return;
+    try {
+      const isNaukri = url.toLowerCase().includes("naukri.com");
+      if (isNaukri) {
+        const { getDecryptedSessionForUser } = await import("../../services/naukriSession.service.js");
+        const sessionState = await getDecryptedSessionForUser(this.userId);
+        if (sessionState && Array.isArray(sessionState.cookies)) {
+          const validCookies = sessionState.cookies
+            .filter((c) => c && c.name && c.value)
+            .map((c) => {
+              const cookie = {
+                name: c.name,
+                value: c.value,
+                path: c.path || "/",
+              };
+              if (c.domain) {
+                cookie.domain = c.domain;
+              } else {
+                cookie.domain = ".naukri.com";
+              }
+              if (c.sameSite === "Strict" || c.sameSite === "Lax" || c.sameSite === "None") {
+                cookie.sameSite = c.sameSite;
+              }
+              cookie.secure = c.secure !== false;
+              if (c.httpOnly !== undefined) {
+                cookie.httpOnly = Boolean(c.httpOnly);
+              }
+              if (typeof c.expires === "number" && c.expires > 0) {
+                cookie.expires = Math.round(c.expires);
+              }
+              return cookie;
+            });
+
+          if (validCookies.length > 0) {
+            await this.context.addCookies(validCookies).catch(() => {});
+            await logJobEvent(
+              "browserSession",
+              "NAUKRI_SESSION_INJECTED",
+              `Successfully injected ${validCookies.length} Naukri session cookies for User: ${this.userId}`
+            ).catch(() => {});
+          }
+        }
+      }
+    } catch (err) {
+      logError("browserSession.injectNaukriSession", err.message);
+    }
+  }
+
   async navigate(url, options = {}) {
     let page = this.getActivePage();
     if (!page) {
@@ -236,6 +304,9 @@ export class BrowserSession {
       page = this.getActivePage();
     }
     if (!page) throw new Error("Active browser page is unavailable.");
+
+    // Inject Naukri cookies dynamically if URL contains naukri.com
+    await this.injectNaukriSessionIfRequired(url);
 
     const waitUntil = options.waitUntil || "domcontentloaded";
     const timeout = options.timeout || 30000;
@@ -256,6 +327,10 @@ export class BrowserSession {
 
   async openNewTab(url = "about:blank") {
     if (!this.context) await this.start();
+
+    // Inject Naukri cookies dynamically if URL contains naukri.com
+    await this.injectNaukriSessionIfRequired(url);
+
     const newPage = await this.context.newPage();
     this.attachPage(newPage);
     if (url && url !== "about:blank") {

@@ -59,7 +59,7 @@ export const EmbeddedInteractiveBrowser = ({
   const [pageTitle, setPageTitle] = useState(
     jobTitle ? `${jobTitle} - Application Portal` : "Live Job Portal Application"
   );
-  const [isLive, setIsLive] = useState(true);
+  const [isLive, setIsLive] = useState(false);
   const [controlMode, setControlMode] = useState("AI"); // "AI" | "HUMAN"
   const [humanReason, setHumanReason] = useState(null);
   const [humanMessage, setHumanMessage] = useState(null);
@@ -865,7 +865,7 @@ export const EmbeddedInteractiveBrowser = ({
           maxHeight: isFullscreen ? "calc(100vh - 170px)" : "680px",
         }}
       >
-        {frameSrc ? (
+        {frameSrc && isLive ? (
           <img
             ref={imageRef}
             src={frameSrc}
@@ -874,34 +874,46 @@ export const EmbeddedInteractiveBrowser = ({
             draggable={false}
           />
         ) : (
-          <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 space-y-4 p-6 text-center">
-            <RefreshCw className="w-8 h-8 text-blue-500 animate-spin" />
-            <div className="space-y-1 max-w-md">
-              <p className="text-sm font-semibold text-slate-200">
-                Connecting to live browser session...
+          <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 space-y-5 p-8 text-center bg-slate-950/80">
+            <div className="w-16 h-16 rounded-full bg-blue-500/10 flex items-center justify-center border border-blue-500/20 text-blue-400 animate-pulse">
+              <Globe className="w-8 h-8" />
+            </div>
+            <div className="space-y-1.5 max-w-md">
+              <p className="text-base font-bold text-slate-100">
+                Interactive Browser Offline
               </p>
-              <p className="text-xs text-slate-400">
-                Target URL: <span className="text-blue-400 font-mono">{currentUrl || "Application Portal"}</span>
+              <p className="text-xs text-slate-300">
+                Start a live browser session to interact directly with the career site, fill application forms, and complete security verification.
+              </p>
+              <p className="text-xs text-slate-500 font-mono mt-1">
+                Target URL: <span className="text-blue-400">{currentUrl || "Application Portal"}</span>
               </p>
             </div>
-            <div className="flex items-center gap-2.5 pt-2">
+            <div className="flex flex-col sm:flex-row items-center gap-3 pt-2">
               <button
                 type="button"
-                onClick={() => {
-                  fetchSingleFrame();
-                  if (currentUrl) handleNavigate();
-                }}
-                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer shadow-sm"
+                onClick={handleTakeControl}
+                disabled={actionPending}
+                className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white rounded-xl text-xs font-bold inline-flex items-center gap-2 transition-all cursor-pointer shadow-lg hover:shadow-blue-500/20 disabled:opacity-50"
               >
-                <RefreshCw className="w-3.5 h-3.5" />
-                <span>Reload Stream</span>
+                {actionPending ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>Launching Browser...</span>
+                  </>
+                ) : (
+                  <>
+                    <Hand className="w-4 h-4" />
+                    <span>Launch Live Browser Session</span>
+                  </>
+                )}
               </button>
               {currentUrl && (
                 <a
                   href={currentUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-colors"
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 active:bg-slate-900 text-slate-200 rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 transition-colors border border-slate-700"
                 >
                   <ExternalLink className="w-3.5 h-3.5" />
                   <span>Open URL in Tab</span>
