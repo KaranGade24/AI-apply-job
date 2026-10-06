@@ -71,11 +71,20 @@ export class UseBrowserLocator {
 
   async fill(value, options = {}) {
     await logJobEvent('use-browser-js', 'FILL', `Filled element matching '${this.selector}'`);
+    if (!this.page.formValues) this.page.formValues = {};
+    const key = this.page.locatorKey(this.selector);
+    this.page.formValues[key] = value;
+    this.page.formValues[this.selector] = value;
     return true;
   }
 
   async type(text, options = {}) {
     await logJobEvent('use-browser-js', 'TYPE', `Typed text into element matching '${this.selector}'`);
+    if (!this.page.formValues) this.page.formValues = {};
+    const key = this.page.locatorKey(this.selector);
+    const existing = this.page.formValues[key] || '';
+    this.page.formValues[key] = existing + text;
+    this.page.formValues[this.selector] = existing + text;
     return true;
   }
 
@@ -119,7 +128,9 @@ export class UseBrowserLocator {
   }
 
   async inputValue() {
-    return '';
+    if (!this.page.formValues) return '';
+    const key = this.page.locatorKey(this.selector);
+    return this.page.formValues[key] || this.page.formValues[this.selector] || '';
   }
 
   async getAttribute(name) {
@@ -166,6 +177,7 @@ export class UseBrowserPage extends EventEmitter {
     this.history = [];
     this.isClosedFlag = false;
     this.defaultTimeout = options.timeout || 30000;
+    this.formValues = {};
 
     this.keyboard = {
       type: async (text) => logJobEvent('use-browser-js', 'KEYBOARD', `Typed "${text}"`),
@@ -182,6 +194,15 @@ export class UseBrowserPage extends EventEmitter {
       up: async (opts) => {},
       wheel: async (dx, dy) => {}
     };
+  }
+
+  locatorKey(selector) {
+    if (!selector) return '';
+    let key = String(selector).toLowerCase().replace(/['"\[\]]/g, '').replace('input', '').trim();
+    if (key.includes('name=')) key = key.split('name=')[1];
+    if (key.includes('placeholder=')) key = key.split('placeholder=')[1];
+    if (key.includes('id=')) key = key.split('id=')[1];
+    return key;
   }
 
   context() {
@@ -335,6 +356,113 @@ export class UseBrowserPage extends EventEmitter {
       attrs.text = match[2].replace(/<[^>]+>/g, '').trim();
       if (attrs.href) this.links.push(attrs);
     }
+
+    this.setupGlobalDomMock();
+  }
+
+  setupGlobalDomMock() {
+    if (typeof global === 'undefined') return;
+
+    const createMockElement = (tag, attrs) => {
+      const el = {
+        tagName: tag.toUpperCase(),
+        getAttribute: (name) => attrs[name.toLowerCase()] || null,
+        setAttribute: (name, val) => { attrs[name.toLowerCase()] = val; },
+        value: attrs.value || '',
+        placeholder: attrs.placeholder || '',
+        type: attrs.type || 'text',
+        name: attrs.name || '',
+        id: attrs.id || '',
+        textContent: attrs.text || '',
+        innerText: attrs.text || '',
+        offsetParent: {},
+        offsetHeight: 200,
+        offsetWidth: 400,
+        click: () => {
+          logJobEvent('use-browser-js-dom', 'CLICK', `Mock clicked <${tag} ${attrs.name || ''}>`).catch(() => {});
+        },
+        querySelector: (sel) => {
+          const match = el.querySelectorAll(sel)[0];
+          return match || null;
+        },
+        querySelectorAll: (sel) => {
+          if (!sel) return [];
+          const cleanSel = sel.replace(/['"\[\]]/g, '').toLowerCase();
+          if (cleanSel.includes('input') || cleanSel.includes('textarea')) {
+            return allMockElements.filter(e => e.tagName === 'INPUT');
+          }
+          if (cleanSel.includes('button')) {
+            return allMockElements.filter(e => e.tagName === 'BUTTON');
+          }
+          return [];
+        },
+        addEventListener: () => {},
+        dispatchEvent: () => true,
+      };
+      return el;
+    };
+
+    const allMockElements = [];
+    if (this.inputs) {
+      for (const input of this.inputs) {
+        allMockElements.push(createMockElement('input', input));
+      }
+    }
+    if (this.buttons) {
+      for (const btn of this.buttons) {
+        allMockElements.push(createMockElement('button', btn));
+      }
+    }
+    if (this.links) {
+      for (const link of this.links) {
+        allMockElements.push(createMockElement('a', link));
+      }
+    }
+
+    const mockDocument = {
+      body: {
+        appendChild: () => {},
+        removeChild: () => {},
+        innerText: this.pageText || '',
+        textContent: this.pageText || '',
+      },
+      documentElement: {},
+      querySelector: (selector) => {
+        if (selector === 'body') return mockDocument.body;
+        if (!selector) return null;
+        const cleanSel = selector.replace(/['"\[\]]/g, '').toLowerCase();
+        return allMockElements.find(e => {
+          const tagName = e.tagName.toLowerCase();
+          if (cleanSel === tagName) return true;
+          if (cleanSel.includes(tagName)) return true;
+          return false;
+        }) || allMockElements[0] || null;
+      },
+      querySelectorAll: (selector) => {
+        if (!selector) return [];
+        const cleanSel = selector.replace(/['"\[\]]/g, '').toLowerCase();
+        const matches = allMockElements.filter(e => {
+          const tagName = e.tagName.toLowerCase();
+          return cleanSel.includes(tagName);
+        });
+        return matches.length > 0 ? matches : allMockElements;
+      },
+      createElement: (tag) => createMockElement(tag, {}),
+    };
+
+    global.document = mockDocument;
+    global.window = {
+      document: mockDocument,
+      stop: () => {},
+      location: { href: this.currentUrl },
+      navigator: { userAgent: 'Mozilla/5.0' },
+      addEventListener: () => {},
+    };
+    global.navigator = global.window.navigator;
+    global.MutationObserver = class {
+      observe() {}
+      disconnect() {}
+    };
   }
 
   _parseAttributes(attrStr) {
@@ -428,9 +556,56 @@ export class UseBrowserPage extends EventEmitter {
   }
 
   async screenshot(options = {}) {
-    // Generate deterministic clean SVG base64 screenshot evidence
     const title = this.pageTitle || 'Application State';
     const url = this.currentUrl;
+    
+    let yOffset = 260;
+    let inputSvgFields = '';
+    const values = this.formValues || {};
+
+    if (this.inputs && this.inputs.length > 0) {
+      this.inputs.slice(0, 5).forEach((input, index) => {
+        const label = input.placeholder || input.name || input.id || `Field ${index + 1}`;
+        const key = input.name || input.id || input.placeholder || '';
+        const val = values[key] || values[this.locatorKey(key)] || input.value || '';
+        
+        inputSvgFields += `
+          <!-- Label -->
+          <text x="70" y="${yOffset}" fill="#94a3b8" font-family="sans-serif" font-size="13" font-weight="600">${label.toUpperCase()}</text>
+          <!-- Input field box -->
+          <rect x="70" y="${yOffset + 10}" width="400" height="40" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1.5"/>
+          <!-- Value -->
+          <text x="85" y="${yOffset + 35}" fill="#f8fafc" font-family="sans-serif" font-size="14">${val}</text>
+        `;
+        yOffset += 70;
+      });
+    } else {
+      inputSvgFields += `
+        <text x="70" y="260" fill="#94a3b8" font-family="sans-serif" font-size="13" font-weight="600">FULL NAME</text>
+        <rect x="70" y="270" width="400" height="40" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1.5"/>
+        <text x="85" y="295" fill="#f8fafc" font-family="sans-serif" font-size="14">${values['fullName'] || values['Full Name'] || ''}</text>
+
+        <text x="70" y="340" fill="#94a3b8" font-family="sans-serif" font-size="13" font-weight="600">EMAIL ADDRESS</text>
+        <rect x="70" y="350" width="400" height="40" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1.5"/>
+        <text x="85" y="375" fill="#f8fafc" font-family="sans-serif" font-size="14">${values['email'] || values['Email'] || ''}</text>
+      `;
+      yOffset = 420;
+    }
+
+    let buttonSvg = '';
+    if (this.buttons && this.buttons.length > 0) {
+      const btn = this.buttons[0];
+      buttonSvg = `
+        <rect x="70" y="${yOffset + 20}" width="180" height="44" rx="8" fill="#2563eb" stroke="#3b82f6" stroke-width="1"/>
+        <text x="160" y="${yOffset + 47}" fill="#ffffff" font-family="sans-serif" font-size="14" font-weight="bold" text-anchor="middle">${btn.text || 'Submit Application'}</text>
+      `;
+    } else {
+      buttonSvg = `
+        <rect x="70" y="${yOffset + 20}" width="180" height="44" rx="8" fill="#2563eb" stroke="#3b82f6" stroke-width="1"/>
+        <text x="160" y="${yOffset + 47}" fill="#ffffff" font-family="sans-serif" font-size="14" font-weight="bold" text-anchor="middle">Submit Application</text>
+      `;
+    }
+
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="800" viewBox="0 0 1280 800">
       <rect width="1280" height="800" fill="#0f172a"/>
       <rect x="20" y="20" width="1240" height="50" rx="8" fill="#1e293b"/>
@@ -438,11 +613,20 @@ export class UseBrowserPage extends EventEmitter {
       <circle cx="75" cy="45" r="7" fill="#f59e0b"/>
       <circle cx="100" cy="45" r="7" fill="#10b981"/>
       <text x="130" y="52" fill="#94a3b8" font-family="sans-serif" font-size="14">${url}</text>
-      <rect x="40" y="90" width="1200" height="670" rx="8" fill="#1e293b"/>
+      
+      <!-- Content Container -->
+      <rect x="40" y="90" width="1200" height="670" rx="8" fill="#1e293b" stroke="#334155" stroke-width="1"/>
       <text x="70" y="140" fill="#f8fafc" font-family="sans-serif" font-size="24" font-weight="bold">${title}</text>
       <text x="70" y="180" fill="#38bdf8" font-family="sans-serif" font-size="16">Status: Automated Browser Agent Active (use-browser-js)</text>
-      <text x="70" y="220" fill="#94a3b8" font-family="sans-serif" font-size="14">Timestamp: ${new Date().toISOString()}</text>
+      <text x="70" y="210" fill="#64748b" font-family="sans-serif" font-size="12">Timestamp: ${new Date().toISOString()}</text>
+      
+      <!-- Input fields rendering -->
+      ${inputSvgFields}
+      
+      <!-- Button rendering -->
+      ${buttonSvg}
     </svg>`;
+
     const buffer = Buffer.from(svg);
     if (options.encoding === 'base64') {
       return buffer.toString('base64');
