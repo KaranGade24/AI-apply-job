@@ -4,6 +4,52 @@ import { ensureEffectiveResumePdfOnDisk } from '../application/resume/resumePdfG
 import { logJobEvent, logError } from '../utils/logger.js';
 import { resolveElement } from './observer/elementResolver.js';
 
+const autoDismissCookieBanners = async (page) => {
+  if (!page || page.isClosed()) return;
+  try {
+    const cookieSelectors = [
+      'button:has-text("I agree")',
+      'button:has-text("Accept")',
+      'button:has-text("Accept All")',
+      'button:has-text("Allow all")',
+      '#accept-cookies',
+      '.cookie-banner button',
+      '.cc-btn.cc-dismiss',
+    ];
+    for (const sel of cookieSelectors) {
+      const btn = page.locator(sel).first();
+      if ((await btn.count().catch(() => 0)) > 0 && (await btn.isVisible().catch(() => false))) {
+        await btn.click({ timeout: 1500 }).catch(() => {});
+        break;
+      }
+    }
+  } catch {}
+};
+
+/**
+ * Visually highlights the active element on the live browser stream with a glowing ring
+ */
+const highlightElement = async (locator, color = '#3b82f6') => {
+  try {
+    await locator.evaluate((el, c) => {
+      if (!el) return;
+      const oldOutline = el.style.outline;
+      const oldBoxShadow = el.style.boxShadow;
+      const oldTransition = el.style.transition;
+      el.style.transition = 'all 0.15s ease-in-out';
+      el.style.outline = `3px solid ${c}`;
+      el.style.boxShadow = `0 0 14px ${c}`;
+      setTimeout(() => {
+        try {
+          el.style.outline = oldOutline || '';
+          el.style.boxShadow = oldBoxShadow || '';
+          el.style.transition = oldTransition || '';
+        } catch {}
+      }, 700);
+    }, color).catch(() => {});
+  } catch {}
+};
+
 /**
  * Resolves a locator safely using our ambiguity-safe resolution system.
  *
@@ -79,27 +125,65 @@ export const executeSingleBrowserAction = async (page, action, options = {}) => 
         const targetUrl = target.url || target.href || (typeof target === 'string' ? target : value);
         if (!targetUrl) throw new Error('NAVIGATE action missing target URL');
         await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        await autoDismissCookieBanners(page);
         await page.waitForTimeout(1000);
         return { success: true, error: null, timestamp };
       }
 
       case BROWSER_ACTIONS.CLICK: {
+        await autoDismissCookieBanners(page);
         const locator = await resolveTargetLocator(page, target);
-        await locator.waitFor({ state: 'visible', timeout: 7000 }).catch(() => {});
         await locator.scrollIntoViewIfNeeded().catch(() => {});
-        await locator.click({ timeout: 5000 }).catch(async () => {
-          // Fallback force click if intercepted by overlay
-          await locator.click({ force: true, timeout: 3000 });
-        });
+        await highlightElement(locator, '#f59e0b');
+        await page.waitForTimeout(150);
+        try {
+          await locator.click({ timeout: 4000 });
+        } catch {
+          // Fallback force click or direct DOM click if intercepted by overlay
+          try {
+            await locator.click({ force: true, timeout: 2500 });
+          } catch {
+            await locator.evaluate((el) => el.click()).catch(() => {});
+          }
+        }
+        await page.waitForTimeout(300);
         return { success: true, error: null, timestamp };
       }
 
       case BROWSER_ACTIONS.FILL: {
+        await autoDismissCookieBanners(page);
         const locator = await resolveTargetLocator(page, target);
         const strVal = String(value ?? '');
-        await locator.waitFor({ state: 'visible', timeout: 7000 }).catch(() => {});
         await locator.scrollIntoViewIfNeeded().catch(() => {});
-        await locator.fill(strVal);
+        await highlightElement(locator, '#3b82f6');
+        await page.waitForTimeout(150);
+
+        let filled = false;
+        try {
+          await locator.fill(strVal, { timeout: 3000 });
+          filled = true;
+        } catch {
+          filled = false;
+        }
+
+        // Direct DOM assignment fallback with event dispatch if locator.fill timed out (e.g. element inside accordion or not standard visible)
+        if (!filled) {
+          try {
+            await locator.evaluate((el, val) => {
+              if (!el) return false;
+              el.value = val;
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+              el.dispatchEvent(new Event('blur', { bubbles: true }));
+              return true;
+            }, strVal);
+            filled = true;
+          } catch {
+            await locator.focus().catch(() => {});
+            await locator.fill(strVal, { force: true, timeout: 2000 }).catch(() => {});
+          }
+        }
+        await page.waitForTimeout(250);
         return { success: true, error: null, timestamp };
       }
 
@@ -108,8 +192,10 @@ export const executeSingleBrowserAction = async (page, action, options = {}) => 
         const strVal = String(value ?? '');
         await locator.waitFor({ state: 'visible', timeout: 7000 }).catch(() => {});
         await locator.scrollIntoViewIfNeeded().catch(() => {});
+        await highlightElement(locator, '#3b82f6');
         await locator.focus().catch(() => {});
-        await locator.pressSequentially(strVal, { delay: 30 });
+        await locator.pressSequentially(strVal, { delay: 35 });
+        await page.waitForTimeout(250);
         return { success: true, error: null, timestamp };
       }
 
@@ -118,6 +204,8 @@ export const executeSingleBrowserAction = async (page, action, options = {}) => 
         const strVal = String(value ?? '');
         await locator.waitFor({ state: 'attached', timeout: 5000 }).catch(() => {});
         await locator.scrollIntoViewIfNeeded().catch(() => {});
+        await highlightElement(locator, '#10b981');
+        await page.waitForTimeout(150);
 
         // 1. Direct DOM select option with event dispatch (works for both visible and hidden/styled selects)
         let handled = false;
@@ -156,6 +244,7 @@ export const executeSingleBrowserAction = async (page, action, options = {}) => 
             });
           });
         }
+        await page.waitForTimeout(250);
         return { success: true, error: null, timestamp };
       }
 
@@ -163,6 +252,8 @@ export const executeSingleBrowserAction = async (page, action, options = {}) => 
         const locator = await resolveTargetLocator(page, target);
         await locator.waitFor({ state: 'attached', timeout: 5000 }).catch(() => {});
         await locator.scrollIntoViewIfNeeded().catch(() => {});
+        await highlightElement(locator, '#10b981');
+        await page.waitForTimeout(150);
         
         let checkedInDom = false;
         try {
@@ -188,6 +279,7 @@ export const executeSingleBrowserAction = async (page, action, options = {}) => 
             });
           });
         }
+        await page.waitForTimeout(200);
         return { success: true, error: null, timestamp };
       }
 
@@ -195,9 +287,12 @@ export const executeSingleBrowserAction = async (page, action, options = {}) => 
         const locator = await resolveTargetLocator(page, target);
         await locator.waitFor({ state: 'visible', timeout: 7000 }).catch(() => {});
         await locator.scrollIntoViewIfNeeded().catch(() => {});
+        await highlightElement(locator, '#64748b');
+        await page.waitForTimeout(150);
         await locator.uncheck().catch(async () => {
           await locator.click();
         });
+        await page.waitForTimeout(200);
         return { success: true, error: null, timestamp };
       }
 
@@ -214,6 +309,8 @@ export const executeSingleBrowserAction = async (page, action, options = {}) => 
           throw new Error(`UPLOAD action file not found on disk: ${value || options.resumePdfPath}`);
         }
         const locator = await resolveTargetLocator(page, target);
+        await highlightElement(locator, '#8b5cf6');
+        await page.waitForTimeout(200);
         await locator.setInputFiles(filePath).catch(async () => {
           // If custom button, click with filechooser
           const fileChooserPromise = page.waitForEvent('filechooser', { timeout: 4000 }).catch(() => null);
@@ -223,13 +320,16 @@ export const executeSingleBrowserAction = async (page, action, options = {}) => 
             await chooser.setFiles(filePath);
           }
         });
+        await page.waitForTimeout(300);
         return { success: true, error: null, timestamp };
       }
 
       case BROWSER_ACTIONS.SCROLL: {
         const deltaY = typeof value === 'number' ? value : 500;
-        await page.evaluate((y) => window.scrollBy(0, y), deltaY);
-        await page.waitForTimeout(500);
+        await page.evaluate((y) => {
+          window.scrollBy({ top: y, left: 0, behavior: 'smooth' });
+        }, deltaY).catch(() => {});
+        await page.waitForTimeout(600);
         return { success: true, error: null, timestamp };
       }
 
