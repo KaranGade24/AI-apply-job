@@ -154,6 +154,22 @@ export const attachScreencast = async (applicationId, page) => {
 
     streamState.isScreencasting = true;
 
+    // Capture initial screenshot immediately in background to avoid any initial blank or frozen screens
+    page.screenshot({ type: "jpeg", quality: 65, timeout: 3000 })
+      .then((buffer) => {
+        if (streamState.activePage === page) {
+          const base64 = buffer.toString("base64");
+          streamState.latestFrame = base64;
+          broadcastToApp(appIdStr, {
+            type: "FRAME",
+            data: base64,
+            currentUrl: page.url(),
+            timestamp: Date.now(),
+          });
+        }
+      })
+      .catch(() => {});
+
     // Listen for navigation changes
     page.on("framenavigated", async (frame) => {
       if (frame === page.mainFrame()) {
@@ -168,6 +184,25 @@ export const attachScreencast = async (applicationId, page) => {
           title: newTitle,
           timestamp: Date.now(),
         });
+
+        // Capture a fresh screenshot on navigation to update the frame immediately
+        setTimeout(() => {
+          if (page.isClosed()) return;
+          page.screenshot({ type: "jpeg", quality: 65, timeout: 3000 })
+            .then((buffer) => {
+              if (streamState.activePage === page) {
+                const base64 = buffer.toString("base64");
+                streamState.latestFrame = base64;
+                broadcastToApp(appIdStr, {
+                  type: "FRAME",
+                  data: base64,
+                  currentUrl: newUrl,
+                  timestamp: Date.now(),
+                });
+              }
+            })
+            .catch(() => {});
+        }, 300);
       }
     });
 

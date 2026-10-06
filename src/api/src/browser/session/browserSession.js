@@ -84,6 +84,7 @@ export class BrowserSession {
   }
 
   attachPage(page) {
+    page.bringToFront().catch(() => {});
     attachDialogHandler(page, this.applicationId);
 
     // Auto-attach live screencast for real-time remote browser viewing & interaction
