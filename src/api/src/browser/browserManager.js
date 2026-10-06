@@ -123,7 +123,7 @@ export class BrowserManager {
           const url = route.request().url();
           if (
             type === 'media' ||
-            /(?:googleads|adsbygoogle|doubleclick|googletagservices|googlesyndication|ezoic|adnxs|amazon-adsystem|facebook\.net|taboola|outbrain|criteo|pubmatic)/i.test(url)
+            (type !== 'document' && /(?:googleads|adsbygoogle|doubleclick|googletagservices|googlesyndication|ezoic|adnxs|amazon-adsystem|facebook\.net|taboola|outbrain|criteo|pubmatic)/i.test(url))
           ) {
             return route.abort().catch(() => {});
           }

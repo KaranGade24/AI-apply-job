@@ -128,35 +128,129 @@ export class BrowserSession {
         // If the page navigates to Naukri's saveCompanyApply API page (blank response),
         // mark application as applied and switch stream to external career site tab if one was opened.
         if (newUrl && newUrl.toLowerCase().includes("savecompanyapply")) {
-          try {
-            const { JobApplication } = await import("../../model/JobApplication.js");
-            await JobApplication.findByIdAndUpdate(this.applicationId, {
-              status: "applied",
-              "form.submittedAt": new Date(),
-            }).catch(() => {});
+          setTimeout(async () => {
+            try {
+              if (page.isClosed()) return;
 
-            const { broadcastToApp } = await import("./browserStreamService.js");
-            broadcastToApp(this.applicationId, {
-              type: "VERIFICATION_COMPLETED",
-              status: "applied",
-              timestamp: Date.now(),
-            });
-          } catch (err) {
-            // ignore
-          }
+              // Ensure the page is still on the saveCompanyApply page before doing anything
+              const currentUrl = page.url() || "";
+              if (!currentUrl.toLowerCase().includes("savecompanyapply")) return;
 
-          const otherPage = this.pages.find((p) => {
-            const u = p.url() || "";
-            return p !== page && !p.isClosed() && !u.includes("naukri.com") && !u.includes("about:blank") && u !== "";
-          });
-          if (otherPage) {
-            this.activePage = otherPage;
-            const otherTab = this.tabs.find((t) => t.page === otherPage);
-            if (otherTab) {
-              this.activeTabId = otherTab.id;
+              try {
+                const { JobApplication } = await import("../../model/JobApplication.js");
+                await JobApplication.findByIdAndUpdate(this.applicationId, {
+                  status: "applied",
+                  "form.submittedAt": new Date(),
+                }).catch(() => {});
+
+                const { broadcastToApp } = await import("./browserStreamService.js");
+                broadcastToApp(this.applicationId, {
+                  type: "VERIFICATION_COMPLETED",
+                  status: "applied",
+                  timestamp: Date.now(),
+                });
+              } catch (err) {
+                // ignore
+              }
+
+              const otherPage = this.pages.find((p) => {
+                const u = p.url() || "";
+                return p !== page && !p.isClosed() && !u.includes("naukri.com") && !u.includes("about:blank") && u !== "";
+              });
+              if (otherPage) {
+                this.activePage = otherPage;
+                const otherTab = this.tabs.find((t) => t.page === otherPage);
+                if (otherTab) {
+                  this.activeTabId = otherTab.id;
+                }
+                await page.close().catch(() => {});
+              } else {
+                // No other tabs (Direct apply completed). Inject a beautiful success screen into the blank page
+                const successHtml = `
+                  <!DOCTYPE html>
+                  <html>
+                  <head>
+                    <meta charset="utf-8">
+                    <title>Application Submitted Successfully</title>
+                    <style>
+                      body {
+                        margin: 0;
+                        padding: 0;
+                        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+                        background-color: #0b0f19;
+                        color: #e2e8f0;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        height: 100vh;
+                        text-align: center;
+                      }
+                      .container {
+                        max-width: 480px;
+                        padding: 40px;
+                        background-color: #111827;
+                        border: 1px solid #1f2937;
+                        border-radius: 20px;
+                        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.4), 0 10px 10px -5px rgba(0, 0, 0, 0.4);
+                      }
+                      .icon-container {
+                        width: 80px;
+                        height: 80px;
+                        background-color: rgba(16, 185, 129, 0.1);
+                        border: 2px solid rgba(16, 185, 129, 0.2);
+                        border-radius: 50%;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        color: #10b981;
+                        margin: 0 auto 24px auto;
+                        font-size: 38px;
+                        font-weight: bold;
+                      }
+                      .badge {
+                        display: inline-block;
+                        padding: 6px 14px;
+                        background-color: rgba(59, 130, 246, 0.1);
+                        border: 1px solid rgba(59, 130, 246, 0.2);
+                        color: #60a5fa;
+                        font-size: 11px;
+                        font-weight: 700;
+                        text-transform: uppercase;
+                        letter-spacing: 0.05em;
+                        border-radius: 9999px;
+                        margin-bottom: 20px;
+                      }
+                      h1 {
+                        font-size: 24px;
+                        font-weight: 800;
+                        margin: 0 0 12px 0;
+                        color: #ffffff;
+                        letter-spacing: -0.025em;
+                      }
+                      p {
+                        font-size: 14px;
+                        line-height: 1.6;
+                        color: #9ca3af;
+                        margin: 0;
+                      }
+                    </style>
+                  </head>
+                  <body>
+                    <div class="container">
+                      <div class="icon-container">✓</div>
+                      <div class="badge">Naukri Direct Apply</div>
+                      <h1>Applied Successfully!</h1>
+                      <p>Your application was successfully processed and submitted directly to the employer on Naukri. You can safely close this live browser view now.</p>
+                    </div>
+                  </body>
+                  </html>
+                `;
+                await page.setContent(successHtml).catch(() => {});
+              }
+            } catch (err) {
+              // ignore
             }
-            await page.close().catch(() => {});
-          }
+          }, 1800);
         }
 
         try {
