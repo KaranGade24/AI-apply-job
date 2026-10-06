@@ -12,7 +12,7 @@ export const takeControl = async (req, res, next) => {
     const userId = req.user?.userId;
     if (!userId) throw new appError("Unauthorized", 401);
 
-    const result = await browserControlService.takeControlService(id, userId);
+    const result = await browserControlService.takeControlService(id, userId, req.body?.targetUrl);
     res.status(200).json({ status: "success", data: result });
   } catch (error) {
     next(error);

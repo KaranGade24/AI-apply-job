@@ -56,6 +56,16 @@ export class BrowserSession {
       await this.injectNaukriSessionIfRequired(initialUrl);
     }
 
+    // Navigate to targetUrl immediately if provided
+    if (this.options.targetUrl && this.options.targetUrl !== "about:blank") {
+      try {
+        await launched.page.goto(this.options.targetUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
+        this.currentUrl = launched.page.url();
+      } catch (gotoErr) {
+        logError("browserSession.start.goto", gotoErr.message);
+      }
+    }
+
     // Dialog handling for functional compatibility
     this.context.on("dialog", async (dialog) => {
       this.dialogs.push({

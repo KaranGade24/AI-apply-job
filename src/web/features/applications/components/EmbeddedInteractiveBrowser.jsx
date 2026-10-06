@@ -543,17 +543,21 @@ export const EmbeddedInteractiveBrowser = ({
     setActionPending(true);
     setVerificationError(null);
     try {
-      await takeControlApi(applicationId);
+      const targetUrl = currentUrl || initialUrl || "https://www.naukri.com";
+      await takeControlApi(applicationId, { targetUrl });
       setControlMode("HUMAN");
       isHumanModeRef.current = true;
+      setIsLive(true);
       if (onStatusChange) onStatusChange("WAITING_FOR_HUMAN");
+      fetchSingleFrame();
       setTimeout(() => {
+        fetchSingleFrame();
         if (containerRef.current) {
           containerRef.current.focus();
           isFocusedRef.current = true;
           setIsFocused(true);
         }
-      }, 100);
+      }, 500);
     } catch (err) {
       console.error("Take control error:", err.message);
     } finally {

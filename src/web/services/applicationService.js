@@ -194,9 +194,10 @@ export const cancelAgentWorkflowApi = async (id) => {
   });
 };
 
-export const takeControlApi = async (id) => {
+export const takeControlApi = async (id, payload = {}) => {
   return await fetchWithAuth(`/applications/${id}/agent/take-control`, {
     method: "POST",
+    body: JSON.stringify(payload),
   });
 };
 

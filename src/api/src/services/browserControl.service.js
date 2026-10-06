@@ -55,36 +55,37 @@ const getThreadConfig = (applicationId) => ({
  * @param {string} userId
  * @returns {Promise<object>}
  */
-export const takeControlService = async (applicationId, userId) => {
+export const takeControlService = async (applicationId, userId, explicitTargetUrl = "") => {
   const appIdStr = String(applicationId);
   const jobApp = await assertOwnership(appIdStr, userId);
 
   let session = SessionRegistry.getSession(appIdStr);
-  if (!session) {
-    // If no active session exists, let's start a new one!
-    const targetUrl =
-      jobApp?.applyUrl ||
-      jobApp?.sourceUrl ||
-      jobApp?.workflow?.agentState?.pendingHumanAction?.savedUrl ||
-      jobApp?.pageAnalysis?.currentUrl ||
-      jobApp?.jobId?.applicationUrl ||
-      jobApp?.jobId?.sourceUrl ||
-      "https://www.naukri.com";
+  const targetUrl =
+    explicitTargetUrl ||
+    jobApp?.applyUrl ||
+    jobApp?.sourceUrl ||
+    jobApp?.workflow?.agentState?.pendingHumanAction?.savedUrl ||
+    jobApp?.pageAnalysis?.currentUrl ||
+    jobApp?.jobId?.applicationUrl ||
+    jobApp?.jobId?.sourceUrl ||
+    "https://www.naukri.com";
 
+  if (!session) {
+    // If no active session exists, start a new one with targetUrl
     session = await SessionRegistry.createOrGetSession(appIdStr, userId, { targetUrl });
-    const activePage = session.getActivePage();
-    if (activePage && (activePage.url() === "about:blank" || activePage.url() === "")) {
-      activePage.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 35005 })
-        .then(async () => {
-          await attachScreencast(appIdStr, activePage).catch(() => {});
-        })
-        .catch((err) => {
-          logError("browserControl.takeControlService.goto", err.message);
-        });
+  }
+
+  const activePage = session.getActivePage();
+  if (activePage) {
+    const currentUrl = activePage.url() || "";
+    if (currentUrl === "about:blank" || currentUrl === "") {
+      try {
+        await activePage.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 35000 });
+      } catch (err) {
+        logError("browserControl.takeControlService.goto", err.message);
+      }
     }
-    if (activePage) {
-      await attachScreencast(appIdStr, activePage).catch(() => {});
-    }
+    await attachScreencast(appIdStr, activePage).catch(() => {});
   }
 
   session.controlMode = CONTROL_MODES.HUMAN;
