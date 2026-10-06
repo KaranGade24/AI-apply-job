@@ -125,6 +125,40 @@ export class BrowserSession {
           await this.injectNaukriSessionIfRequired(newUrl);
         }
 
+        // If the page navigates to Naukri's saveCompanyApply API page (blank response),
+        // mark application as applied and switch stream to external career site tab if one was opened.
+        if (newUrl && newUrl.toLowerCase().includes("savecompanyapply")) {
+          try {
+            const { JobApplication } = await import("../../model/JobApplication.js");
+            await JobApplication.findByIdAndUpdate(this.applicationId, {
+              status: "applied",
+              "form.submittedAt": new Date(),
+            }).catch(() => {});
+
+            const { broadcastToApp } = await import("./browserStreamService.js");
+            broadcastToApp(this.applicationId, {
+              type: "VERIFICATION_COMPLETED",
+              status: "applied",
+              timestamp: Date.now(),
+            });
+          } catch (err) {
+            // ignore
+          }
+
+          const otherPage = this.pages.find((p) => {
+            const u = p.url() || "";
+            return p !== page && !p.isClosed() && !u.includes("naukri.com") && !u.includes("about:blank") && u !== "";
+          });
+          if (otherPage) {
+            this.activePage = otherPage;
+            const otherTab = this.tabs.find((t) => t.page === otherPage);
+            if (otherTab) {
+              this.activeTabId = otherTab.id;
+            }
+            await page.close().catch(() => {});
+          }
+        }
+
         try {
           const { SessionRegistry } = await import("./sessionRegistry.js");
           SessionRegistry.resetHumanResponseTimerIfActive(this.applicationId, this.userId);
