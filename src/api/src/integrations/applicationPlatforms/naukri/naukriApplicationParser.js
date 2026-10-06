@@ -171,7 +171,23 @@ export const detectSecurityPrompt = async (page) => {
  */
 export const detectSubmissionSuccess = async (page) => {
   try {
-    const pageText = (await page.evaluate(() => document.body.innerText || '').catch(() => '')).toLowerCase();
+    if (!page || page.isClosed()) {
+      return { isSubmitted: false, confirmationText: "" };
+    }
+
+    const currentUrl = page.url() || "";
+    if (
+      currentUrl.includes("saveCompanyApply") ||
+      currentUrl.includes("apply-services") ||
+      currentUrl.includes("/apply/saveCompanyApply")
+    ) {
+      return {
+        isSubmitted: true,
+        confirmationText: "Naukri direct apply saveCompanyApply API success URL detected",
+      };
+    }
+
+    const pageText = (await page.evaluate(() => document.body.innerText || "").catch(() => "")).toLowerCase();
 
     const successKeywords = [
       'applied successfully',
