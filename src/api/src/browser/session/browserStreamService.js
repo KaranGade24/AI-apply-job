@@ -90,6 +90,12 @@ export const attachScreencast = async (applicationId, page) => {
     streamState.isScreencasting = false;
   }
 
+  // Clear any existing screenshot fallback interval
+  if (fallbackIntervals.has(appIdStr)) {
+    clearInterval(fallbackIntervals.get(appIdStr));
+    fallbackIntervals.delete(appIdStr);
+  }
+
   streamState.activePage = page;
   streamState.currentUrl = page.url() || "";
   try {
@@ -102,7 +108,23 @@ export const attachScreencast = async (applicationId, page) => {
       startScreenshotFallback(appIdStr, page);
       return true;
     }
-    const cdp = await context.newCDPSession(page);
+
+    // Resilient CDP Attachment with retry for extremely fresh pages/popups
+    let cdp = null;
+    let attempts = 0;
+    while (attempts < 3) {
+      try {
+        cdp = await context.newCDPSession(page);
+        break;
+      } catch (cdpErr) {
+        attempts++;
+        if (attempts >= 3) {
+          throw cdpErr;
+        }
+        await new Promise((r) => setTimeout(r, 200));
+      }
+    }
+
     streamState.cdpSession = cdp;
 
     cdp.on("Page.screencastFrame", async ({ data, metadata, sessionId }) => {
@@ -170,7 +192,10 @@ export const attachScreencast = async (applicationId, page) => {
 let fallbackIntervals = new Map();
 const startScreenshotFallback = (applicationId, page) => {
   const appIdStr = String(applicationId);
-  if (fallbackIntervals.has(appIdStr)) return;
+  if (fallbackIntervals.has(appIdStr)) {
+    clearInterval(fallbackIntervals.get(appIdStr));
+    fallbackIntervals.delete(appIdStr);
+  }
 
   const interval = setInterval(async () => {
     if (!page || page.isClosed()) {
