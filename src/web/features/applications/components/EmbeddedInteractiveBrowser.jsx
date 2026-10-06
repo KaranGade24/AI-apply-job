@@ -869,7 +869,7 @@ export const EmbeddedInteractiveBrowser = ({
           maxHeight: isFullscreen ? "calc(100vh - 170px)" : "680px",
         }}
       >
-        {frameSrc && isLive ? (
+        {frameSrc ? (
           <img
             ref={imageRef}
             src={frameSrc}
@@ -878,16 +878,16 @@ export const EmbeddedInteractiveBrowser = ({
             draggable={false}
           />
         ) : (
-          <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 space-y-5 p-8 text-center bg-slate-950/80">
-            <div className="w-16 h-16 rounded-full bg-blue-500/10 flex items-center justify-center border border-blue-500/20 text-blue-400 animate-pulse">
-              <Globe className="w-8 h-8" />
+          <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 space-y-5 p-8 text-center bg-slate-950">
+            <div className="w-16 h-16 rounded-full bg-blue-500/10 flex items-center justify-center border border-blue-500/20 text-blue-400">
+              <RefreshCw className="w-8 h-8 animate-spin" />
             </div>
             <div className="space-y-1.5 max-w-md">
               <p className="text-base font-bold text-slate-100">
-                Interactive Browser Offline
+                Connecting to Live Browser...
               </p>
               <p className="text-xs text-slate-300">
-                Start a live browser session to interact directly with the career site, fill application forms, and complete security verification.
+                Initializing Playwright browser session, injecting authenticated cookies, and streaming live viewport.
               </p>
               <p className="text-xs text-slate-500 font-mono mt-1">
                 Target URL: <span className="text-blue-400">{currentUrl || "Application Portal"}</span>
@@ -903,12 +903,12 @@ export const EmbeddedInteractiveBrowser = ({
                 {actionPending ? (
                   <>
                     <RefreshCw className="w-4 h-4 animate-spin" />
-                    <span>Launching Browser...</span>
+                    <span>Reconnecting...</span>
                   </>
                 ) : (
                   <>
-                    <Hand className="w-4 h-4" />
-                    <span>Launch Live Browser Session</span>
+                    <RefreshCw className="w-4 h-4" />
+                    <span>Force Refresh Browser</span>
                   </>
                 )}
               </button>

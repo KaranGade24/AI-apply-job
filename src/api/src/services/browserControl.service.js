@@ -323,7 +323,32 @@ export const dispatchUserActionService = async (applicationId, userId, action) =
  */
 export const getBrowserFrameService = async (applicationId, userId) => {
   const appIdStr = String(applicationId);
-  await assertOwnership(appIdStr, userId);
+  const jobApp = await assertOwnership(appIdStr, userId);
+
+  let session = SessionRegistry.getSession(appIdStr);
+  if (!session) {
+    const targetUrl =
+      jobApp?.applyUrl ||
+      jobApp?.sourceUrl ||
+      jobApp?.workflow?.agentState?.pendingHumanAction?.savedUrl ||
+      jobApp?.pageAnalysis?.currentUrl ||
+      jobApp?.jobId?.applicationUrl ||
+      jobApp?.jobId?.sourceUrl ||
+      "https://www.naukri.com";
+
+    session = await SessionRegistry.createOrGetSession(appIdStr, userId, { targetUrl });
+    const activePage = session.getActivePage();
+    if (activePage) {
+      const cur = activePage.url() || "";
+      if (cur === "about:blank" || cur === "") {
+        activePage.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 30000 }).catch((err) => {
+          logError("browserControl.getBrowserFrameService.goto", err.message);
+        });
+      }
+      await attachScreencast(appIdStr, activePage).catch(() => {});
+    }
+  }
+
   return getLatestBrowserFrame(appIdStr);
 };
 
