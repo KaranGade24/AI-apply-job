@@ -1,4 +1,4 @@
-import { chromium } from '../../services/browser/useBrowserJs.js';
+import { chromium } from 'playwright';
 
 let isChromiumAvailable = null;
 

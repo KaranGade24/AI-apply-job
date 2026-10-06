@@ -1,4 +1,4 @@
-import { chromium } from '../services/browser/useBrowserJs.js';
+import { chromium } from 'playwright';
 import {
   BROWSER_HEADLESS,
   BROWSER_SLOW_MO,

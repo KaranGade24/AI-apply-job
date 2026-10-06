@@ -1,4 +1,4 @@
-import { chromium } from '../../../services/browser/useBrowserJs.js';
+import { chromium } from 'playwright';
 import { config } from '../../../config/env.js';
 import {
   BROWSER_VIEWPORT,
